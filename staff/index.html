@@ -118,7 +118,7 @@
 
   <section id="app" hidden>
     <div class="view-head"><h2>Staff logins</h2><button class="btn primary sm" id="addBtn">Add login</button></div>
-    <p class="hint">Logins and roles for AMA ID Cards and Black Belt Prep. Tap someone to change their roles, set a new password or remove their login.</p>
+    <p class="hint">Logins and permissions for AMA ID Cards and Black Belt Prep. Tap someone to change their permissions, set a new password or remove their login.</p>
     <input type="search" id="search" placeholder="Search email" aria-label="Search email" style="margin:12px 0">
     <ul class="people" id="list"></ul>
     <p class="hint" id="count" style="margin-top:8px"></p>
@@ -134,7 +134,7 @@
 const SUPABASE_URL = 'https://ptdrcxngaptcgswfbjhg.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_YsRY6SlgR7U_ohn_xxQD1A_lrowkIGS'; // public by design; the function checks who is signed in
 const FN = SUPABASE_URL + '/functions/v1/staff';
-const CARD = { admin: 'Admin', approver: 'Approver', photos: 'Photos', viewer: 'Viewer', printer: 'Print station', pending: 'No access' };
+const CARD = { admin: 'Admin', edit: 'Edit people', delete: 'Delete people', send: 'Send to print', approve: 'Approve prints', viewer: 'View only', printer: 'Print station' };
 const PREP = { admin: 'Admin', instructor: 'Instructor', attendance: 'Attendance', payments: 'Payments', grading: 'Grading', certificates: 'Certificates', idcards: 'ID cards', viewer: 'Viewer' };
 
 const $ = s => document.querySelector(s);
@@ -171,7 +171,7 @@ async function api(body) {
 }
 
 const fmtDate = iso => iso ? new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
-const prepText = roles => roles.length ? roles.map(r => PREP[r] || r).join(', ') : 'No access';
+const listText = (roles, names) => roles.length ? (roles.includes('admin') ? 'Admin' : roles.map(r => names[r] || r).join(', ')) : 'No access';
 
 async function load() {
   try {
@@ -192,8 +192,8 @@ function draw() {
   const rows = state.users.filter(u => !q || u.email.includes(q));
   $('#list').innerHTML = rows.length ? rows.map(u => `<li><button class="person" data-email="${esc(u.email)}">
       <div class="who"><strong>${esc(u.email)}</strong>
-        <span class="meta">${u.card_role === 'admin' && u.prep_roles.includes('admin') ? '<span class="chip">Admin</span>' : ''}
-          <span>ID Cards: ${esc(CARD[u.card_role] || 'No access')}</span><span>·</span><span>Prep: ${esc(prepText(u.prep_roles))}</span>
+        <span class="meta">${u.card_perms.includes('admin') && u.prep_roles.includes('admin') ? '<span class="chip">Admin</span>' : ''}
+          <span>ID Cards: ${esc(listText(u.card_perms, CARD))}</span><span>·</span><span>Prep: ${esc(listText(u.prep_roles, PREP))}</span>
           ${!u.has_login ? '<span class="tag warn">No login yet</span>' : !u.last_sign_in_at ? '<span class="tag muted">Never signed in</span>' : ''}
           ${u.email === state.me ? '<span class="tag muted">You</span>' : ''}</span></div>
       <span class="chev" aria-hidden="true">›</span></button></li>`).join('')
@@ -202,11 +202,10 @@ function draw() {
   document.querySelectorAll('#list [data-email]').forEach(b => b.onclick = () => openPerson(b.dataset.email));
 }
 
-const cardSelect = (id, cur) => `<select id="${id}">${Object.entries(CARD).map(([k, t]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
-const prepChecks = (cur) => `<div class="checks" id="prepChecks">${Object.entries(PREP).map(([k, t]) => `<label class="check"><input type="checkbox" value="${k}"${cur.includes(k) ? ' checked' : ''}> ${t}</label>`).join('')}</div>`;
-const pickedPrep = () => [...document.querySelectorAll('#prepChecks input:checked')].map(i => i.value);
+const checks = (id, names, cur) => `<div class="checks" id="${id}">${Object.entries(names).map(([k, t]) => `<label class="check"><input type="checkbox" value="${k}"${cur.includes(k) ? ' checked' : ''}> ${t}</label>`).join('')}</div>`;
+const picked = id => [...document.querySelectorAll(`#${id} input:checked`)].map(i => i.value);
 const makePassword = () => { const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const r = crypto.getRandomValues(new Uint32Array(12)); return Array.from(r, n => a[n % a.length]).join(''); };
-const ROLE_HELP = '<p class="hint">ID Cards: Approver can send and approve prints; Photos can add people and take photos. Prep: Admin can do everything; tick only what each person needs.</p>';
+const ROLE_HELP = '<p class="hint">Admin can do everything in that app. Tick only what each person needs; with no ticks they can\'t use that app. Print station is only for the printer laptop\'s login.</p>';
 
 function openPerson(email) {
   const u = state.users.find(x => x.email === email); if (!u) return;
@@ -214,11 +213,11 @@ function openPerson(email) {
   openDlg(`<div class="dlg">
     <div class="dlg-head"><div><h3>${esc(u.email)}</h3><p class="hint">${u.has_login ? `Added ${fmtDate(u.created_at)} · ${u.last_sign_in_at ? 'last signed in ' + fmtDate(u.last_sign_in_at) : 'never signed in'}` : 'Has roles but no login yet'}</p></div><button class="x" data-close>Close</button></div>
     <form id="rolesForm" class="section" style="border-top:0;padding-top:0">
-      <h3>Roles</h3>
-      <div class="field"><label for="cardRole">AMA ID Cards</label>${cardSelect('cardRole', u.card_role || 'pending')}</div>
-      <div class="field"><span class="label">Black Belt Prep</span>${prepChecks(u.prep_roles)}</div>
+      <h3>Permissions</h3>
+      <div class="field"><span class="label">AMA ID Cards</span>${checks('cardChecks', CARD, u.card_perms)}</div>
+      <div class="field"><span class="label">Black Belt Prep</span>${checks('prepChecks', PREP, u.prep_roles)}</div>
       ${self ? '<p class="hint">You can\'t remove your own admin access.</p>' : ROLE_HELP}
-      <div class="row"><button class="btn primary" id="saveRoles" type="submit">Save roles</button></div>
+      <div class="row"><button class="btn primary" id="saveRoles" type="submit">Save permissions</button></div>
     </form>
     ${u.has_login ? `<form id="pwForm" class="section"><h3>New password</h3>
       <div class="row"><input type="text" id="newPw" class="grow" autocomplete="new-password" placeholder="At least 8 characters" aria-label="New password" style="flex:1 1 180px;width:auto"><button type="button" class="btn sm" id="genPw">Make one</button></div>
@@ -228,7 +227,7 @@ function openPerson(email) {
   </div>`);
   $('#rolesForm').onsubmit = async e => {
     e.preventDefault(); $('#saveRoles').disabled = true;
-    try { await api({ action: 'roles', email, card_role: $('#cardRole').value, prep_roles: pickedPrep() }); dlg.close(); toast('Roles saved'); await load(); }
+    try { await api({ action: 'roles', email, card_perms: picked('cardChecks'), prep_roles: picked('prepChecks') }); dlg.close(); toast('Permissions saved'); await load(); }
     catch (er) { toast(er.message, 7000); $('#saveRoles').disabled = false; }
   };
   const pw = $('#pwForm');
@@ -255,10 +254,10 @@ function openAdd() {
     <div class="dlg-head"><h3>Add login</h3><button class="x" data-close>Close</button></div>
     <div class="field"><label for="addEmail">Email</label><input type="email" id="addEmail" required autocomplete="off"></div>
     <div class="field"><label for="addPw">Starting password</label><div class="row"><input type="text" id="addPw" autocomplete="new-password" placeholder="At least 8 characters" style="flex:1 1 180px;width:auto"><button type="button" class="btn sm" id="addGen">Make one</button></div></div>
-    <div class="field"><label for="addCard">AMA ID Cards</label>${cardSelect('addCard', 'pending')}</div>
-    <div class="field"><span class="label">Black Belt Prep</span>${prepChecks([])}</div>
+    <div class="field"><span class="label">AMA ID Cards</span>${checks('cardChecks', CARD, [])}</div>
+    <div class="field"><span class="label">Black Belt Prep</span>${checks('prepChecks', PREP, [])}</div>
     ${ROLE_HELP}
-    <p class="hint">If the email already has a login, its roles are updated. Leave the password blank to keep their current one.</p>
+    <p class="hint">If the email already has a login, its permissions are updated. Leave the password blank to keep their current one.</p>
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" id="addGo" type="submit">Add login</button></div>
   </form>`);
   $('#addGen').onclick = () => { $('#addPw').value = makePassword(); };
@@ -268,8 +267,8 @@ function openAdd() {
     if (password && password.length < 8) return toast('The password needs at least 8 characters.');
     $('#addGo').disabled = true;
     try {
-      const r = await api({ action: 'create', email, password, card_role: $('#addCard').value, prep_roles: pickedPrep() });
-      dlg.close(); toast(r.existed ? `${email} already had a login; roles updated` : `Login added for ${email}${password ? '. Give them the starting password.' : ''}`, 6000); await load();
+      const r = await api({ action: 'create', email, password, card_perms: picked('cardChecks'), prep_roles: picked('prepChecks') });
+      dlg.close(); toast(r.existed ? `${email} already had a login; permissions updated` : `Login added for ${email}${password ? '. Give them the starting password.' : ''}`, 6000); await load();
     } catch (er) { toast(er.message, 7000); $('#addGo').disabled = false; }
   };
 }

@@ -19,7 +19,7 @@ const ok = (c, m) => { if (c) { passed++; console.log('  pass  ' + m); } else { 
 
 const db = makeDb();
 for (const e of ['tate@ama.test', 'jo@ama.test']) await db.auth.admin.createUser({ email: e, password: 'password1' });
-db._t.staff_roles = [{ email: 'tate@ama.test', role: 'admin' }, { email: 'jo@ama.test', role: 'viewer' }];
+db._t.staff_permissions = [{ email: 'tate@ama.test', permission: 'admin' }, { email: 'jo@ama.test', permission: 'viewer' }];
 db._t.prep_roles = [{ email: 'tate@ama.test', role: 'admin' }, { email: 'jo@ama.test', role: 'instructor' }];
 let fnDeployed = true;
 
@@ -62,7 +62,7 @@ try {
   await page.fill('#siPass', 'password1'); await page.click('#siGo');
   await page.waitForSelector('#app:not([hidden]) #list [data-email]');
   const list = await page.textContent('#list');
-  ok(list.includes('jo@ama.test') && list.includes('ID Cards: Viewer') && list.includes('Prep: Instructor'), 'list shows each login with roles in both apps');
+  ok(list.includes('jo@ama.test') && list.includes('ID Cards: View only') && list.includes('Prep: Instructor'), 'list shows each login with roles in both apps');
   ok(list.includes('You') && (await page.textContent('#list [data-email="tate@ama.test"]')).includes('Admin'), 'you are marked, and admins get the gold Admin chip');
 
   // Add a login
@@ -71,22 +71,24 @@ try {
   await page.click('#addGen');
   const pw = await page.inputValue('#addPw');
   ok(pw.length === 12, '"Make one" fills in a 12-character password');
-  await page.selectOption('#addCard', 'photos');
+  await page.check('#cardChecks input[value="edit"]'); await page.check('#cardChecks input[value="send"]');
   await page.check('#prepChecks input[value="attendance"]'); await page.check('#prepChecks input[value="payments"]');
   await page.click('#addGo');
   await page.waitForSelector('#list [data-email="coach@ama.test"]');
   ok(db._users.some(u => u.email === 'coach@ama.test' && u.password === pw), 'login created with the starting password');
-  ok((await page.textContent('#list [data-email="coach@ama.test"]')).includes('ID Cards: Photos') && (await page.textContent('#list [data-email="coach@ama.test"]')).includes('Attendance, Payments'), 'new login shows its roles');
+  ok((await page.textContent('#list [data-email="coach@ama.test"]')).includes('ID Cards: Edit people, Send to print') && (await page.textContent('#list [data-email="coach@ama.test"]')).includes('Attendance, Payments'), 'new login shows its roles');
   ok((await page.textContent('#list [data-email="coach@ama.test"]')).includes('Never signed in'), 'new login shows it has never signed in');
   await page.screenshot({ path: process.env.SHOT_DIR ? join(process.env.SHOT_DIR, 'staff-list.png') : join(tmpdir(), 'staff-list.png') });
 
   // Change roles
   await page.click('#list [data-email="jo@ama.test"]'); await page.waitForSelector('#rolesForm');
-  await page.selectOption('#cardRole', 'approver'); await page.check('#prepChecks input[value="grading"]'); await page.uncheck('#prepChecks input[value="instructor"]');
+  ok((await page.$$('#cardChecks input')).length === 7 && (await page.$$('#prepChecks input')).length === 8, 'both apps show tick boxes, laid out the same way');
+  await page.uncheck('#cardChecks input[value="viewer"]'); await page.check('#cardChecks input[value="approve"]'); await page.check('#cardChecks input[value="edit"]');
+  await page.check('#prepChecks input[value="grading"]'); await page.uncheck('#prepChecks input[value="instructor"]');
   await page.screenshot({ path: process.env.SHOT_DIR ? join(process.env.SHOT_DIR, 'staff-person.png') : join(tmpdir(), 'staff-person.png') });
   await page.click('#saveRoles'); await settle();
-  await page.waitForFunction(() => document.querySelector('#list [data-email="jo@ama.test"]').textContent.includes('Approver'));
-  ok(db._t.staff_roles.find(x => x.email === 'jo@ama.test').role === 'approver' && db._t.prep_roles.filter(x => x.email === 'jo@ama.test').map(x => x.role).join() === 'grading', 'roles saved in both apps');
+  await page.waitForFunction(() => document.querySelector('#list [data-email="jo@ama.test"]').textContent.includes('Approve prints'));
+  ok(db._t.staff_permissions.filter(x => x.email === 'jo@ama.test').map(x => x.permission).sort().join() === 'approve,edit' && db._t.prep_roles.filter(x => x.email === 'jo@ama.test').map(x => x.role).join() === 'grading', 'roles saved in both apps');
 
   // Password
   await page.click('#list [data-email="jo@ama.test"]'); await page.waitForSelector('#pwForm');
@@ -98,7 +100,7 @@ try {
   await page.evaluate(() => document.querySelector('#dlg').close());
   await page.click('#list [data-email="tate@ama.test"]'); await page.waitForSelector('#rolesForm');
   ok(!(await page.$('#removeBtn')), "you can't remove yourself (no Remove button)");
-  await page.selectOption('#cardRole', 'viewer'); await page.click('#saveRoles');
+  await page.uncheck('#cardChecks input[value="admin"]'); await page.click('#saveRoles');
   ok((await toastSays('own admin')).includes('own admin'), "removing your own admin access is refused, with the reason shown above the window");
   ok(await page.evaluate(() => document.querySelector('#toast').matches(':popover-open')), 'messages show on top of the open window');
   await page.evaluate(() => document.querySelector('#dlg').close());

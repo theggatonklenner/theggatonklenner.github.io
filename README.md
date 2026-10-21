@@ -14,6 +14,8 @@ The home page at https://theggatonklenner.github.io, with links to the grading t
 3. Open the function's **Details** (or settings), turn **off** "Verify JWT with legacy secret" (older screens call it "Enforce JWT verification"), and save. The function checks who is signed in itself.
 4. Open https://theggatonklenner.github.io/staff/ and sign in.
 
+Before using it, run `supabase/permissions.sql` from the ama-id-cards repository (tick-box permissions for AMA ID Cards).
+
 Only people who are an admin in **both** AMA ID Cards and Black Belt Prep can use it. Each app always keeps at least one admin, and you can't remove your own admin access or your own login.
 
 Signing in or out here also signs you in or out of the two apps on that device, because they share the same web address.

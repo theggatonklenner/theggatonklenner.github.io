@@ -6,14 +6,19 @@
 // (it checks the signed-in person itself).
 //
 // Only people who are an admin in BOTH apps can use it. It can:
-//   list      every login, with its AMA ID Cards role and Black Belt Prep roles
-//   create    add a login with a starting password and roles (or give an existing login roles)
+//   list      every login, with its AMA ID Cards and Black Belt Prep permissions
+//   create    add a login with a starting password and permissions (or update an existing login)
 //   password  set a new password for a login
-//   roles     change a login's roles in either app
-//   remove    delete a login and its roles in both apps
+//   roles     change a login's permissions in either app
+//   remove    delete a login and its permissions in both apps
+// AMA ID Cards needs supabase/permissions.sql (tick-box permissions) from the ama-id-cards repository.
 
-export const CARD_ROLES = ['admin', 'approver', 'photos', 'viewer', 'printer', 'pending'];
+export const CARD_PERMS = ['admin', 'edit', 'delete', 'send', 'approve', 'viewer', 'printer'];
 export const PREP_ROLES = ['admin', 'instructor', 'attendance', 'payments', 'grading', 'certificates', 'idcards', 'viewer'];
+const APPS = {
+  card: { table: 'staff_permissions', col: 'permission', allowed: CARD_PERMS, name: 'AMA ID Cards' },
+  prep: { table: 'prep_roles', col: 'role', allowed: PREP_ROLES, name: 'Black Belt Prep' }
+};
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -24,6 +29,7 @@ const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const fail = (msg, status = 400) => json({ error: msg }, status);
 const validEmail = e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
+const NEEDS_UPDATE = 'AMA ID Cards needs its tick-box permissions update first: run supabase/permissions.sql (from the ama-id-cards repository) in Supabase > SQL Editor.';
 
 async function allUsers(db) {
   const out = [];
@@ -36,41 +42,30 @@ async function allUsers(db) {
   return out;
 }
 const findUser = async (db, email) => (await allUsers(db)).find(u => (u.email || '').toLowerCase() === email) || null;
+const clean = (list, allowed) => [...new Set((list || []).filter(r => allowed.includes(r)))];
 
-async function setRoles(db, email, cardRole, prepRoles) {
-  if (cardRole !== undefined) {
-    if (!CARD_ROLES.includes(cardRole)) throw new Error('Unknown AMA ID Cards role.');
-    const { error } = await db.from('staff_roles').upsert({ email, role: cardRole });
+// Make one app's permissions for this email exactly "want" (adds first, so an admin is never lost half way)
+async function setPerms(db, app, email, want) {
+  const A = APPS[app];
+  if (want.length) {
+    const { error } = await db.from(A.table).upsert(want.map(v => ({ email, [A.col]: v })), { onConflict: `email,${A.col}`, ignoreDuplicates: true });
     if (error) throw error;
   }
-  if (prepRoles !== undefined) {
-    const want = [...new Set((prepRoles || []).filter(r => PREP_ROLES.includes(r)))];
-    // Add first, then remove, so the "always one admin" rule is never broken half way
-    if (want.length) {
-      const { error } = await db.from('prep_roles').upsert(want.map(role => ({ email, role })), { onConflict: 'email,role', ignoreDuplicates: true });
-      if (error) throw error;
-    }
-    const { data: have, error: e2 } = await db.from('prep_roles').select('role').eq('email', email);
-    if (e2) throw e2;
-    const drop = (have || []).map(r => r.role).filter(r => !want.includes(r));
-    if (drop.length) {
-      const { error } = await db.from('prep_roles').delete().eq('email', email).in('role', drop);
-      if (error) throw error;
-    }
+  const { data: have, error: e2 } = await db.from(A.table).select(A.col).eq('email', email);
+  if (e2) throw e2;
+  const drop = (have || []).map(r => r[A.col]).filter(v => !want.includes(v));
+  if (drop.length) {
+    const { error } = await db.from(A.table).delete().eq('email', email).in(A.col, drop);
+    if (error) throw error;
   }
 }
 
-// Last admin checks (each app must keep at least one admin)
-async function checkAdmins(db, email, cardRole, prepRoles) {
-  if (cardRole !== undefined && cardRole !== 'admin') {
-    const { data } = await db.from('staff_roles').select('email').eq('role', 'admin');
-    if (!(data || []).some(r => r.email !== email)) return 'AMA ID Cards must keep at least one admin.';
-  }
-  if (prepRoles !== undefined && !(prepRoles || []).includes('admin')) {
-    const { data } = await db.from('prep_roles').select('email').eq('role', 'admin');
-    if (!(data || []).some(r => r.email !== email)) return 'Black Belt Prep must keep at least one admin.';
-  }
-  return null;
+// Each app must keep at least one admin
+async function lastAdmin(db, app, email, want) {
+  if (want.includes('admin')) return null;
+  const A = APPS[app];
+  const { data } = await db.from(A.table).select('email').eq(A.col, 'admin');
+  return (data || []).some(r => r.email !== email) ? null : `${A.name} must keep at least one admin.`;
 }
 
 export async function handle(req, db) {
@@ -81,40 +76,40 @@ export async function handle(req, db) {
     const { data: who } = token ? await db.auth.getUser(token) : { data: null };
     const me = who && who.user && who.user.email ? who.user.email.toLowerCase() : null;
     if (!me) return fail('Sign in first.', 401);
+    const cardReady = !(await db.from('staff_permissions').select('email').limit(1)).error;
+    if (!cardReady) return fail(NEEDS_UPDATE, 409);
     const [{ data: cardMine }, { data: prepMine }] = await Promise.all([
-      db.from('staff_roles').select('role').eq('email', me).maybeSingle(),
+      db.from('staff_permissions').select('permission').eq('email', me).eq('permission', 'admin').maybeSingle(),
       db.from('prep_roles').select('role').eq('email', me).eq('role', 'admin').maybeSingle()
     ]);
-    if (!(cardMine && cardMine.role === 'admin' && prepMine)) return fail('Only people who are an admin in both AMA ID Cards and Black Belt Prep can manage staff logins.', 403);
+    if (!(cardMine && prepMine)) return fail('Only people who are an admin in both AMA ID Cards and Black Belt Prep can manage staff logins.', 403);
 
     const body = await req.json().catch(() => ({}));
     const action = body.action;
 
     if (action === 'list') {
-      const [users, cardRes, prepRes] = await Promise.all([allUsers(db), db.from('staff_roles').select('email, role'), db.from('prep_roles').select('email, role')]);
+      const [users, cardRes, prepRes] = await Promise.all([allUsers(db), db.from('staff_permissions').select('email, permission'), db.from('prep_roles').select('email, role')]);
       if (cardRes.error) throw cardRes.error;
       if (prepRes.error) throw prepRes.error;
-      const card = new Map((cardRes.data || []).map(r => [r.email, r.role]));
-      const prep = new Map();
+      const card = new Map(), prep = new Map();
+      (cardRes.data || []).forEach(r => card.set(r.email, [...(card.get(r.email) || []), r.permission]));
       (prepRes.data || []).forEach(r => prep.set(r.email, [...(prep.get(r.email) || []), r.role]));
-      const rows = users.filter(u => u.email).map(u => {
-        const email = u.email.toLowerCase();
-        return { email, has_login: true, created_at: u.created_at, last_sign_in_at: u.last_sign_in_at || null,
-                 card_role: card.get(email) || null, prep_roles: (prep.get(email) || []).sort() };
-      });
+      const order = (list, all) => (list || []).sort((a, b) => all.indexOf(a) - all.indexOf(b));
+      const row = (email, u) => ({ email, has_login: !!u, created_at: u ? u.created_at : null, last_sign_in_at: u && u.last_sign_in_at || null,
+        card_perms: order(card.get(email), CARD_PERMS), prep_roles: order(prep.get(email), PREP_ROLES) });
+      const rows = users.filter(u => u.email).map(u => row(u.email.toLowerCase(), u));
       const seen = new Set(rows.map(r => r.email));
-      // Roles given to an email that has no login yet
-      new Set([...card.keys(), ...prep.keys()]).forEach(email => {
-        if (!seen.has(email)) rows.push({ email, has_login: false, created_at: null, last_sign_in_at: null, card_role: card.get(email) || null, prep_roles: (prep.get(email) || []).sort() });
-      });
+      // Permissions given to an email that has no login yet
+      new Set([...card.keys(), ...prep.keys()]).forEach(email => { if (!seen.has(email)) rows.push(row(email, null)); });
       rows.sort((a, b) => a.email.localeCompare(b.email));
-      return json({ me, users: rows, card_roles: CARD_ROLES, prep_roles: PREP_ROLES });
+      return json({ me, users: rows, card_perms: CARD_PERMS, prep_roles: PREP_ROLES });
     }
 
     const email = String(body.email || '').trim().toLowerCase();
     if (!validEmail(email)) return fail('Enter a valid email address.');
     const password = String(body.password || '');
-    if (body.card_role !== undefined && body.card_role !== null && !CARD_ROLES.includes(body.card_role)) return fail('Unknown AMA ID Cards role.');
+    const cardWant = body.card_perms === undefined ? undefined : clean(body.card_perms, CARD_PERMS);
+    const prepWant = body.prep_roles === undefined ? undefined : clean(body.prep_roles, PREP_ROLES);
 
     if (action === 'create') {
       const existing = await findUser(db, email);
@@ -127,7 +122,8 @@ export async function handle(req, db) {
         const { error } = await db.auth.admin.updateUserById(existing.id, { password });
         if (error) return fail(error.message);
       }
-      await setRoles(db, email, body.card_role || 'pending', body.prep_roles || []);
+      await setPerms(db, 'card', email, cardWant || []);
+      await setPerms(db, 'prep', email, prepWant || []);
       return json({ ok: true, existed: !!existing });
     }
 
@@ -141,22 +137,24 @@ export async function handle(req, db) {
     }
 
     if (action === 'roles') {
-      if (email === me && ((body.card_role !== undefined && body.card_role !== 'admin') || (body.prep_roles !== undefined && !(body.prep_roles || []).includes('admin'))))
+      if (email === me && ((cardWant && !cardWant.includes('admin')) || (prepWant && !prepWant.includes('admin'))))
         return fail("You can't remove your own admin access.");
-      const last = await checkAdmins(db, email, body.card_role, body.prep_roles);
-      if (last) return fail(last);
-      await setRoles(db, email, body.card_role, body.prep_roles);
+      for (const [app, want] of [['card', cardWant], ['prep', prepWant]]) {
+        if (!want) continue;
+        const last = await lastAdmin(db, app, email, want);
+        if (last) return fail(last);
+      }
+      if (cardWant) await setPerms(db, 'card', email, cardWant);
+      if (prepWant) await setPerms(db, 'prep', email, prepWant);
       return json({ ok: true });
     }
 
     if (action === 'remove') {
       if (email === me) return fail("You can't remove yourself.");
-      const last = await checkAdmins(db, email, 'pending', []);
-      if (last) return fail(last);
-      const { error: e1 } = await db.from('prep_roles').delete().eq('email', email);
-      if (e1) throw e1;
-      const { error: e2 } = await db.from('staff_roles').delete().eq('email', email);
-      if (e2) throw e2;
+      for (const app of ['card', 'prep']) { const last = await lastAdmin(db, app, email, []); if (last) return fail(last); }
+      await setPerms(db, 'prep', email, []);
+      await setPerms(db, 'card', email, []);
+      await db.from('staff_roles').delete().eq('email', email); // old single roles, if still there
       const user = await findUser(db, email);
       if (user) {
         await db.from('push_subscriptions').delete().eq('user_email', email); // phone notifications, if set up
