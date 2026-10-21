@@ -181,7 +181,7 @@ async function load() {
   } catch (e) {
     show('#problem');
     $('#problem').innerHTML = e.setup
-      ? `<h2>Set up needed</h2><p class="hint">${esc(e.message)}</p><p class="hint">In Supabase: Edge Functions &gt; Deploy a new function &gt; Via Editor. Name it <b>staff</b>, paste the whole of <code>supabase/functions/staff/index.ts</code> from the theggatonklenner.github.io repository, and Deploy. Then turn off "Enforce JWT verification" for it.</p><div class="row"><button class="btn" id="retry">Try again</button></div>`
+      ? `<h2>Set up needed</h2><p class="hint">${esc(e.message)}</p><p class="hint">In Supabase: Edge Functions &gt; Deploy a new function &gt; Via Editor. Name it <b>staff</b>, paste the whole of <code>supabase/functions/staff/index.ts</code> from the theggatonklenner.github.io repository, and Deploy. Then turn off "Verify JWT with legacy secret" for it.</p><div class="row"><button class="btn" id="retry">Try again</button></div>`
       : `<h2>Can't open staff logins</h2><p class="hint">${esc(e.message)}</p><div class="row"><button class="btn" id="retry">Try again</button></div>`;
     $('#retry').onclick = load;
   }

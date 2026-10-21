@@ -11,7 +11,7 @@ The home page at https://theggatonklenner.github.io, with links to the grading t
 
 1. In Supabase, open **Edge Functions > Deploy a new function > Via Editor**.
 2. Name it `staff`, replace the example code with the whole of `supabase/functions/staff/index.ts`, and click **Deploy**.
-3. Open the function's **Details** (or settings), turn **off** "Enforce JWT verification" (also called "Verify JWT"), and save. The function checks who is signed in itself.
+3. Open the function's **Details** (or settings), turn **off** "Verify JWT with legacy secret" (older screens call it "Enforce JWT verification"), and save. The function checks who is signed in itself.
 4. Open https://theggatonklenner.github.io/staff/ and sign in.
 
 Only people who are an admin in **both** AMA ID Cards and Black Belt Prep can use it. Each app always keeps at least one admin, and you can't remove your own admin access or your own login.

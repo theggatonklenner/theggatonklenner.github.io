@@ -2,7 +2,7 @@
 // AMA Grading Toolkit: staff logins for AMA ID Cards and Black Belt Prep, in one place.
 //
 // Deploy in Supabase: Edge Functions > Deploy a new function > Via Editor, name it "staff",
-// paste this whole file, Deploy. Then turn OFF "Enforce JWT verification" for the function
+// paste this whole file, Deploy. Then turn OFF "Verify JWT with legacy secret" (or "Enforce JWT verification") for the function
 // (it checks the signed-in person itself).
 //
 // Only people who are an admin in BOTH apps can use it. It can:
