@@ -176,11 +176,14 @@ const listText = (roles, names) => roles.length ? (roles.includes('admin') ? 'Ad
 async function load() {
   try {
     const d = await api({ action: 'list' });
-    state.me = d.me; state.users = d.users;
+    if (!Array.isArray(d.card_perms)) { const er = new Error('The "staff" function in Supabase is an older copy. Update it with the latest supabase/functions/staff/index.ts.'); er.setup = true; er.outdated = true; throw er; }
+    state.me = d.me; state.users = d.users.map(u => ({ ...u, card_perms: u.card_perms || [], prep_roles: u.prep_roles || [] }));
     show('#app'); draw();
   } catch (e) {
     show('#problem');
-    $('#problem').innerHTML = e.setup
+    $('#problem').innerHTML = e.outdated
+      ? `<h2>Update needed</h2><p class="hint">${esc(e.message)}</p><p class="hint">In Supabase: Edge Functions &gt; <b>staff</b> &gt; Code. Replace everything with the whole of <code>supabase/functions/staff/index.ts</code> from the theggatonklenner.github.io repository, and Deploy. Check "Verify JWT with legacy secret" is still off.</p><div class="row"><button class="btn" id="retry">Try again</button></div>`
+      : e.setup
       ? `<h2>Set up needed</h2><p class="hint">${esc(e.message)}</p><p class="hint">In Supabase: Edge Functions &gt; Deploy a new function &gt; Via Editor. Name it <b>staff</b>, paste the whole of <code>supabase/functions/staff/index.ts</code> from the theggatonklenner.github.io repository, and Deploy. Then turn off "Verify JWT with legacy secret" for it.</p><div class="row"><button class="btn" id="retry">Try again</button></div>`
       : `<h2>Can't open staff logins</h2><p class="hint">${esc(e.message)}</p><div class="row"><button class="btn" id="retry">Try again</button></div>`;
     $('#retry').onclick = load;

@@ -21,7 +21,7 @@ const db = makeDb();
 for (const e of ['tate@ama.test', 'jo@ama.test']) await db.auth.admin.createUser({ email: e, password: 'password1' });
 db._t.staff_permissions = [{ email: 'tate@ama.test', permission: 'admin' }, { email: 'jo@ama.test', permission: 'viewer' }];
 db._t.prep_roles = [{ email: 'tate@ama.test', role: 'admin' }, { email: 'jo@ama.test', role: 'instructor' }];
-let fnDeployed = true;
+let fnDeployed = true, oldFunction = false;
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -41,6 +41,7 @@ await ctx.route('https://ptdrcxngaptcgswfbjhg.supabase.co/auth/v1/**', async r =
   return r.fulfill({ contentType: 'application/json', body: '{}' });
 });
 await ctx.route('https://ptdrcxngaptcgswfbjhg.supabase.co/functions/v1/staff', async r => {
+  if (oldFunction) return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ me: 'tate@ama.test', users: [{ email: 'tate@ama.test', has_login: true, card_role: 'admin', prep_roles: ['admin'] }], card_roles: ['admin'], prep_roles: ['admin'] }) });
   if (!fnDeployed) return r.fulfill({ status: 404, contentType: 'application/json', body: '{"code":"NOT_FOUND","message":"Requested function was not found"}' });
   const q = r.request();
   const res = await handle(new Request(q.url(), { method: q.method(), headers: q.headers(), body: q.method() === 'POST' ? q.postData() : undefined }), db);
@@ -125,6 +126,13 @@ try {
   fnDeployed = true;
   await page.click('#retry'); await page.waitForSelector('#app:not([hidden])');
   ok(true, 'Try again works once it is set up');
+
+  // Older copy of the function deployed (single ID Cards role)
+  oldFunction = true;
+  await page.reload(); await page.waitForSelector('#problem:not([hidden])');
+  ok((await page.textContent('#problem')).includes('older copy') && !(await page.textContent('#problem')).includes('undefined'), 'an older staff function is explained (update it), not a crash');
+  oldFunction = false;
+  await page.click('#retry'); await page.waitForSelector('#app:not([hidden])');
 
   // Not an admin in both
   await page.click('#signOut'); await page.waitForSelector('#signIn:not([hidden])');
