@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tate's Tools</title>
+<meta name="description" content="Tools made by Tate Heggatonklenner.">
+<meta name="theme-color" content="#04794b">
+<link rel="icon" href="icons/black-belt-prep.png">
+<link rel="apple-touch-icon" href="icons/black-belt-prep.png">
+<style>
+  :root {
+    --bg: #f6f7f5; --card: #ffffff; --fg: #18201c; --muted: #5d6b63; --line: #dfe4e0;
+    --accent: #04794b; --accent-soft: #e3f2ea; --shadow: 0 1px 2px rgba(16, 24, 20, .06), 0 4px 16px rgba(16, 24, 20, .05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1412; --card: #171e1a; --fg: #e8eeea; --muted: #9aa8a0; --line: #26302b; --accent: #3ccf8e; --accent-soft: #15291f; --shadow: none; }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: max(48px, env(safe-area-inset-top)) 16px 48px; }
+  header { margin-bottom: 28px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  .tools { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .tool { display: flex; align-items: center; gap: 16px; padding: 16px; background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: var(--shadow); color: inherit; text-decoration: none; transition: border-color .15s, transform .15s; }
+  .tool:hover { border-color: var(--accent); }
+  .tool:active { transform: scale(.99); }
+  .tool:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .tool img { width: 56px; height: 56px; border-radius: 12px; flex: none; }
+  .tool .text { flex: 1; min-width: 0; }
+  .tool h2 { font-size: 18px; margin: 0 0 2px; }
+  .tool p { margin: 0; color: var(--muted); font-size: 15px; }
+  .tool .go { flex: none; color: var(--accent); font-weight: 600; font-size: 15px; }
+  footer { margin-top: 32px; color: var(--muted); font-size: 14px; }
+  @media (max-width: 420px) { .tool .go { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Tate's Tools</h1>
+    <p>Apps for AMA Marrickville. Sign in with your usual login.</p>
+  </header>
+
+  <ul class="tools">
+    <li>
+      <a class="tool" href="https://theggatonklenner.github.io/Black-belt-prep-system/">
+        <img src="icons/black-belt-prep.png" alt="">
+        <div class="text">
+          <h2>Black Belt Prep</h2>
+          <p>Preparation cycles, attendance, payments, grading and certificates.</p>
+        </div>
+        <span class="go" aria-hidden="true">Open</span>
+      </a>
+    </li>
+    <li>
+      <a class="tool" href="https://theggatonklenner.github.io/ama-id-cards/">
+        <img src="icons/ama-id-cards.png" alt="">
+        <div class="text">
+          <h2>AMA ID Cards</h2>
+          <p>Make, approve and print member ID cards.</p>
+        </div>
+        <span class="go" aria-hidden="true">Open</span>
+      </a>
+    </li>
+  </ul>
+
+  <footer>Made by Tate Heggatonklenner</footer>
+</main>
+</body>
+</html>
