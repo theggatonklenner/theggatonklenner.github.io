@@ -27,6 +27,14 @@
   /* Info and live slides */
   .card { position: absolute; left: 0; top: 0; width: 100%; height: 100%; box-sizing: border-box; padding: 11vh 7vw 9vh; display: flex; flex-direction: column; justify-content: center; }
   .t-green { background: #04794b; color: #fff; } .t-dark { background: #0e1612; color: #e6efe9; } .t-gold { background: #f2d500; color: #16211b; } .t-light { background: #f3f6f4; color: #16211b; }
+  .t-party { background: #5b2a86; background: linear-gradient(135deg, #e0218a 0%, #7b2ff7 55%, #1e90ff 100%); color: #fff; text-align: center; align-items: center; }
+  .t-party h1 { font-size: 9vw; text-shadow: 0 .4vw 1.6vw rgba(0,0,0,.25); }
+  .t-party .body { font-size: 4vw; }
+  .t-party .belt { display: none; }
+  .confetti { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; }
+  .confetti i { position: absolute; top: -5vh; width: 1.2vw; height: 2vw; border-radius: .2vw; opacity: .95; -webkit-animation: fall linear infinite; animation: fall linear infinite; }
+  @-webkit-keyframes fall { from { -webkit-transform: translateY(0) rotate(0deg); } to { -webkit-transform: translateY(112vh) rotate(720deg); } }
+  @keyframes fall { from { transform: translateY(0) rotate(0deg); } to { transform: translateY(112vh) rotate(720deg); } }
   .card .belt { height: 1.2vh; width: 16vw; margin-bottom: 4vh; background: #141414; position: relative; }
   .t-dark .belt, .t-green .belt { background: #f2d500; }
   .card .kicker { font-size: 2.4vw; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; opacity: .8; margin-bottom: 1.5vh; }
@@ -87,7 +95,7 @@
   var CFG = window.TOOLKIT_CONFIG || {};
   var BASE = (CFG.SUPABASE_URL || '').replace(/\/$/, '');
   var MEDIA = BASE + '/storage/v1/object/public/tv/';
-  var POLL_MS = 60 * 1000;
+  var POLL_MS = 20 * 1000;
   var $ = function (id) { return document.getElementById(id); };
   var stage = $('stage');
   var store = {
@@ -138,6 +146,10 @@
   }
   function apply(f, first) {
     if (first || !feed) { feed = f; version = f.version; build(); setCorners(); next(); return; }
+    var wasOnly = feed.only ? (feed.slides[0] || {}).id : null, isOnly = f.only ? (f.slides[0] || {}).id : null;
+    if (wasOnly !== isOnly || (f.only && f.version !== version)) {   // party mode started, ended or changed: switch now
+      pending = null; feed = f; version = f.version; build(); setCorners(); index = -1; next(); return;
+    }
     if (f.version !== version || JSON.stringify(f.live) !== JSON.stringify(feed.live) || JSON.stringify(f.settings) !== JSON.stringify(feed.settings)) pending = f;   // switch over at the next slide
   }
 
@@ -179,13 +191,21 @@
   }
   setInterval(tick, 15000);
 
+  function confetti() {
+    var cols = ['#f2d500', '#ffffff', '#3fbf7f', '#ff6fb5', '#5ad1ff', '#ff9f1a'], out = '';
+    for (var i = 0; i < 46; i++) {
+      out += '<i style="left:' + Math.round(Math.random() * 100) + '%;background:' + cols[i % cols.length] +
+        ';animation-duration:' + (4 + Math.random() * 5).toFixed(1) + 's;-webkit-animation-duration:' + (4 + Math.random() * 5).toFixed(1) + 's;animation-delay:-' + (Math.random() * 8).toFixed(1) + 's;-webkit-animation-delay:-' + (Math.random() * 8).toFixed(1) + 's"></i>';
+    }
+    return '<div class="confetti">' + out + '</div>';
+  }
   function themeOf(s) { return 't-' + (s.theme || 'green'); }
   function html(s) {
     var live = feed.live || {};
     if (s.kind === 'photo') return '<div class="fill blur" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')"></div><div class="fill contain" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')"></div>' + (s.title ? '<div class="caption">' + esc(s.title) + '</div>' : '');
     if (s.kind === 'text') {
       var bg = s.media_path ? ' bgphoto" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')' : '';
-      return '<div class="card ' + themeOf(s) + bg + '">' + (s.media_path ? '<div class="shade"></div>' : '') + '<div class="belt"></div>' + (s.title ? '<h1>' + esc(s.title) + '</h1>' : '') + (s.body ? '<div class="body">' + esc(s.body) + '</div>' : '') + '</div>';
+      return '<div class="card ' + themeOf(s) + bg + '">' + (s.media_path ? '<div class="shade"></div>' : '') + (s.theme === 'party' ? confetti() : '') + '<div class="belt"></div>' + (s.title ? '<h1>' + esc(s.title) + '</h1>' : '') + (s.body ? '<div class="body">' + esc(s.body) + '</div>' : '') + '</div>';
     }
     if (s.live_kind === 'next_grading') {
       var g = live.next_grading;

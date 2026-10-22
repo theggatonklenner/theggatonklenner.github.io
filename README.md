@@ -36,11 +36,12 @@ node tests/tv-page.test.mjs
 2. Open https://theggatonklenner.github.io/tv/edit/ on your phone, sign in, and add some slides. Note the **screen code** under Settings.
 3. On the TV, open its web browser, go to **theggatonklenner.github.io/tv**, type the screen code once, and press OK on the remote for full screen. Bookmark it, or set it as the browser's home page, so it opens straight away next time.
 
-The TV picks up changes within a minute, keeps playing its last slides if the internet drops, and reloads itself once a night. On the remote, right and left skip between slides.
+The TV picks up changes within 20 seconds, keeps playing its last slides if the internet drops, and reloads itself once a night. On the remote, right and left skip between slides.
 
 - **Photos** are resized to TV size before uploading. **Videos** (MP4 works best) play without sound, up to 50 MB each.
 - **Info slides**: heading, text, a colour, and an optional background photo.
 - **Live slides** fill themselves in from Black Belt Prep: the next grading date, the next prep sessions, and congratulations to students who passed in the last 45 days (certificate names and new rank; nothing else about students). A live slide only shows when there's something to show.
+- **Party mode** (top of the editor): show only one thing, like a birthday message (typed, with confetti) or an uploaded birthday image, for 1, 2 or 3 hours, the rest of the day, or until a set time. The TV switches straight to it and goes back to the slideshow by itself; **Back to normal now** ends it early. Party slides are saved (kept out of the slideshow) to reuse.
 - Each slide can be turned off, given its own time on screen, or set to show only between two dates.
 - Anyone with an AMA staff login can edit. **New code** under Settings stops any TV using the old code until the new one is typed in.
 - Photos and videos are public to anyone with their exact link (the TV shows them without signing in), so only add what you'd put on the dojang wall.

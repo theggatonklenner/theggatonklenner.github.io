@@ -86,6 +86,19 @@ ok(f.live.sessions.map(s => s.date).join() === [plus(1), plus(15), plus(29)].joi
 ok(f.live.congrats.map(c => c.name + ':' + c.rank).join() === 'Kara Jane Lee:Probationary Black Belt,Sam Park:2nd Dan', 'congratulations: recent passes with certificate names; old passes and test records left out');
 ok(JSON.stringify(f).indexOf('student_id') === -1 && JSON.stringify(f).indexOf('T1') === -1, 'the TV never gets Student IDs or anything else about students');
 
+console.log('\nParty mode');
+const pid = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, theme, party) values ('text', 'Happy Birthday Kara!', 'party', true) returning id`))).rows[0].id;
+f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
+ok(!f.only && !f.slides.some(s => s.title === 'Happy Birthday Kara!'), 'party slides stay out of the normal slideshow');
+await as('tate@ama.test', () => db.query(`update tv_settings set only_slide = $1, only_until = now() + interval '2 hours'`, [pid]));
+f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
+ok(f.only === true && f.slides.length === 1 && f.slides[0].title === 'Happy Birthday Kara!' && f.slides[0].theme === 'party', 'party mode: the TV gets only that slide');
+ok(f.settings.show_clock === false && f.settings.show_logo === false && Object.keys(f.live).length === 0, 'with no clock, logo or live info over it');
+await as('tate@ama.test', () => db.exec(`update tv_settings set only_until = now() - interval '1 minute'`));
+f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
+ok(!f.only && f.slides.length > 1, 'when the time is up, the normal slideshow comes back by itself');
+ok(!(await tryAs('nobody@ama.test', `update tv_settings set only_slide = null`)).n, 'only staff can start or stop party mode');
+
 console.log('\nFiles');
 const pol = (await db.query(`select policyname, roles::text r from pg_policies where tablename = 'objects' and policyname like 'tv files%'`)).rows;
 ok(pol.length === 4 && pol.every(p => p.r.includes('authenticated') && !p.r.includes('anon')), 'only signed-in staff can add, change or remove TV files');

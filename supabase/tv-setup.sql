@@ -10,6 +10,9 @@
 --   next_grading  the next grading date of the active cycle
 --   sessions      the next prep session dates (sign-off marked)
 --   congrats      students who passed a grading in the last 45 days, with their new rank
+--
+-- Party mode: the TV shows only one slide (e.g. a birthday message) until a set time, then goes back to
+-- the normal slideshow by itself. That slide is kept out of the normal slideshow so it can be reused.
 
 -- ---------- Who can edit ----------
 create or replace function public.tv_is_staff() returns boolean
@@ -38,6 +41,8 @@ create table if not exists public.tv_settings (
   updated_at  timestamptz not null default now()
 );
 insert into public.tv_settings (id) values (1) on conflict (id) do nothing;
+alter table public.tv_settings add column if not exists only_slide uuid;          -- party mode: the one slide to show
+alter table public.tv_settings add column if not exists only_until timestamptz;   -- ... until this time
 alter table public.tv_settings drop constraint if exists tv_settings_code_check;
 alter table public.tv_settings add constraint tv_settings_code_check check (screen_code ~ '^[A-Z0-9]{4,12}$');
 
@@ -48,7 +53,7 @@ create table if not exists public.tv_slides (
   title       text,
   body        text,
   media_path  text,                 -- file in the "tv" storage bucket (photos, videos, info slide backgrounds)
-  theme       text not null default 'green' check (theme in ('green', 'dark', 'gold', 'light')),
+  theme       text not null default 'green',
   live_kind   text check (live_kind in ('next_grading', 'sessions', 'congrats')),
   seconds     int check (seconds is null or seconds between 3 and 600),   -- blank = the default
   position    int not null,         -- filled in automatically: new slides go at the end
@@ -64,6 +69,9 @@ create table if not exists public.tv_slides (
   check (ends_on is null or starts_on is null or ends_on >= starts_on)
 );
 create index if not exists tv_slides_position_idx on public.tv_slides (position);
+alter table public.tv_slides drop constraint if exists tv_slides_theme_check;
+alter table public.tv_slides add constraint tv_slides_theme_check check (theme in ('green', 'dark', 'gold', 'light', 'party'));
+alter table public.tv_slides add column if not exists party boolean not null default false;   -- made for party mode
 alter table public.tv_slides alter column position drop default;
 
 create or replace function public.tv_stamp() returns trigger language plpgsql as $$
@@ -96,11 +104,24 @@ create or replace function public.tv_feed(p_code text) returns jsonb
 declare
   s public.tv_settings%rowtype;
   today date := (now() at time zone 'Australia/Sydney')::date;
-  slides jsonb; live jsonb := '{}'::jsonb; v jsonb; changed timestamptz;
+  slides jsonb; live jsonb := '{}'::jsonb; v jsonb; changed timestamptz; one_slide jsonb;
 begin
   select * into s from public.tv_settings where id = 1;
   if not found or upper(trim(coalesce(p_code, ''))) <> s.screen_code then
     return jsonb_build_object('error', 'wrong_code');
+  end if;
+
+  -- Party mode: just the one slide, until the set time
+  if s.only_slide is not null and s.only_until > now() then
+    select jsonb_build_object('id', t.id, 'kind', t.kind, 'title', t.title, 'body', t.body, 'media_path', t.media_path,
+             'theme', t.theme, 'live_kind', t.live_kind, 'seconds', t.seconds)
+      into one_slide from public.tv_slides t where t.id = s.only_slide;
+  end if;
+  if one_slide is not null then
+    return jsonb_build_object(
+      'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false),
+      'version', s.updated_at, 'slides', jsonb_build_array(one_slide), 'live', '{}'::jsonb, 'today', today,
+      'only', true, 'only_until', s.only_until);
   end if;
 
   select coalesce(jsonb_agg(jsonb_build_object(
@@ -109,7 +130,7 @@ begin
          max(t.updated_at)
     into slides, changed
     from public.tv_slides t
-   where t.enabled and (t.starts_on is null or t.starts_on <= today) and (t.ends_on is null or t.ends_on >= today);
+   where t.enabled and not t.party and (t.starts_on is null or t.starts_on <= today) and (t.ends_on is null or t.ends_on >= today);
 
   -- Live AMA info (only if Black Belt Prep is set up in this project)
   if to_regclass('public.prep_cycles') is not null then

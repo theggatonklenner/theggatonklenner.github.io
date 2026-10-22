@@ -182,6 +182,52 @@ try {
   ok((await page.textContent('#codeErr')).includes('changed'), 'after a new code, the TV asks for it');
   await ctx.close();
 
+  // Party mode
+  ({ ctx, page } = await context({ width: 390, height: 844 }));
+  await db.query(`update tv_settings set screen_code = $1`, [CODE]);
+  await page.goto(BASE + '/tv/edit/index.html');
+  await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+  await page.waitForSelector('#partyStart');
+  await page.click('#partyStart'); await page.waitForSelector('#pForm');
+  await page.fill('#pName', 'Kara'); await page.fill('#pLine', 'Turning 7 today!');
+  ok((await page.textContent('#pPrev')).includes('Happy Birthday Kara!') && (await page.textContent('#pPrev')).includes('Turning 7 today!'), 'party message preview shows "Happy Birthday Kara!"');
+  await page.selectOption('#pFor', '60');
+  await page.screenshot({ path: join(SHOTS, 'tv-party-editor.png') });
+  await page.click('#pGo'); await page.waitForSelector('#partyStop');
+  const tvset = (await db.query(`select only_slide, only_until > now() + interval '55 minutes' and only_until < now() + interval '65 minutes' ok from tv_settings`)).rows[0];
+  ok(tvset.only_slide && tvset.ok, 'party mode is on for 1 hour');
+  ok((await page.textContent('#party')).includes('Party mode is on') && !(await page.textContent('#list')).includes('Happy Birthday'), 'editor shows party mode is on; the party slide is kept out of the slide list');
+  await page.screenshot({ path: join(SHOTS, 'tv-party-on.png') });
+  const tv = await context({ width: 1280, height: 720 });
+  await tv.page.goto(BASE + `/tv/index.html?code=${CODE}`); await tv.page.waitForSelector('.layer.on');
+  await tv.page.waitForTimeout(1200);
+  ok((await tv.page.evaluate(() => window.__tv.state())).count === 1 && (await tv.page.textContent('.layer.on')).includes('Happy Birthday Kara!'), 'the TV shows only the birthday message');
+  ok(await tv.page.isHidden('#clock') && (await tv.page.$$('.confetti i')).length > 10, 'full screen with confetti, no clock or logo');
+  await tv.page.screenshot({ path: join(SHOTS, 'tv-party.png') });
+  await page.click('#partyStop'); await toastSays(page, 'Back to normal');
+  await tv.page.evaluate(() => window.__tv.reload()); await tv.page.waitForTimeout(800);
+  ok((await tv.page.evaluate(() => window.__tv.state())).count > 1, '"Back to normal" brings the slideshow straight back');
+  // Image, and reusing a saved one
+  await page.click('#partyStart'); await page.waitForSelector('#pForm');
+  await page.click('#pForm [data-m="image"]');
+  await page.click('#pPick'); await page.setInputFiles('#pickBg', join(ROOT, 'icons/ama-id-cards.png'));
+  await page.waitForSelector('#pForm .preview-img');
+  await page.fill('#pCap', 'Happy Birthday Sam!'); await page.click('#pGo'); await page.waitForSelector('#partyStop');
+  const img = (await db.query(`select s.kind, s.media_path from tv_settings t join tv_slides s on s.id = t.only_slide`)).rows[0];
+  ok(img.kind === 'photo' && files.has(img.media_path), 'an uploaded image can be shown on its own');
+  await tv.page.evaluate(() => window.__tv.reload()); await tv.page.waitForTimeout(800);
+  ok((await tv.page.evaluate(() => window.__tv.state())).count === 1, 'and the TV switches to it');
+  await page.click('#partyStop'); await toastSays(page, 'Back to normal');
+  await page.click('#partyStart'); await page.waitForSelector('#pForm');
+  ok((await page.$$('#pForm [data-m="saved"]')).length === 1, 'earlier party slides are saved to reuse');
+  await page.click('#pForm [data-m="saved"]'); await page.waitForSelector('#pForm [data-pick]');
+  ok((await page.$$('#pForm [data-pick]')).length === 2, 'both earlier party slides are listed');
+  await page.selectOption('#pFor', 'day'); await page.click('#pGo'); await page.waitForSelector('#partyStop');
+  const endOfDay = await page.evaluate(() => { const d = new Date(); d.setHours(23, 59, 0, 0); return d.toISOString(); });
+  ok(Math.abs(new Date((await db.query(`select only_until from tv_settings`)).rows[0].only_until) - new Date(endOfDay)) < 60e3, '"the rest of today" runs until 11:59 pm');
+  await page.click('#partyStop'); await toastSays(page, 'Back to normal');
+  await tv.ctx.close(); await ctx.close();
+
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));
   await page.goto(BASE + '/tv/edit/index.html');

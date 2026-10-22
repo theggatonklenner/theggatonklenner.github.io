@@ -80,6 +80,7 @@
   .slide { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
   .slide.off { opacity: .55; }
   .thumb { flex: none; width: 96px; height: 54px; border-radius: 8px; background: #000 center/cover no-repeat; display: flex; align-items: center; justify-content: center; color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 13px; overflow: hidden; position: relative; text-align: center; line-height: 1.1; padding: 4px; }
+  .thumb.t-party { background: linear-gradient(135deg, #e0218a, #7b2ff7, #1e90ff); }
   .thumb.t-green { background-color: #04794b; } .thumb.t-dark { background-color: #0e1612; } .thumb.t-gold { background-color: #f2d500; color: #16211b; } .thumb.t-light { background-color: #e7ece9; color: #16211b; }
   .thumb .play { position: absolute; width: 0; height: 0; border-left: 14px solid rgba(255,255,255,.9); border-top: 9px solid transparent; border-bottom: 9px solid transparent; }
   .slide .main { flex: 1; min-width: 0; cursor: pointer; }
@@ -93,6 +94,18 @@
   .swatches input { position: absolute; opacity: 0; }
   .swatches span { display: block; width: 44px; height: 32px; border-radius: 8px; border: 2px solid var(--line); }
   .swatches input:checked + span { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  #party.on { background: var(--gold); color: var(--on-gold); }
+  #party.on .hint { color: var(--on-gold); opacity: .85; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .seg button { flex: 1; border: 0; background: var(--surface); padding: 9px 6px; font-weight: 600; font-size: 14px; color: var(--muted); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+  .partyprev { aspect-ratio: 16 / 9; border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #fff; padding: 12px;
+    background: linear-gradient(135deg, #e0218a 0%, #7b2ff7 55%, #1e90ff 100%); font-family: var(--font-display); }
+  .partyprev b { font-size: 30px; line-height: 1.05; } .partyprev span { font-family: var(--font-body); font-size: 15px; margin-top: 6px; }
+  .saved { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .saved li { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+  .saved li.pick { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
   .addgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .addgrid button { text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 12px; cursor: pointer; min-height: 72px; }
   .addgrid button b { display: block; font-size: 16px; }
@@ -136,8 +149,9 @@
   <section id="problem" class="card" hidden></section>
 
   <section id="app" hidden style="display:flex;flex-direction:column;gap:14px">
+    <div class="card" id="party"></div>
     <div class="view-head"><h2>Slides</h2><div class="row"><a class="btn sm" id="previewBtn" target="_blank" rel="noopener">Preview</a><button class="btn primary sm" id="addBtn">Add</button></div></div>
-    <p class="hint">The TV shows these in order, on a loop, and picks up changes within a minute.</p>
+    <p class="hint">The TV shows these in order, on a loop, and picks up changes within 20 seconds.</p>
     <ul class="slides" id="list"></ul>
 
     <h2 style="margin-top:8px">Settings</h2>
@@ -169,14 +183,14 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const sb = supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY);
 const MEDIA = (CFG.SUPABASE_URL || '').replace(/\/$/, '') + '/storage/v1/object/public/tv/';
 const dlg = $('#dlg');
-const THEMES = { green: ['Green', '#04794b'], dark: ['Dark', '#0e1612'], gold: ['Gold', '#f2d500'], light: ['Light', '#e7ece9'] };
+const THEMES = { green: ['Green', '#04794b'], dark: ['Dark', '#0e1612'], gold: ['Gold', '#f2d500'], light: ['Light', '#e7ece9'], party: ['Party (confetti)', 'linear-gradient(135deg,#e0218a,#7b2ff7,#1e90ff)'] };
 const LIVE = {
   next_grading: ['Next grading', 'The next black belt grading date and how long to go'],
   sessions: ['Prep sessions', 'The next prep session dates, with the sign-off marked'],
   congrats: ['Congratulations', 'Students who passed a grading in the last 45 days']
 };
 const KIND = { photo: 'Photo', video: 'Video', text: 'Info slide', live: 'Live' };
-const state = { me: '', slides: [], settings: null };
+const state = { me: '', slides: [], partySlides: [], settings: null };
 
 /* ---------- Small helpers ---------- */
 let toastTimer;
@@ -213,7 +227,7 @@ async function load() {
     sb.from('tv_settings').select('*').eq('id', 1).maybeSingle()
   ]);
   if (e1 || e2) return problem(/tv_slides|tv_settings|schema cache|does not exist/i.test((e1 || e2).message) ? 'setup' : (e1 || e2).message);
-  state.slides = slides || []; state.settings = settings;
+  state.slides = (slides || []).filter(x => !x.party); state.partySlides = (slides || []).filter(x => x.party).reverse(); state.settings = settings;
   show('#app'); draw();
 }
 function problem(kind) {
@@ -236,6 +250,7 @@ function thumb(s) {
 function slideName(s) { return s.title || (s.kind === 'live' ? LIVE[s.live_kind][0] : KIND[s.kind]); }
 function draw() {
   const S = state.settings, list = state.slides, t = today();
+  drawParty();
   $('#code').textContent = S.screen_code;
   $('#setSecs').value = S.seconds; $('#setClock').checked = S.show_clock; $('#setLogo').checked = S.show_logo;
   $('#previewBtn').href = `../?code=${encodeURIComponent(S.screen_code)}`;
@@ -409,6 +424,112 @@ function openSlide(s, fresh) {
     if (s.media_path) sb.storage.from('tv').remove([s.media_path]).catch(() => {});
     toast('Deleted'); load();
   };
+}
+
+/* ---------- Party mode: show only one thing (e.g. a birthday message) for a while ---------- */
+const partyOn = () => { const S = state.settings; return !!(S && S.only_slide && S.only_until && new Date(S.only_until) > new Date()); };
+const timeText = iso => new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+function drawParty() {
+  const box = $('#party'), S = state.settings;
+  if (!('only_slide' in S)) { box.hidden = true; return; }   // database not updated yet
+  box.hidden = false;
+  if (partyOn()) {
+    const sl = state.partySlides.concat(state.slides).find(x => x.id === S.only_slide) || {};
+    const sameDay = new Date(S.only_until).toDateString() === new Date().toDateString();
+    box.className = 'card on';
+    box.innerHTML = `<div class="row" style="justify-content:space-between"><h3>Party mode is on</h3><span class="chip" style="background:var(--on-gold);color:var(--gold)">TV</span></div>
+      <div class="row" style="align-items:center">${thumb(sl)}<p class="grow" style="margin:0">The TV is showing only <b>${esc(slideName(sl))}</b> until <b>${timeText(S.only_until)}</b>${sameDay ? '' : ' ' + new Date(S.only_until).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}. Then it goes back to the slideshow by itself.</p></div>
+      <div class="row"><button class="btn primary" id="partyStop">Back to normal now</button><button class="btn" id="partyMore">1 more hour</button></div>`;
+    $('#partyStop').onclick = async () => { await setParty(null, null); toast('Back to normal. The TV switches within 20 seconds.', 4000); };
+    $('#partyMore').onclick = async () => { await setParty(S.only_slide, new Date(new Date(S.only_until).getTime() + 3600e3).toISOString()); toast(`Party mode until ${timeText(state.settings.only_until)}`); };
+  } else {
+    box.className = 'card';
+    box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start"><div class="grow"><h3>Party mode</h3><p class="hint">Show just one thing on the TV, like a birthday message, for a set time. Then it goes back to the slideshow by itself.</p></div>
+      <button class="btn primary" id="partyStart">Start</button></div>`;
+    $('#partyStart').onclick = openParty;
+  }
+}
+async function setParty(slideId, until) {
+  const { error } = await sb.from('tv_settings').update({ only_slide: slideId, only_until: until }).eq('id', 1);
+  if (error) { toast('Not saved: ' + error.message, 5000); return false; }
+  await load(); return true;
+}
+function openParty() {
+  let mode = 'message', photo = null, pick = (state.partySlides[0] || {}).id || null;
+  const render = () => {
+    openDlg(`<form class="dlg" id="pForm">
+      <div class="dlg-head"><div><h3>Party mode</h3><p class="hint">The TV shows only this until the time is up.</p></div><button class="x" data-close>Close</button></div>
+      <div class="seg" role="group" aria-label="What to show"><button type="button" data-m="message" aria-pressed="${mode === 'message'}">Birthday message</button><button type="button" data-m="image" aria-pressed="${mode === 'image'}">Upload an image</button>${state.partySlides.length ? `<button type="button" data-m="saved" aria-pressed="${mode === 'saved'}">Saved (${state.partySlides.length})</button>` : ''}</div>
+      ${mode === 'message' ? `
+        <div class="field"><label for="pName">Birthday child's name</label><input type="text" id="pName" maxlength="60" placeholder="e.g. Kara" autocomplete="off"></div>
+        <div class="field"><label for="pHead">Heading</label><input type="text" id="pHead" maxlength="120" value="Happy Birthday!"></div>
+        <div class="field"><label for="pLine">Second line (optional)</label><input type="text" id="pLine" maxlength="160" placeholder="e.g. Turning 7 today!"></div>
+        <div class="partyprev" id="pPrev"><b></b><span></span></div>`
+      : mode === 'image' ? `
+        <div class="field"><span class="label">Image</span><div class="row"><span class="hint grow" id="pFile">${photo ? 'Image ready' : 'No image chosen'}</span><button type="button" class="btn sm" id="pPick">${photo ? 'Change' : 'Choose image'}</button></div></div>
+        ${photo ? `<div class="preview-img" style="background-image:url('${MEDIA + esc(photo)}')"></div>` : '<p class="hint">Use the birthday image or poster made for the party. It fills the screen.</p>'}
+        <div class="field"><label for="pCap">Caption (optional)</label><input type="text" id="pCap" maxlength="120" placeholder="e.g. Happy Birthday Kara!"></div>`
+      : `<ul class="saved">${state.partySlides.map(x => `<li class="${x.id === pick ? 'pick' : ''}" data-pick="${x.id}">${thumb(x)}<span class="grow">${esc(slideName(x))}</span><button type="button" class="btn sm danger" data-forget="${x.id}">Delete</button></li>`).join('')}</ul>`}
+      <div class="field"><label for="pFor">Show it for</label><select id="pFor"><option value="60">1 hour</option><option value="120">2 hours</option><option value="180" selected>3 hours</option><option value="day">The rest of today</option><option value="until">Until a set time...</option></select></div>
+      <div class="field" id="pUntilRow" hidden><label for="pUntil">Until</label><input type="time" id="pUntil"></div>
+      <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="pGo">Show on the TV</button></div>
+    </form>`);
+    $$('#pForm [data-m]').forEach(b => b.onclick = () => { mode = b.dataset.m; render(); });
+    $('#pFor').onchange = () => { $('#pUntilRow').hidden = $('#pFor').value !== 'until'; };
+    if (mode === 'message') {
+      const prev = () => { const n = $('#pName').value.trim(), h = $('#pHead').value.trim() || 'Happy Birthday!';
+        $('#pPrev b').textContent = n ? h.replace(/!?\s*$/, '') + ' ' + n + '!' : h; $('#pPrev span').textContent = $('#pLine').value.trim(); };
+      ['#pName', '#pHead', '#pLine'].forEach(id => $(id).oninput = prev); prev(); $('#pName').focus();
+    }
+    if (mode === 'image') $('#pPick').onclick = () => { $('#pickBg').onchange = async e => {
+      const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      $('#pFile').textContent = 'Uploading...';
+      try { photo = await upload('photos', await resize(f), 'jpg', 'image/jpeg'); render(); }
+      catch (er) { $('#pFile').textContent = 'No image chosen'; toast(er.message || String(er), 6000); }
+    }; $('#pickBg').click(); };
+    if (mode === 'saved') {
+      $$('#pForm [data-pick]').forEach(li => li.onclick = e => { if (e.target.dataset.forget) return; pick = li.dataset.pick; render(); });
+      $$('#pForm [data-forget]').forEach(b => b.onclick = async () => {
+        const x = state.partySlides.find(y => y.id === b.dataset.forget);
+        if (partyOn() && state.settings.only_slide === x.id) return toast("That's on the TV now. Go back to normal first.");
+        const { error } = await sb.from('tv_slides').delete().eq('id', x.id);
+        if (error) return toast('Not deleted: ' + error.message, 5000);
+        if (x.media_path) sb.storage.from('tv').remove([x.media_path]).catch(() => {});
+        await load(); if (pick === x.id) pick = (state.partySlides[0] || {}).id || null; if (!state.partySlides.length) mode = 'message'; render();
+      });
+    }
+    $('#pForm').onsubmit = async e => {
+      e.preventDefault();
+      const v = $('#pFor').value; let until;
+      if (v === 'day') { const d = new Date(); d.setHours(23, 59, 0, 0); until = d; }
+      else if (v === 'until') {
+        if (!$('#pUntil').value) return toast('Choose the time to stop.');
+        const [h, m] = $('#pUntil').value.split(':').map(Number), d = new Date(); d.setHours(h, m, 0, 0);
+        if (d <= new Date()) d.setDate(d.getDate() + 1);   // a time earlier than now means tomorrow
+        until = d;
+      } else until = new Date(Date.now() + Number(v) * 60e3);
+      let id = null;
+      $('#pGo').disabled = true;
+      if (mode === 'saved') id = pick;
+      else {
+        let rec;
+        if (mode === 'message') {
+          const n = $('#pName').value.trim(), h = $('#pHead').value.trim() || 'Happy Birthday!';
+          rec = { kind: 'text', theme: 'party', title: n ? h.replace(/!?\s*$/, '') + ' ' + n + '!' : h, body: $('#pLine').value.trim() || null };
+        } else {
+          if (!photo) { $('#pGo').disabled = false; return toast('Choose the image first.'); }
+          rec = { kind: 'photo', media_path: photo, title: $('#pCap').value.trim() || null };
+        }
+        const { data, error } = await sb.from('tv_slides').insert({ ...rec, party: true }).select('id').single();
+        if (error) { $('#pGo').disabled = false; return toast('Not saved: ' + error.message, 5000); }
+        id = (Array.isArray(data) ? data[0] : data || {}).id;
+      }
+      if (!id) { $('#pGo').disabled = false; return toast('Choose what to show.'); }
+      dlg.close();
+      if (await setParty(id, until.toISOString())) toast(`Party mode on until ${timeText(until.toISOString())}. The TV switches within 20 seconds.`, 5000);
+    };
+  };
+  render();
 }
 
 /* ---------- Settings ---------- */
