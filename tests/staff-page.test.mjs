@@ -58,6 +58,7 @@ try {
   await page.goto(pathToFileURL(join(here, '../staff/index.html')).href);
   await page.waitForSelector('#signIn:not([hidden])');
   ok(true, 'sign-in shows when not signed in');
+  ok(await page.isVisible('#homeBtn') && (await page.getAttribute('#homeBtn', 'href')) === 'https://theggatonklenner.github.io/', 'home button goes back to the AMA Grading Toolkit');
   await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'wrong'); await page.click('#siGo');
   ok((await toastText()).includes('Wrong email or password'), 'wrong password is explained');
   await page.fill('#siPass', 'password1'); await page.click('#siGo');
