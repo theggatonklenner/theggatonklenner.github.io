@@ -149,7 +149,7 @@ function toast(msg, ms = 4000) {
   toastTimer = setTimeout(() => { t.hidden = true; try { t.hidePopover(); } catch (e) { /* ignore */ } }, ms);
 }
 function show(id) { ['#signIn', '#app', '#problem'].forEach(s => $(s).hidden = s !== id); $('#signOut').hidden = id === '#signIn'; }
-function openDlg(html) { dlg.innerHTML = html; dlg.querySelectorAll('[data-close]').forEach(b => b.onclick = e => { e.preventDefault(); dlg.close(); }); if (!dlg.open) dlg.showModal(); const t = $('#toast'); if (!t.hidden) { try { t.hidePopover(); t.showPopover(); } catch (e) { /* ignore */ } } }
+function openDlg(html) { dlg.innerHTML = html; dlg.querySelectorAll('[data-close]').forEach(b => { b.type = 'button'; b.onclick = e => { e.preventDefault(); dlg.close(); }; }); if (!dlg.open) dlg.showModal(); const t = $('#toast'); if (!t.hidden) { try { t.hidePopover(); t.showPopover(); } catch (e) { /* ignore */ } } }
 function confirmBox(text, yes, danger) {
   return new Promise(res => {
     openDlg(`<div class="dlg"><h3>Are you sure?</h3><p style="margin:0">${esc(text)}</p><div class="row" style="justify-content:flex-end"><button class="btn" id="cfNo">Cancel</button><button class="btn ${danger ? 'danger' : 'primary'}" id="cfYes">${esc(yes)}</button></div></div>`);
