@@ -27,7 +27,7 @@ Signing in or out here also signs you in or out of the two apps on that device, 
 node tests/staff-function.test.mjs
 node tests/staff-page.test.mjs     # needs Playwright and supabase-js (see the top of the file)
 node tests/tv-db.test.mjs
-node tests/tv-page.test.mjs
+node tests/tv-page.test.mjs        # also needs pdfjs-dist@3.11.174 (PDFJS=path to its build folder); TEST_PDF=your.pdf to try a real file
 ```
 
 ## Setting up the TV display (once, about 3 minutes)
@@ -38,10 +38,10 @@ node tests/tv-page.test.mjs
 
 The TV picks up changes within 20 seconds, keeps playing its last slides if the internet drops, and reloads itself once a night. On the remote, right and left skip between slides.
 
-- **Photos** are resized to TV size before uploading. **Videos** (MP4 works best) play without sound, up to 50 MB each.
+- **Photos** are resized to TV size before uploading. A **PDF** (e.g. exported from Canva) works too: each page becomes a slide. **Videos** (MP4 works best) play without sound, up to 50 MB each.
 - **Info slides**: heading, text, a colour, and an optional background photo.
 - **Live slides** fill themselves in from Black Belt Prep: the next grading date, the next prep sessions, and congratulations to students who passed in the last 45 days (certificate names and new rank; nothing else about students). A live slide only shows when there's something to show.
-- **Party mode** (top of the editor): show only one thing, like a birthday message (typed, with confetti) or an uploaded birthday image, for 1, 2 or 3 hours, the rest of the day, or until a set time. The TV switches straight to it and goes back to the slideshow by itself; **Back to normal now** ends it early. Party slides are saved (kept out of the slideshow) to reuse.
+- **Party mode** (top of the editor): show only one thing, like a birthday message (typed, with confetti) or an uploaded birthday image or Canva PDF (pick the page, or **Save all** so each design is one tap next time; designs are named after the child automatically), for 1, 2 or 3 hours, the rest of the day, or until a set time. The TV switches straight to it and goes back to the slideshow by itself; **Back to normal now** ends it early. Party slides are saved (kept out of the slideshow) to reuse.
 - Each slide can be turned off, given its own time on screen, or set to show only between two dates.
 - Anyone with an AMA staff login can edit. **New code** under Settings stops any TV using the old code until the new one is typed in.
 - Photos and videos are public to anyone with their exact link (the TV shows them without signing in), so only add what you'd put on the dojang wall.

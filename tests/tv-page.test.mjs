@@ -15,6 +15,7 @@ const { PGlite } = await import(join(PREP_TESTS, 'node_modules/@electric-sql/pgl
 const { startServer } = await import(pathToFileURL(join(PREP_TESTS, 'fake-supabase.mjs')).href);
 const { chromium } = await import(process.env.PLAYWRIGHT || '/opt/npm-tools/node_modules/playwright/index.mjs');
 const read = p => readFileSync(p, 'utf8');
+const PDFJS = process.env.PDFJS || '/tmp/claude-0/-home-claude/eaa02a79-d300-5a00-9b7a-e09b12f5efb0/scratchpad/pdfjs/node_modules/pdfjs-dist/build';   // pdfjs-dist@3.11.174
 const SHOTS = process.env.SHOT_DIR || join(tmpdir(), 'tv-shots'); mkdirSync(SHOTS, { recursive: true });
 let passed = 0, failed = 0;
 const ok = (c, m) => { if (c) { passed++; console.log('  pass  ' + m); } else { failed++; console.log('  FAIL  ' + m); } };
@@ -54,6 +55,7 @@ async function context(size, offline = false) {
   await ctx.route('https://cdn.jsdelivr.net/**', r => r.fulfill({ contentType: 'text/javascript', body: read(join(PREP_TESTS, 'node_modules/@supabase/supabase-js/dist/umd/supabase.js')) }));
   await ctx.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
   await ctx.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+  await ctx.route('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/**', r => r.fulfill({ contentType: 'text/javascript', body: read(join(PDFJS, r.request().url().endsWith('pdf.worker.min.js') ? 'pdf.worker.min.js' : 'pdf.min.js')) }));
   await ctx.route('**/storage/v1/**', async r => {
     const q = r.request(), url = new URL(q.url()), m = url.pathname.match(/\/storage\/v1\/object\/(public\/)?tv\/(.+)$/);
     if (q.method() === 'GET' && m) { const f = files.get(decodeURIComponent(m[2])); return f ? r.fulfill({ status: 200, contentType: f.type, body: f.body }) : r.fulfill({ status: 404, body: '' }); }
@@ -210,7 +212,7 @@ try {
   // Image, and reusing a saved one
   await page.click('#partyStart'); await page.waitForSelector('#pForm');
   await page.click('#pForm [data-m="image"]');
-  await page.click('#pPick'); await page.setInputFiles('#pickBg', join(ROOT, 'icons/ama-id-cards.png'));
+  await page.click('#pPick'); await page.setInputFiles('#pickParty', join(ROOT, 'icons/ama-id-cards.png'));
   await page.waitForSelector('#pForm .preview-img');
   await page.fill('#pCap', 'Happy Birthday Sam!'); await page.click('#pGo'); await page.waitForSelector('#partyStop');
   const img = (await db.query(`select s.kind, s.media_path from tv_settings t join tv_slides s on s.id = t.only_slide`)).rows[0];
@@ -226,6 +228,47 @@ try {
   const endOfDay = await page.evaluate(() => { const d = new Date(); d.setHours(23, 59, 0, 0); return d.toISOString(); });
   ok(Math.abs(new Date((await db.query(`select only_until from tv_settings`)).rows[0].only_until) - new Date(endOfDay)) < 60e3, '"the rest of today" runs until 11:59 pm');
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
+
+  // A PDF of birthday designs (as exported from Canva): pick a page, or save them all
+  let pdfPath = process.env.TEST_PDF;
+  if (!pdfPath) {
+    const mk = await browser.newPage();
+    await mk.setContent(`<style>@page{size:1440px 810px;margin:0}body{margin:0}div{width:1440px;height:810px;display:flex;flex-direction:column;align-items:center;justify-content:center;font:bold 90px Arial;color:#fff;page-break-after:always}</style>
+      <div style="background:#4f8ff7">HAPPY BIRTHDAY<span style="font-size:160px">KIAN</span><span style="font-size:30px">From Australian Martial Arts Academy</span></div>
+      <div style="background:#2a2a8f">HAPPY BIRTHDAY<span style="font-size:160px">ASTRO</span></div>`);
+    pdfPath = join(tmpdir(), 'tv-test-birthdays.pdf');
+    await mk.pdf({ path: pdfPath, width: '1440px', height: '810px', printBackground: true }); await mk.close();
+  }
+  await page.click('#partyStart'); await page.waitForSelector('#pForm');
+  await page.click('#pForm [data-m="image"]');
+  await page.click('#pPick'); await page.setInputFiles('#pickParty', pdfPath);
+  await page.waitForSelector('#pForm [data-page]', { timeout: 60000 });
+  const pageNames = await page.$$eval('#pForm [data-page] span', ss => ss.map(x => x.textContent));
+  console.log('        PDF pages:', pageNames.join(', '));
+  ok(pageNames.length >= 2 && (process.env.TEST_PDF || pageNames.join() === 'Kian,Astro'), 'a PDF shows each page to pick from, named after the birthday child');
+  await page.screenshot({ path: join(SHOTS, 'tv-party-pdf.png') });
+  await page.click('#pForm [data-page="1"]'); await page.waitForSelector('#pForm .preview-img');
+  ok((await page.inputValue('#pCap')) === pageNames[1], 'picking a page gets it ready, named');
+  await page.click('#pGo'); await page.waitForSelector('#partyStop');
+  const pdfSlide = (await db.query(`select s.kind, s.media_path, s.title from tv_settings t join tv_slides s on s.id = t.only_slide`)).rows[0];
+  ok(pdfSlide.kind === 'photo' && pdfSlide.title === pageNames[1] && files.get(pdfSlide.media_path).type === 'image/jpeg', 'the chosen page goes on the TV as a full-screen image');
+  await page.click('#partyStop'); await toastSays(page, 'Back to normal');
+  const before = (await db.query(`select count(*)::int n from tv_slides where party`)).rows[0].n;
+  await page.click('#partyStart'); await page.waitForSelector('#pForm');
+  await page.click('#pForm [data-m="image"]'); await page.click('#pPick'); await page.setInputFiles('#pickParty', pdfPath);
+  await page.waitForSelector('#pSaveAll', { timeout: 60000 }); await page.click('#pSaveAll');
+  await page.waitForSelector('#pForm [data-m="saved"][aria-pressed="true"]', { timeout: 60000 });
+  ok((await db.query(`select count(*)::int n from tv_slides where party`)).rows[0].n === before + pageNames.length, '"Save all" keeps every design for next time, under Saved');
+  await page.screenshot({ path: join(SHOTS, 'tv-party-saved.png') });
+  await page.evaluate(() => document.querySelector('#dlg').close());
+
+  // PDFs in the normal slideshow: one slide per page
+  const normalBefore = (await db.query(`select count(*)::int n from tv_slides where not party and kind = 'photo'`)).rows[0].n;
+  await page.setInputFiles('#pickPhotos', pdfPath);
+  await toastSays(page, 'Added').catch(() => {});
+  await page.waitForFunction(() => { const t = document.querySelector('#toast'); return !t.hidden && /^Added/.test(t.textContent); }, null, { timeout: 180000 }).catch(() => {});
+  await page.waitForTimeout(500);
+  ok((await db.query(`select count(*)::int n from tv_slides where not party and kind = 'photo'`)).rows[0].n === normalBefore + pageNames.length, 'a PDF added under Photos becomes one slide per page');
   await tv.ctx.close(); await ctx.close();
 
   // Delete removes the file
