@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#04794b">
+<title>AMA TV</title>
+<link rel="icon" href="../icons/ama-id-cards.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
+<script src="../config.js"></script>
+<style>
+  /* Plays full screen on the dojang TV. Written for older smart TV browsers: no newer CSS or JS. */
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-family: "Source Sans 3", "Segoe UI", Arial, sans-serif; color: #fff; -webkit-font-smoothing: antialiased; }
+  body.idle, body.idle * { cursor: none !important; }
+  .layer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; transition: opacity .9s ease; overflow: hidden; }
+  .layer.on { opacity: 1; }
+  .fill { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+  .blur { background-size: cover; background-position: center; -webkit-filter: blur(40px) brightness(.5); filter: blur(40px) brightness(.5); transform: scale(1.15); }
+  .contain { background-size: contain; background-position: center; background-repeat: no-repeat; }
+  video.fill { object-fit: contain; background: #000; }
+  .caption { position: absolute; left: 4vw; bottom: 4vh; right: 4vw; font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-weight: 700; font-size: 3.6vw; line-height: 1.1; text-shadow: 0 .3vw 1.2vw rgba(0,0,0,.6); }
+
+  /* Info and live slides */
+  .card { position: absolute; left: 0; top: 0; width: 100%; height: 100%; box-sizing: border-box; padding: 11vh 7vw 9vh; display: flex; flex-direction: column; justify-content: center; }
+  .t-green { background: #04794b; color: #fff; } .t-dark { background: #0e1612; color: #e6efe9; } .t-gold { background: #f2d500; color: #16211b; } .t-light { background: #f3f6f4; color: #16211b; }
+  .card .belt { height: 1.2vh; width: 16vw; margin-bottom: 4vh; background: #141414; position: relative; }
+  .t-dark .belt, .t-green .belt { background: #f2d500; }
+  .card .kicker { font-size: 2.4vw; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; opacity: .8; margin-bottom: 1.5vh; }
+  .card h1 { font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-weight: 700; font-size: 7vw; line-height: 1.02; margin: 0 0 3vh; letter-spacing: .005em; }
+  .card .body { font-size: 3.4vw; line-height: 1.3; white-space: pre-line; }
+  .card.bgphoto { background-size: cover; background-position: center; }
+  .card.bgphoto .shade { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: linear-gradient(90deg, rgba(0,0,0,.78), rgba(0,0,0,.35)); }
+  .card.bgphoto > *:not(.shade) { position: relative; color: #fff; }
+  .big { font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-weight: 700; font-size: 11vw; line-height: 1; margin: 0 0 2vh; }
+  .sub { font-size: 3.4vw; opacity: .9; }
+  .rows { margin-top: 1vh; }
+  .rows .r { display: flex; align-items: baseline; justify-content: space-between; font-size: 3.6vw; padding: 1.6vh 0; border-bottom: .25vh solid rgba(255,255,255,.25); }
+  .t-gold .rows .r, .t-light .rows .r { border-bottom-color: rgba(0,0,0,.15); }
+  .rows .r b { font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-size: 4.2vw; }
+  .tag { display: inline-block; font-size: 2vw; font-weight: 700; padding: .4vh 1.2vw; border-radius: 99px; background: #f2d500; color: #16211b; margin-left: 1.2vw; vertical-align: middle; }
+  .names { display: flex; flex-wrap: wrap; margin: 1vh -1vw 0; }
+  .names .n { width: 50%; box-sizing: border-box; padding: 1.4vh 1vw; }
+  .names .n b { display: block; font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-size: 4vw; line-height: 1.1; }
+  .names .n span { font-size: 2.4vw; opacity: .85; }
+
+  /* Corner bits */
+  .logo { position: absolute; left: 2.2vw; top: 2.4vh; width: 5vw; height: 5vw; border-radius: 1vw; background: #fff url(../icons/ama-id-cards.png) center/86% no-repeat; z-index: 5; box-shadow: 0 .3vw 1vw rgba(0,0,0,.3); }
+  .clock { position: absolute; right: 2.4vw; top: 2.4vh; z-index: 5; font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-weight: 700; font-size: 3vw; padding: .6vh 1.2vw; border-radius: 1vw; background: rgba(0,0,0,.45); color: #fff; }
+  .dot { position: absolute; right: 1vw; bottom: 1.4vh; width: 1vw; height: 1vw; border-radius: 50%; background: #f2867d; z-index: 6; display: none; }
+  .offline .dot { display: block; }
+
+  /* Code entry and messages */
+  .screen { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: #04794b; display: flex; align-items: center; justify-content: center; text-align: center; z-index: 10; }
+  .screen .box { width: 60vw; }
+  .screen h1 { font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-size: 5vw; margin: 0 0 2vh; }
+  .screen p { font-size: 2.2vw; margin: 0 0 3vh; opacity: .9; }
+  .screen input { font: 700 5vw "Barlow Semi Condensed", Arial, sans-serif; letter-spacing: .3em; text-transform: uppercase; text-align: center; width: 36vw; padding: 1.5vh 1vw; border: 0; border-radius: 1vw; color: #16211b; }
+  .screen button { font: 700 2.6vw "Source Sans 3", Arial, sans-serif; margin-top: 3vh; padding: 1.5vh 4vw; border: 0; border-radius: 1vw; background: #f2d500; color: #16211b; cursor: pointer; }
+  .screen .err { color: #ffd9d4; font-weight: 700; min-height: 3vh; }
+  .hint { position: absolute; left: 50%; bottom: 3vh; transform: translateX(-50%); z-index: 7; background: rgba(0,0,0,.6); color: #fff; font-size: 1.8vw; padding: 1vh 2vw; border-radius: 1vw; transition: opacity .6s; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div class="logo" id="logo" style="display:none"></div>
+<div class="clock" id="clock" style="display:none"></div>
+<div class="dot" title="No connection"></div>
+<div class="hint" id="hint" style="display:none">Press OK or click for full screen</div>
+
+<div class="screen" id="codeScreen" style="display:none">
+  <form class="box" id="codeForm" autocomplete="off">
+    <h1>AMA TV</h1>
+    <p>Enter the screen code from the TV editor (Settings).</p>
+    <input id="codeInput" maxlength="12" autocapitalize="characters" spellcheck="false" aria-label="Screen code">
+    <div class="err" id="codeErr"></div>
+    <button type="submit">Start</button>
+  </form>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var CFG = window.TOOLKIT_CONFIG || {};
+  var BASE = (CFG.SUPABASE_URL || '').replace(/\/$/, '');
+  var MEDIA = BASE + '/storage/v1/object/public/tv/';
+  var POLL_MS = 60 * 1000;
+  var $ = function (id) { return document.getElementById(id); };
+  var stage = $('stage');
+  var store = {
+    get: function (k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { window.localStorage.setItem(k, v); } catch (e) { /* ignore */ } },
+    del: function (k) { try { window.localStorage.removeItem(k); } catch (e) { /* ignore */ } }
+  };
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+  var code = null, feed = null, version = null, pending = null, playlist = [], index = -1, timer = null, layerOn = null;
+
+  // ---------- Screen code ----------
+  var params = (function () { var o = {}; location.search.replace(/^\?/, '').split('&').forEach(function (p) { if (!p) return; var kv = p.split('='); o[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || ''); }); return o; })();
+  if (params.code) { store.set('tvCode', params.code.toUpperCase()); history.replaceState(null, '', location.pathname); }
+  code = store.get('tvCode');
+  function askCode(msg) {
+    clearTimeout(timer); stage.innerHTML = '';
+    $('codeScreen').style.display = ''; $('codeErr').textContent = msg || '';
+    var i = $('codeInput'); i.value = ''; setTimeout(function () { i.focus(); }, 50);
+  }
+  $('codeForm').onsubmit = function (e) {
+    e.preventDefault();
+    var c = $('codeInput').value.replace(/\s+/g, '').toUpperCase();
+    if (!c) return;
+    code = c; store.set('tvCode', c); $('codeScreen').style.display = 'none';
+    load(true);
+  };
+
+  // ---------- Getting the slides ----------
+  function fetchFeed() {
+    return fetch(BASE + '/rest/v1/rpc/tv_feed', {
+      method: 'POST', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'apikey': CFG.SUPABASE_KEY },
+      body: JSON.stringify({ p_code: code })
+    }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+  }
+  function load(first) {
+    if (!code) return askCode();
+    fetchFeed().then(function (f) {
+      document.body.className = document.body.className.replace(/\boffline\b/g, '');
+      if (f && f.error === 'wrong_code') { store.del('tvCode'); code = null; store.del('tvFeed'); return askCode(first ? 'That code is not right. Check it in the TV editor.' : 'The screen code was changed. Enter the new one.'); }
+      store.set('tvFeed', JSON.stringify(f));
+      apply(f, first);
+    }).catch(function () {
+      document.body.className += ' offline';
+      if (first || !feed) { var c = store.get('tvFeed'); if (c) { try { apply(JSON.parse(c), true); } catch (e) { /* ignore */ } } else showMessage('Connecting...', 'Check the TV is on the internet.'); }
+    });
+  }
+  function apply(f, first) {
+    if (first || !feed) { feed = f; version = f.version; build(); setCorners(); next(); return; }
+    if (f.version !== version || JSON.stringify(f.live) !== JSON.stringify(feed.live) || JSON.stringify(f.settings) !== JSON.stringify(feed.settings)) pending = f;   // switch over at the next slide
+  }
+
+  // ---------- Building the playlist ----------
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  function d(iso) { var p = String(iso).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function longDate(iso) { var x = d(iso); return DAYS[x.getDay()] + ' ' + x.getDate() + ' ' + MONTHS[x.getMonth()]; }
+  function shortDate(iso) { var x = d(iso); return DAYS[x.getDay()].slice(0, 3) + ' ' + x.getDate() + ' ' + MONTHS[x.getMonth()].slice(0, 3); }
+  function untilText(iso) {
+    var days = Math.round((d(iso) - d(feed.today)) / 86400000);
+    if (days <= 0) return 'Today'; if (days === 1) return 'Tomorrow';
+    if (days < 14) return days + ' days to go';
+    var w = Math.round(days / 7); return w + ' weeks to go';
+  }
+  function build() {
+    var live = feed.live || {}, out = [];
+    (feed.slides || []).forEach(function (s) {
+      if (s.kind !== 'live') { out.push(s); return; }
+      if (s.live_kind === 'next_grading' && live.next_grading && live.next_grading.date) out.push(s);
+      if (s.live_kind === 'sessions' && live.sessions && live.sessions.length) out.push(s);
+      if (s.live_kind === 'congrats' && live.congrats && live.congrats.length) {
+        for (var i = 0; i < live.congrats.length; i += 10) out.push({ id: s.id + ':' + i, kind: 'live', live_kind: 'congrats', title: s.title, theme: s.theme, seconds: s.seconds, page: live.congrats.slice(i, i + 10) });
+      }
+    });
+    playlist = out;
+  }
+
+  // ---------- Showing a slide ----------
+  function setCorners() {
+    var st = feed.settings || {};
+    $('logo').style.display = st.show_logo ? '' : 'none';
+    $('clock').style.display = st.show_clock ? '' : 'none';
+    tick();
+  }
+  function tick() {
+    var n = new Date(), h = n.getHours(), m = n.getMinutes();
+    $('clock').textContent = ((h % 12) || 12) + ':' + (m < 10 ? '0' : '') + m + (h < 12 ? ' am' : ' pm');
+  }
+  setInterval(tick, 15000);
+
+  function themeOf(s) { return 't-' + (s.theme || 'green'); }
+  function html(s) {
+    var live = feed.live || {};
+    if (s.kind === 'photo') return '<div class="fill blur" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')"></div><div class="fill contain" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')"></div>' + (s.title ? '<div class="caption">' + esc(s.title) + '</div>' : '');
+    if (s.kind === 'text') {
+      var bg = s.media_path ? ' bgphoto" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')' : '';
+      return '<div class="card ' + themeOf(s) + bg + '">' + (s.media_path ? '<div class="shade"></div>' : '') + '<div class="belt"></div>' + (s.title ? '<h1>' + esc(s.title) + '</h1>' : '') + (s.body ? '<div class="body">' + esc(s.body) + '</div>' : '') + '</div>';
+    }
+    if (s.live_kind === 'next_grading') {
+      var g = live.next_grading;
+      return '<div class="card ' + themeOf(s) + '"><div class="belt"></div><div class="kicker">' + esc(s.title || 'Next black belt grading') + '</div><div class="big">' + esc(longDate(g.date)) + '</div><div class="sub">' + esc(untilText(g.date)) + '</div></div>';
+    }
+    if (s.live_kind === 'sessions') {
+      return '<div class="card ' + themeOf(s) + '"><div class="belt"></div><div class="kicker">' + esc(s.title || 'Black belt prep sessions') + '</div><div class="rows">' +
+        live.sessions.map(function (x) { return '<div class="r"><b>' + esc(longDate(x.date)) + '</b><span>' + (x.signoff ? 'Sign-off<span class="tag">Must attend</span>' : 'Session ' + esc(x.number)) + '</span></div>'; }).join('') + '</div></div>';
+    }
+    if (s.live_kind === 'congrats') {
+      return '<div class="card ' + themeOf(s) + '"><div class="belt"></div><h1>' + esc(s.title || 'Congratulations') + '</h1><div class="names">' +
+        s.page.map(function (x) { return '<div class="n"><b>' + esc(x.name) + '</b><span>' + esc(x.rank || '') + '</span></div>'; }).join('') + '</div></div>';
+    }
+    return '';
+  }
+  // Shrink text that would overflow the screen
+  function fit(el) {
+    var card = el.querySelector('.card'); if (!card) return;
+    var parts = card.querySelectorAll('h1, .body, .big, .names, .rows'), scale = 1, n = 0;
+    while (card.scrollHeight > card.clientHeight + 2 && n < 12) {
+      scale *= 0.9; n++;
+      for (var i = 0; i < parts.length; i++) parts[i].style.fontSize = '';
+      for (var j = 0; j < parts.length; j++) { var fs = parseFloat(getComputedStyle(parts[j]).fontSize); parts[j].style.fontSize = (fs * scale) + 'px'; }
+    }
+  }
+  function showMessage(title, sub) {
+    clearTimeout(timer);
+    stage.innerHTML = '<div class="layer on"><div class="card t-green"><div class="belt"></div><h1>' + esc(title) + '</h1><div class="body">' + esc(sub || '') + '</div></div></div>';
+  }
+  function next() {
+    clearTimeout(timer);
+    if (pending) { feed = pending; version = pending.version; pending = null; build(); setCorners(); index = -1; }
+    if (!playlist.length) { showMessage('AMA Marrickville', 'No slides yet. Add some in the TV editor.'); timer = setTimeout(next, 30000); return; }
+    index = (index + 1) % playlist.length;
+    var s = playlist[index];
+    var layer = document.createElement('div');
+    layer.className = 'layer';
+    layer.setAttribute('data-slide', s.id);
+    layer.innerHTML = html(s);
+    stage.appendChild(layer);
+    var secs = (s.seconds || (feed.settings && feed.settings.seconds) || 10) * 1000;
+    var shown = false;
+    var reveal = function () {
+      if (shown) return; shown = true;
+      fit(layer);
+      // fade in, then remove the old slide
+      setTimeout(function () {
+        layer.className = 'layer on';
+        var old = layerOn; layerOn = layer;
+        if (old) setTimeout(function () { if (old.parentNode) old.parentNode.removeChild(old); }, 1000);
+      }, 30);
+    };
+    if (s.kind === 'video') {
+      var v = document.createElement('video');
+      v.className = 'fill'; v.muted = true; v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.autoplay = true; v.preload = 'auto';
+      v.src = MEDIA + s.media_path;
+      v.onended = function () { next(); };
+      v.onerror = function () { timer = setTimeout(next, 500); };
+      layer.appendChild(v);
+      var started = v.play && v.play(); if (started && started.catch) started.catch(function () { timer = setTimeout(next, 3000); });
+      reveal();
+      timer = setTimeout(next, s.seconds ? secs : 10 * 60 * 1000);   // a video plays to the end (or its set time)
+      return;
+    }
+    if (s.kind === 'photo' || s.media_path) {
+      var img = new Image(); img.onload = reveal; img.onerror = function () { reveal(); };
+      img.src = MEDIA + s.media_path;
+      setTimeout(reveal, 4000);
+    } else reveal();
+    // load the next photo early
+    var nx = playlist[(index + 1) % playlist.length];
+    if (nx && nx.media_path && nx.kind !== 'video') { var pre = new Image(); pre.src = MEDIA + nx.media_path; }
+    timer = setTimeout(next, secs);
+  }
+
+  // ---------- Full screen, cursor, keeping awake ----------
+  function fullScreen() {
+    var el = document.documentElement, f = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (f && !(document.fullscreenElement || document.webkitFullscreenElement)) { try { f.call(el); } catch (e) { /* ignore */ } }
+    $('hint').style.display = 'none';
+    if (navigator.wakeLock && navigator.wakeLock.request) navigator.wakeLock.request('screen').catch(function () {});
+  }
+  document.addEventListener('keydown', function (e) {
+    if ($('codeScreen').style.display !== 'none') return;
+    if (e.key === 'Enter' || e.keyCode === 13) fullScreen();
+    if (e.key === 'ArrowRight' || e.keyCode === 39) next();                       // remote: next slide
+    if (e.key === 'ArrowLeft' || e.keyCode === 37) { index = Math.max(-1, index - 2); next(); }   // remote: back
+  });
+  document.addEventListener('click', function () { if ($('codeScreen').style.display === 'none') fullScreen(); });
+  var idleT;
+  function wake() { document.body.className = document.body.className.replace(/\bidle\b/g, ''); clearTimeout(idleT); idleT = setTimeout(function () { document.body.className += ' idle'; }, 3000); }
+  document.addEventListener('mousemove', wake); wake();
+  if (!(document.fullscreenElement || document.webkitFullscreenElement)) { $('hint').style.display = ''; setTimeout(function () { $('hint').style.display = 'none'; }, 12000); }
+
+  // Reload once a night (picks up updates and keeps the TV browser fresh)
+  setInterval(function () { var n = new Date(); if (n.getHours() === 3 && n.getMinutes() < 2) location.reload(); }, 60000);
+  setInterval(function () { if (code) load(false); }, POLL_MS);
+  window.__tv = { next: next, reload: function () { load(false); }, state: function () { return { index: index, count: playlist.length, ids: playlist.map(function (s) { return s.id; }) }; } };   // for testing
+  load(true);
+})();
+</script>
+</body>
+</html>
