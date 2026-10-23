@@ -188,7 +188,9 @@
   var screenId = store.get('tvScreen');
   if (!screenId) { screenId = 'tv-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); store.set('tvScreen', screenId); }
   // Tell the editor this TV is on and what it's showing; reload if "Refresh the TV" was pressed
-  function showingNow() {
+  var kioskNote = '';   // what the FreeKiosk link last did, shown in the editor's status card
+  function showingNow() { var t = showingNow0(); return kioskNote ? t + ' [FreeKiosk: ' + kioskNote + ']' : t; }
+  function showingNow0() {
     if (feed && feed.blackout) return 'Blacked out';
     if (signinOpen) return 'Sign-in page';
     if (feed && feed.off) return 'Screen off (scheduled)';
@@ -538,25 +540,30 @@
   // where taps do nothing. That page (?kiosk=main) goes back to the sign-in page when the party is over.
   var kioskDone = null, kioskTry = 0;
   function kioskApi(st, path, body) {
-    var key = st.kiosk_key, opts = { method: 'POST', body: JSON.stringify(body || {}) };
-    if (key) { opts.mode = 'cors'; opts.headers = { 'Content-Type': 'application/json', 'X-Api-Key': key }; }
-    else { opts.mode = 'no-cors'; opts.headers = { 'Content-Type': 'text/plain' }; }   // works even without CORS headers
-    return fetch('http://127.0.0.1:' + (st.kiosk_port || 8080) + path, opts);
+    var headers = { 'Content-Type': 'application/json' };
+    if (st.kiosk_key) headers['X-Api-Key'] = st.kiosk_key;
+    return fetch('http://127.0.0.1:' + (st.kiosk_port || 8080) + path, { method: 'POST', mode: 'cors', headers: headers, body: JSON.stringify(body || {}) })
+      .then(function (r) { if (!r.ok) throw new Error('reply ' + r.status); return r; });
   }
   function kioskSync(f) {
     var st = (f && f.settings) || {};
-    if (st.signin_open !== 'kiosk' || !st.signin || PREVIEW) return;
-    var lock = !!(f.only || f.blackout);
+    var lock = !!(f && (f.only || f.blackout));
+    if (PREVIEW) return;
+    if (st.signin_open !== 'kiosk') { kioskNote = lock ? 'off (Settings: A tap is not "Handled by FreeKiosk")' : ''; return; }
+    if (!st.signin) { kioskNote = 'no sign-in link in Settings'; return; }
+    if (KIOSK_MAIN) kioskNote = lock ? 'main screen, party locked' : '';
     if (KIOSK_MAIN) { if (!lock) { try { location.href = st.signin; } catch (e) { /* ignore */ } } return; }   // over: back to sign-in
-    if (!lock) { kioskDone = null; return; }
+    if (!lock) { kioskDone = null; kioskNote = 'ready (screensaver)'; return; }
     var key = f.only ? 'party:' + ((f.slides[0] || {}).id || '') : 'blackout';
     if (kioskDone === key || Date.now() - kioskTry < 30000) return;
-    kioskTry = Date.now();
+    kioskTry = Date.now(); kioskNote = 'sending...';
     var main = location.protocol + '//' + location.host + location.pathname + '?code=' + encodeURIComponent(code) + (LOC ? '&loc=' + encodeURIComponent(LOC) : '') + '&kiosk=main';
-    kioskApi(st, '/api/url', { url: main }).then(function () {
-      kioskDone = key;
+    var t0 = new Date(), hm = t0.getHours() + ':' + (t0.getMinutes() < 10 ? '0' : '') + t0.getMinutes();
+    kioskApi(st, '/api/url', { url: main }).then(function (r) {
+      kioskDone = key; kioskNote = 'sent at ' + hm + (r && r.type !== 'opaque' ? ' (reply ' + r.status + ')' : '');
+      setTimeout(checkIn, 500);
       return kioskApi(st, '/api/wake');   // close the screensaver so the main screen (the party) shows
-    })['catch'](function () { /* the REST API isn't on, or isn't reachable: the screensaver still comes back after its delay */ });
+    })['catch'](function (e) { kioskNote = 'could not reach it at ' + hm + ' (' + (e && e.message || e) + ')'; setTimeout(checkIn, 500); });   // the screensaver still comes back after its delay
   }
 
   // ---------- Sign-in mode (tablets): the sign-in page until nobody has touched it for a while, then the slides ----------

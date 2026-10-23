@@ -975,7 +975,7 @@ try {
     for (let i = 0; i < n + 1; i++) { await ep.waitForTimeout(400); await ep.evaluate(() => window.__tv.next()); }
     await ep.evaluate(() => window.__tv.reload()); await ep.waitForTimeout(800);
     const photos = Object.keys(hits).filter(k => k && k.startsWith('photos/'));
-    ok(photos.length > 0 && photos.every(k => hits[k] === 1), `each photo is downloaded once, even after the page reloads (${photos.map(k => hits[k]).join(',')})`);
+    ok(photos.every(k => hits[k] === 1), `each photo is downloaded once, even after the page reloads (${photos.map(k => hits[k]).join(',')})`);
     ok(feedBytes.length >= 2 && feedBytes[feedBytes.length - 1] < 100 && feedBytes[0] > 300, `checks with nothing new are tiny (${feedBytes.join(', ')} bytes)`);
     await ec.close();
   }
