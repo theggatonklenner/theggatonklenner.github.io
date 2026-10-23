@@ -402,6 +402,14 @@ try {
   ok(bk.length === 1 && bk[0].title === 'Happy Birthday Kian!' && new Date(bk[0].starts_at).getHours() === 14 && new Date(bk[0].ends_at).getHours() === 17, 'the party is booked with its name and times');
   await page.waitForSelector('#party .booked', { timeout: 5000 }).catch(() => {});
   ok((await page.textContent('#party')).includes('Happy Birthday Kian!') && (await page.textContent('#party')).includes('2:00'), 'the booking shows under Party mode');
+  // Edit it: the words and the times
+  await page.click('#party [data-editbk]'); await page.waitForSelector('#bkHead');
+  ok(await page.inputValue('#bkHead') === 'Happy Birthday Kian!' && await page.inputValue('#bkFrom') === '14:00' && await page.inputValue('#bkTo') === '17:00', 'Edit opens the booking with its words and times');
+  await page.fill('#bkHead', 'Happy Birthday Kian!!'); await page.fill('#bkLine', 'Turning 8'); await page.fill('#bkFrom', '13:00'); await page.fill('#bkTo', '15:30');
+  await page.click('#bkGo'); await toastSays(page, 'Saved');
+  const bke = (await db.query(`select b.*, s.title, s.body from tv_party_bookings b join tv_slides s on s.id = b.slide_id where s.display = 'tv' and b.starts_at > now()`)).rows;
+  ok(bke.length === 1 && bke[0].title === 'Happy Birthday Kian!!' && bke[0].body === 'Turning 8' && new Date(bke[0].starts_at).getHours() === 13 && new Date(bke[0].ends_at).getMinutes() === 30, 'editing a booked party changes its words and times');
+  await page.click('#party [data-editbk]'); await page.waitForSelector('#bkHead'); await page.fill('#bkFrom', '14:00'); await page.fill('#bkTo', '17:00'); await page.fill('#bkHead', 'Happy Birthday Kian!'); await page.click('#bkGo'); await toastSays(page, 'Saved');
   await page.click('#partyBook'); await page.waitForSelector('#bDate'); await page.click('#pForm [data-m="message"]'); await page.waitForSelector('#pName');
   await page.fill('#bDate', tmr); await page.fill('#bFrom', '16:00'); await page.fill('#bTo', '18:00'); await page.fill('#pName', 'Ava');
   await page.click('#pGo');
@@ -713,6 +721,10 @@ try {
     await page.fill('#bDate', d2); await page.fill('#bFrom', '10:00'); await page.fill('#bTo', '12:00'); await page.fill('#pName', 'Noah'); await page.click('#pGo'); await toastSays(page, 'Booked');
     const bks = (await db.query(`select s.display from tv_party_bookings b join tv_slides s on s.id = b.slide_id where b.starts_at > now() order by s.display`)).rows.map(r => r.display).join();
     ok(bks === 'tablet,tv', 'booking a party books it on both screens');
+    await page.waitForSelector('#party [data-editbk]'); await page.click('#party [data-editbk]'); await page.waitForSelector('#bkTo');
+    await page.fill('#bkFrom', '11:00'); await page.fill('#bkTo', '13:00'); await page.fill('#bkHead', 'Happy Birthday Noah and Mia!'); await page.click('#bkGo'); await toastSays(page, 'Saved');
+    const bke2 = (await db.query(`select b.starts_at, s.title from tv_party_bookings b join tv_slides s on s.id = b.slide_id where b.starts_at > now()`)).rows;
+    ok(bke2.length === 2 && bke2.every(r => new Date(r.starts_at).getHours() === 11 && r.title === 'Happy Birthday Noah and Mia!'), 'editing a linked booking changes it on both screens');
     await page.waitForSelector('#party [data-unbook]'); await page.click('#party [data-unbook]'); await page.click('#cfYes'); await toastSays(page, 'cancelled');
     await page.waitForTimeout(500);
     ok((await db.query(`select count(*)::int n from tv_party_bookings where starts_at > now()`)).rows[0].n === 0, 'cancelling it cancels both');

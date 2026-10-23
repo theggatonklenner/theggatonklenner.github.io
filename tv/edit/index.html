@@ -898,7 +898,7 @@ function drawParty() {
     box.className = 'card on';
     box.innerHTML = `<div class="row" style="justify-content:space-between"><h3>Party mode is on</h3><span class="chip" style="background:var(--on-gold);color:var(--gold)">${act.some(b => findSlide(b.slide_id).linked) ? 'TV + tablets' : state.display === 'tv' ? 'TV' : 'Tablets'}</span></div>
       ${act.map((b, i) => { const sl = findSlide(b.slide_id); return `<div class="row" style="align-items:center">${thumb(sl)}<p class="grow" style="margin:0">${sl.linked ? 'The TV and the tablets' : here()[0].toUpperCase() + here().slice(1)}${sl.locations && sl.locations.length ? ` at <b>${esc(locName(sl.locations))}</b>` : ''} ${sl.linked || state.display === 'tablet' ? 'are' : 'is'} showing only <b>${esc(slideName(sl))}</b> until <b>${timeText(b.ends_at)}</b>. Then ${sl.linked ? 'they go' : 'it goes'} back to the slideshow by itself.</p></div>
-        <div class="row"><button class="btn primary" data-stop="${b.id}"${i ? '' : ' id="partyStop"'}>Back to normal now</button><button class="btn" data-more="${b.id}"${i ? '' : ' id="partyMore"'}>1 more hour</button></div>`; }).join('')}
+        <div class="row"><button class="btn primary" data-stop="${b.id}"${i ? '' : ' id="partyStop"'}>Back to normal now</button><button class="btn" data-more="${b.id}"${i ? '' : ' id="partyMore"'}>1 more hour</button><button class="btn" data-editbk="${b.id}">Edit</button></div>`; }).join('')}
       <div class="row"><button class="btn sm" id="partyStart">${state.locations ? 'Start one somewhere else' : 'Start a different one'}</button>${state.bookings ? '<button class="btn sm" id="partyBook">Book for later</button>' : ''}</div>${bookedList()}`;
     $$('#party [data-stop]').forEach(x => x.onclick = async () => { const b = act.find(y => y.id === x.dataset.stop); if (await moveBooking(b, new Date().toISOString())) toast('Back to normal. It switches within a few seconds.', 4000); });
     $$('#party [data-more]').forEach(x => x.onclick = async () => { const b = act.find(y => y.id === x.dataset.more), t = new Date(new Date(b.ends_at).getTime() + 3600e3).toISOString(); if (await moveBooking(b, t)) toast(`Party until ${timeText(t)}`); });
@@ -911,6 +911,7 @@ function drawParty() {
     $('#partyStart').onclick = () => openParty();
     if ($('#partyBook')) $('#partyBook').onclick = () => openParty({ book: true });
   }
+  $$('#party [data-editbk]').forEach(b => b.onclick = () => editBooking(state.bookings.find(x => x.id === b.dataset.editbk)));
   $$('#party [data-unbook]').forEach(b => b.onclick = async () => {
     const bk = state.bookings.find(x => x.id === b.dataset.unbook);
     if (!await confirmBox(`Cancel the party booked for ${whenText(bk.starts_at)}?`, 'Cancel booking')) return;
@@ -929,8 +930,83 @@ function bookedList(skip) {
   return `<div class="label" style="margin-top:12px">Booked</div><ul class="booked">${list.map(b => {
     const sl = state.partySlides.concat(state.slides).find(x => x.id === b.slide_id) || {};
     const sameDay = new Date(b.starts_at).toDateString() === new Date(b.ends_at).toDateString();
-    return `<li>${thumb(sl)}<div class="grow"><b>${esc(slideName(sl))}</b>${sl.linked ? ' <span class="tag muted">+ ' + otherNoun() + '</span>' : ''}${state.locations ? ` <span class="tag">${esc(locName(sl.locations))}</span>` : ''}<div class="when">${esc(whenText(b.starts_at))} to ${esc(sameDay ? timeText(b.ends_at) : whenText(b.ends_at))}</div></div><button class="btn sm" data-unbook="${b.id}">Cancel</button></li>`;
+    return `<li>${thumb(sl)}<div class="grow"><b>${esc(slideName(sl))}</b>${sl.linked ? ' <span class="tag muted">+ ' + otherNoun() + '</span>' : ''}${state.locations ? ` <span class="tag">${esc(locName(sl.locations))}</span>` : ''}<div class="when">${esc(whenText(b.starts_at))} to ${esc(sameDay ? timeText(b.ends_at) : whenText(b.ends_at))}</div></div><button class="btn sm" data-editbk="${b.id}">Edit</button><button class="btn sm" data-unbook="${b.id}">Cancel</button></li>`;
   }).join('')}</ul>`;
+}
+// Edit a booked party (or one on now): what it says, where, and when. The linked copy on the other screen changes too.
+const hm = d => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+function editBooking(b) {
+  if (!b) return;
+  const sl = findSlide(b.slide_id), on = new Date(b.starts_at) <= new Date();
+  const st = new Date(b.starts_at), en = new Date(b.ends_at);
+  // A poster made from a template: its title is "Name (Template)", so the name can be changed and the poster redrawn
+  const pm = sl.kind === 'photo' && /^(.*) \((.+)\)$/.exec(sl.title || ''), tpl = pm && (state.templates || []).find(t => t.title === pm[2]);
+  const isMsg = sl.kind === 'text';
+  openDlg(`<form class="dlg" id="bkForm">
+    <div class="dlg-head"><div><h3>Edit party</h3><p class="hint">${on ? 'On now.' : 'Booked.'}${sl.linked ? ' Changes the ' + otherNoun() + ' too.' : ''}</p></div><button class="x" data-close>Close</button></div>
+    ${tpl ? `<div class="field"><label for="bkName">Birthday child's name</label><input type="text" id="bkName" maxlength="40" autocomplete="off" value="${esc(pm[1])}"></div>
+      <div class="prevs"><canvas class="posterprev${state.display === 'tablet' && hasTablet(tpl) ? ' up' : ''}" id="bkCanvas" width="1920" height="1080" aria-label="Poster preview"></canvas></div>`
+    : isMsg ? `<div class="field"><label for="bkHead">Heading</label><input type="text" id="bkHead" maxlength="120" value="${esc(sl.title || '')}"></div>
+      <div class="field"><label for="bkLine">Second line (optional)</label><input type="text" id="bkLine" maxlength="160" value="${esc(sl.body || '')}"></div>`
+    : `<div class="row" style="align-items:center">${thumb(sl)}<p class="grow hint" style="margin:0"><b>${esc(slideName(sl))}</b>. To show a different image, cancel this and book again.</p></div>`}
+    ${state.locations && state.locations.length ? `<div class="field"><label for="bkWhere">Where</label><select id="bkWhere"><option value="">All locations</option>${state.locations.map(l => `<option value="${esc(l.slug)}"${(sl.locations || [])[0] === l.slug ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>` : ''}
+    <div class="grid2">
+      <div class="field"><label for="bkDate">Date</label><input type="date" id="bkDate" value="${ymd(st)}"${on ? ' disabled' : ` min="${today()}"`}></div><span></span>
+      <div class="field"><label for="bkFrom">Starts</label><input type="time" id="bkFrom" value="${hm(st)}"${on ? ' disabled' : ''}></div>
+      <div class="field"><label for="bkTo">Ends</label><input type="time" id="bkTo" value="${hm(en)}"></div></div>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="bkGo">Save</button></div>
+  </form>`);
+  if (tpl) { const draw = () => drawPoster($('#bkCanvas'), variant(tpl, state.display), $('#bkName').value); $('#bkName').oninput = draw; draw(); }
+  $('#bkForm').onsubmit = async e => {
+    e.preventDefault();
+    if (!$('#bkTo').value) return toast('Choose the end time.');
+    const where = $('#bkWhere') ? $('#bkWhere').value : null, locs = where ? [where] : null;
+    let starts = st, until;
+    if (on) { const [h, m] = $('#bkTo').value.split(':').map(Number); until = new Date(); until.setHours(h, m, 0, 0); if (until <= new Date()) until.setDate(until.getDate() + 1); }
+    else {
+      const dd = $('#bkDate').value, f = $('#bkFrom').value, t = $('#bkTo').value;
+      if (!dd || !f || !t) return toast('Fill in the date, start and end times.');
+      starts = new Date(`${dd}T${f}`); until = new Date(`${dd}T${t}`);
+      if (until <= starts) until.setDate(until.getDate() + 1);   // ends after midnight
+      if (until <= new Date()) return toast('That time has already passed.');
+    }
+    const sameWhere = x => { const bl = findSlide(x.slide_id).locations; return !where || !bl || !bl.length || bl.includes(where); };
+    const clash = (state.bookings || []).find(x => x.id !== b.id && x.slide_id !== sl.linked && new Date(x.starts_at) < until && new Date(x.ends_at) > starts && sameWhere(x));
+    if (clash) return toast(`Another party is booked then${where ? ' at ' + locName([where]) : ''} (${whenText(clash.starts_at)} to ${timeText(clash.ends_at)}).`, 6000);
+    const ids = [sl.id].concat(sl.linked ? [sl.linked] : []);
+    $('#bkGo').disabled = true;
+    try {
+      // What it shows
+      if (tpl) {
+        const nm = $('#bkName').value.trim();
+        if (!nm) throw new Error("Type the birthday child's name.");
+        if (nm !== pm[1]) {
+          toast('Making the poster...', 0);
+          const old = [sl.media_path];
+          const mk = async d => upload('photos', await posterBlob(variant(tpl, d), nm, 'image/jpeg'), 'jpg', 'image/jpeg');
+          const title = `${nm} (${tpl.title})`;
+          let r = await sb.from('tv_slides').update({ title, media_path: await mk(state.display) }).eq('id', sl.id); if (r.error) throw r.error;
+          if (sl.linked) {
+            const o = await sb.from('tv_slides').select('media_path').eq('id', sl.linked).maybeSingle();
+            if (o.data && o.data.media_path) old.push(o.data.media_path);
+            r = await sb.from('tv_slides').update({ title, media_path: await mk(other()) }).eq('id', sl.linked); if (r.error) throw r.error;
+          }
+          sb.storage.from('tv').remove(old.filter(Boolean)).catch(() => {});
+        }
+      } else if (isMsg) {
+        const head = $('#bkHead').value.trim();
+        if (!head) throw new Error('Type the heading.');
+        const r = await sb.from('tv_slides').update({ title: head, body: $('#bkLine').value.trim() || null }).in('id', ids); if (r.error) throw r.error;
+      }
+      // Where
+      if (state.locations) { const r = await sb.from('tv_slides').update({ locations: locs }).in('id', ids); if (r.error) throw r.error; }
+      // When (the other screen's booking has the same start time)
+      const times = { starts_at: starts.toISOString(), ends_at: until.toISOString() };
+      let r = await sb.from('tv_party_bookings').update(times).eq('id', b.id); if (r.error) throw r.error;
+      if (sl.linked) { r = await sb.from('tv_party_bookings').update(times).eq('slide_id', sl.linked).eq('starts_at', b.starts_at); if (r.error) throw r.error; }
+    } catch (er) { $('#bkGo').disabled = false; return toast('Not saved: ' + (er.message || er), 6000); }
+    dlg.close(); toast(on ? 'Saved. The screens update within a few seconds.' : 'Saved', 4000); load();
+  };
 }
 async function moveBooking(b, ends, noReload) {
   // Ending it now: the end must stay after the start
