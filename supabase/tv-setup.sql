@@ -242,6 +242,7 @@ create table if not exists public.tv_screens (
 alter table public.tv_screens add column if not exists loaded_at timestamptz;
 alter table public.tv_screens add column if not exists display text not null default 'tv';   -- the TV or a tablet
 alter table public.tv_screens add column if not exists name text;
+alter table public.tv_screens add column if not exists blackout boolean not null default false;   -- just this device blacked out
 alter table public.tv_screens add column if not exists location text references public.tv_locations (slug) on update cascade on delete set null;                              -- e.g. "Front desk", given in the editor
 alter table public.tv_screens add column if not exists first_seen timestamptz not null default now();   -- server time of the first check-in after the page loaded
 alter table public.tv_screens enable row level security;
@@ -346,6 +347,7 @@ create or replace function public.tv_feed_full(p_code text, p_screen text defaul
 declare
   s public.tv_settings%rowtype;
   loc text;   -- this device's location (set in the editor, or from its link)
+  dev_dark boolean := false;   -- this device blacked out on its own
   today date := (now() at time zone 'Australia/Sydney')::date;
   slides jsonb; live jsonb := '{}'::jsonb; v jsonb; changed timestamptz; one_slide jsonb;
   one_id uuid; one_until timestamptz; one_changed timestamptz;
@@ -360,11 +362,11 @@ begin
   if not found then
     return jsonb_build_object('error', 'wrong_code');
   end if;
-  select sc.location into loc from public.tv_screens sc where sc.screen_id = p_screen;
+  select sc.location, coalesce(sc.blackout, false) into loc, dev_dark from public.tv_screens sc where sc.screen_id = p_screen;
   if loc is null then select l.slug into loc from public.tv_locations l where l.slug = lower(trim(coalesce(p_loc, ''))); end if;
 
-  -- Blacked out from the remote or the editor: a black screen, whatever else is on
-  if s.blackout then
+  -- Blacked out from the remote or the editor (the whole screen, or just this device): black, whatever else is on
+  if s.blackout or dev_dark then
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open,
         'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn),
@@ -537,6 +539,20 @@ begin
     'cmd', case when p_after is not null and s.remote_seq > p_after and s.remote_at > now() - interval '30 seconds' then s.remote_cmd end);
 end $$;
 grant execute on function public.tv_remote_poll(text, text, bigint, jsonb) to anon, authenticated;
+
+-- Black out (or turn back on) one device. Devices with the remote open hear about it straight away.
+create or replace function public.tv_screen_blackout(p_screen text, p_on boolean)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare d text;
+begin
+  if not public.tv_can('remote') then raise exception 'Your login doesn''t have TV access' using errcode = '42501'; end if;
+  update public.tv_screens set blackout = coalesce(p_on, false) where screen_id = p_screen returning display into d;
+  if d is null then raise exception 'That device isn''t here any more'; end if;
+  update public.tv_settings set remote_seq = remote_seq + 1, remote_at = now(), remote_cmd = jsonb_build_object('cmd', 'refresh') where display = d;
+  return jsonb_build_object('blackout', coalesce(p_on, false));
+end $$;
+revoke all on function public.tv_screen_blackout(text, boolean) from public, anon;
+grant execute on function public.tv_screen_blackout(text, boolean) to authenticated;
 
 -- ---------- Photos and videos ----------
 -- Files are public by link (the TV shows them without signing in); names are random, and only staff can add,

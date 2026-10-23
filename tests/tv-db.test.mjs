@@ -349,6 +349,16 @@ ok(!(await tryAs('tate@ama.test', `update tv_settings set signin_url = 'javascri
 await as('tate@ama.test', () => db.exec(`update tv_settings set signin_url = null, signin_idle = 60 where id = 2`));
 
 ok((await feedNow()).settings.battery_warn === 20, 'screens get the low battery level (20% to start)');
+console.log('\nBlack out one device');
+await as(null, () => db.query(`select tv_checkin($1, 'dark-dev-01', 'x', now(), '{}'::jsonb)`, [code]));
+await as(null, () => db.query(`select tv_checkin($1, 'lit-dev-001', 'x', now(), '{}'::jsonb)`, [code]));
+await as('remote@ama.test', () => db.query(`select tv_screen_blackout('dark-dev-01', true)`));
+ok((await feedAt('dark-dev-01', null)).blackout === true && !(await feedAt('lit-dev-001', null)).blackout, 'one device can be blacked out on its own');
+ok(!(await tryAs('nobody@ama.test', `select tv_screen_blackout('dark-dev-01', false)`)).ok, 'only people with TV access can');
+await as('tate@ama.test', () => db.query(`select tv_screen_blackout('dark-dev-01', false)`));
+ok(!(await feedAt('dark-dev-01', null)).blackout, 'and turn it back on');
+await db.exec(`delete from tv_screens where screen_id in ('dark-dev-01', 'lit-dev-001'); update tv_settings set remote_until = null`);
+
 console.log('\nSaving egress');
 const full1 = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
 const same1 = (await as(null, () => db.query(`select tv_feed($1, null, null, $2) f`, [code, full1.hash]))).rows[0].f;

@@ -1016,6 +1016,33 @@ try {
     await ctx.close(); await tb.x.close();
   }
 
+  // Black out one device
+  console.log('\nBlack out one device');
+  {
+    const mk = async () => { const x = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+      await x.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+      await x.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+      const p = await x.newPage(); await p.goto(BASE + `/tv/index.html?code=${CODE}`); await p.waitForSelector('.layer.on');
+      await p.evaluate(() => window.__tv.checkIn()); await p.waitForTimeout(500); return { x, p }; };
+    const a1 = await mk(), a2 = await mk();
+    const id1 = await a1.p.evaluate(() => localStorage.getItem('tvScreen'));
+    ({ ctx, page } = await context({ width: 390, height: 844 }));
+    await page.goto(BASE + '/tv/edit/index.html');
+    await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+    await page.waitForSelector(`#status [data-dark-tv="${id1}"]`);
+    await page.click(`#status [data-dark-tv="${id1}"]`); await toastSays(page, 'goes black');
+    await page.waitForFunction(id => (document.querySelector(`#status [data-dark-tv="${id}"]`) || {}).textContent === 'Back on', id1, { timeout: 5000 }).catch(() => {});
+    await page.locator('#status').screenshot({ path: join(SHOTS, 'device-blackout.png') });
+    for (const t of [a1, a2]) { await t.p.evaluate(() => window.__tv.reload()); await t.p.waitForTimeout(800); }
+    ok(await a1.p.isVisible('.quiet') && !(await a2.p.$('.quiet')), 'one device goes black, the other keeps playing');
+    ok((await page.textContent('#status')).includes('Blacked out'), 'the status card shows which device is blacked out');
+    await page.click(`#status [data-dark-tv="${id1}"]`); await toastSays(page, 'comes back on');
+    await a1.p.evaluate(() => window.__tv.reload()); await a1.p.waitForFunction(() => !document.querySelector('.quiet'), null, { timeout: 5000 }).catch(() => {});
+    ok(!(await a1.p.$('.quiet')), 'and comes back on');
+    ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'the device buttons fit on a phone');
+    await ctx.close(); await a1.x.close(); await a2.x.close();
+  }
+
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));
   await page.goto(BASE + '/tv/edit/index.html');

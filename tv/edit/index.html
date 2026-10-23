@@ -104,7 +104,9 @@
   #status .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: 1px; }
   #status .dot.on { background: #1fa85c; box-shadow: 0 0 0 3px rgba(31,168,92,.2); }
   #status .screens { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-  #status .screens li { display: flex; gap: 10px; align-items: flex-start; }
+  #status .screens li { display: flex; gap: 6px 10px; align-items: flex-start; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  #status .screens li:last-child { border-bottom: 0; }
+  #status .screens li > .grow { flex: 1 1 240px; }
   #status .screens .grow > div { font-size: 13px; color: var(--muted); }
   .cd-to { display: flex; flex-direction: column; gap: 6px; }
   #party.on .hint { color: var(--on-gold); opacity: .85; }
@@ -960,13 +962,14 @@ function drawStatus() {
       const bt = x.details && x.details.battery, btWarn = (state.settings && state.settings.battery_warn) || 0;
       const batt = state.display === 'tablet' && bt && bt.level != null ? ` <span class="tag${!bt.charging && btWarn && bt.level < btWarn ? ' warn' : ' muted'}" title="Battery">${bt.charging ? 'Charging ' : 'Battery '}${esc(bt.level)}%</span>` : '';
       const where = state.locations ? ` <span class="tag${x.location ? '' : ' warn'}">${x.location ? esc(locName([x.location])) : 'No location'}</span>` : '';
-      return `<li><div class="grow"><b>${label ? label + ': ' : ''}${live ? 'Showing: ' + what : 'Offline'}</b>${where}${batt}
+      const darkTag = x.blackout ? ' <span class="tag warn">Blacked out</span>' : '';
+      return `<li><div class="grow"><b>${label ? label + ': ' : ''}${live ? 'Showing: ' + what : 'Offline'}</b>${where}${batt}${darkTag}
         <div>${live ? `Checked in ${esc(ago(x.last_seen))}` : `Last seen ${esc(ago(x.last_seen))}${x.showing ? `, showing ${what}` : ''}`}${x.started_at ? ` · page loaded ${esc(ago(x.started_at))}` : ''}</div></div>
-        <div class="row" style="flex-wrap:nowrap"><button class="btn sm" data-name-tv="${esc(x.screen_id)}">${state.locations ? 'Edit' : x.name ? 'Rename' : 'Name'}</button>${!live ? `<button class="btn sm" data-forget-tv="${esc(x.screen_id)}">Remove</button>` : ''}</div></li>`;
+        <div class="row" style="flex-wrap:nowrap">${'blackout' in x ? `<button class="btn sm" data-dark-tv="${esc(x.screen_id)}" data-on="${x.blackout ? '' : '1'}" style="${x.blackout ? 'background:var(--gold);border-color:var(--gold);color:var(--on-gold)' : 'background:#111;border-color:#111;color:#fff'}">${x.blackout ? 'Back on' : 'Black out'}</button>` : ''}<button class="btn sm" data-name-tv="${esc(x.screen_id)}">${state.locations ? 'Edit' : x.name ? 'Rename' : 'Name'}</button>${!live ? `<button class="btn sm" data-forget-tv="${esc(x.screen_id)}">Remove</button>` : ''}</div></li>`;
     }).join('')}</ul>` : ''}
     ${'blackout' in state.settings ? (state.settings.blackout
       ? `<div class="row" style="background:#111;color:#fff;border-radius:10px;padding:10px 12px"><span class="grow"><b>${N === 'TV' ? 'The screen is' : 'The tablets are'} blacked out</b> until you turn ${N === 'TV' ? 'it' : 'them'} back on.</span><button class="btn sm" id="tvDark" style="background:var(--gold);border-color:var(--gold);color:var(--on-gold)">Turn ${N === 'TV' ? 'the screen' : 'them'} back on</button></div>`
-      : `<div class="row"><button class="btn" id="tvDark" style="background:#111;border-color:#111;color:#fff">Black out the ${N === 'TV' ? 'screen' : 'tablets'}</button><span class="hint grow">Black until you turn it back on, even during a party.</span></div>`) : ''}`;
+      : `<div class="row"><button class="btn" id="tvDark" style="background:#111;border-color:#111;color:#fff">Black out ${N === 'TV' ? 'every TV' : 'all tablets'}</button><span class="hint grow">Black until you turn ${N === 'TV' ? 'them' : 'them'} back on, even during a party. For just one, use its own button above.</span></div>`) : ''}`;
   if ($('#tvDark')) $('#tvDark').onclick = async () => {
     const on = !state.settings.blackout; $('#tvDark').disabled = true;
     const { error } = await sb.rpc('tv_remote_send', { p_cmd: on ? 'blackout' : 'wake', p_slide: null, p_display: state.display });
@@ -981,6 +984,12 @@ function drawStatus() {
     setTimeout(pollStatus, 25e3);
     setTimeout(() => { const b = $('#tvReload'); if (b) b.disabled = false; }, 5000);
   };
+  $$('#status [data-dark-tv]').forEach(b => b.onclick = async () => {
+    const on = !!b.dataset.on; b.disabled = true;
+    const { error } = await sb.rpc('tv_screen_blackout', { p_screen: b.dataset.darkTv, p_on: on });
+    if (error) { b.disabled = false; return toast((/function|schema cache/i.test(error.message) ? 'Run supabase/tv-setup.sql again first. ' : 'Not sent: ') + error.message, 6000); }
+    toast(on ? `That ${noun()} goes black within 20 seconds.` : `That ${noun()} comes back on within 20 seconds.`, 4000); pollStatus();
+  });
   $$('#status [data-name-tv]').forEach(b => b.onclick = () => {
     const x = state.screens.find(y => y.screen_id === b.dataset.nameTv); if (!x) return;
     openDlg(`<form class="dlg" id="nmForm"><div class="dlg-head"><div><h3>This ${noun()}</h3><p class="hint">Showing: ${esc(x.showing || '-')}</p></div><button class="x" data-close>Close</button></div>

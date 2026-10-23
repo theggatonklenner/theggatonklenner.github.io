@@ -492,7 +492,7 @@
     }).then(function (r) { return r.ok ? r.json() : null; }).then(function (r) {
       if (!r || r.error) { remoteOn = false; return; }
       var c = r.cmd; remoteSeq = r.seq;
-      if (c && (c.cmd === 'blackout' || c.cmd === 'wake')) { load(false); setTimeout(remotePoll, 1200); }   // black out / back on: straight away
+      if (c && (c.cmd === 'blackout' || c.cmd === 'wake' || c.cmd === 'refresh')) { load(false); setTimeout(remotePoll, 1200); }   // black out / back on (all or one device): straight away
       else if (c && !feed.only && !feed.quiet) {
         if (c.cmd === 'next') next();
         else if (c.cmd === 'back') back();
