@@ -321,6 +321,19 @@ ok(!fn1.only, 'a device with no location shows neither');
 ok((await feedAt(null, 'sydenham')).slides.some(x => x.title === 'Happy Birthday Syd!'), "a new device uses its link's location before it has checked in");
 await as('tate@ama.test', () => db.exec(`delete from tv_party_bookings`));
 await as('tate@ama.test', () => db.query(`delete from tv_slides where id in ($1, $2, $3)`, [ls1, sp, mp]));
+// A location's own slideshow hours
+{
+  const today = (await db.query(`select extract(dow from ${syd})::int d`)).rows[0].d;
+  const closed = { 0: null, 1: null, 2: null, 3: null, 4: null, 5: null, 6: null };
+  await as('tate@ama.test', () => db.query(`update tv_locations set hours = $1::jsonb where slug = 'sydenham'`, [JSON.stringify(closed)]));
+  ok((await feedAt('syd-tv-0001', null)).quiet && !(await feedAt('mkv-tv-0001', null)).quiet, 'a location with its own hours goes quiet outside them; other locations keep the main hours');
+  await as('tate@ama.test', () => db.query(`update tv_settings set quiet_on = true, quiet_days = $1::jsonb where id = 1`, [JSON.stringify(closed)]));
+  await as('tate@ama.test', () => db.query(`update tv_locations set hours = $1::jsonb where slug = 'sydenham'`, [JSON.stringify({ ...closed, [today]: { on: '00:00', off: '23:59' } })]));
+  ok(!(await feedAt('syd-tv-0001', null)).quiet && (await feedAt('mkv-tv-0001', null)).quiet, "a location's own hours are used instead of the main ones");
+  await as('tate@ama.test', () => db.exec(`update tv_settings set quiet_on = false, quiet_days = null where id = 1; update tv_locations set hours = null`));
+  ok(!(await feedAt('syd-tv-0001', null)).quiet, 'cleared, it goes back to the main hours');
+  ok(!(await tryAs('remote@ama.test', `update tv_locations set hours = '{}'::jsonb where slug = 'sydenham'`)).n, 'only the editor changes location hours');
+}
 await db.exec(`delete from tv_screens where screen_id in ('syd-tv-0001', 'mkv-tv-0001')`);
 ok(!(await tryAs('remote@ama.test', `insert into tv_locations (slug, name) values ('x1', 'X')`)).ok && (await tryAs('remote@ama.test', `select * from tv_locations`)).n === 5, 'everyone with TV access sees the locations; only the editor changes them');
 

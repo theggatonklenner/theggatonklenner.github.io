@@ -224,6 +224,9 @@ begin
       ('marrickville', 'Marrickville', 1), ('sydenham', 'Sydenham', 2), ('concord', 'Concord', 3), ('auburn', 'Auburn', 4), ('sylvania', 'Sylvania', 5);
   end if;
 end $$;
+-- A location's own slideshow hours (same shape as tv_settings.quiet_days), for every TV and tablet there.
+-- Empty: each screen's main slideshow hours.
+alter table public.tv_locations add column if not exists hours jsonb;
 alter table public.tv_locations enable row level security;
 drop policy if exists "staff see locations" on public.tv_locations;
 drop policy if exists "staff edit locations" on public.tv_locations;
@@ -356,6 +359,7 @@ declare
   two boolean;
   now_time time := (now() at time zone 'Australia/Sydney')::time;
   day_hours jsonb;
+  hours jsonb; hours_on boolean;
   off_now boolean := false;
 begin
   select * into s from public.tv_settings where screen_code = upper(trim(coalesce(p_code, '')));   -- the code says which display
@@ -407,10 +411,14 @@ begin
        and (coalesce(e ->> 'for', 'all') = 'all' or e ->> 'for' = 'loc:' || coalesce(loc, '') or e ->> 'for' = 'dev:' || coalesce(p_screen, ''))
        and (case when w.z > w.a then now_time >= w.a and now_time < w.z else now_time >= w.a or now_time < w.z end));
 
-  -- Quiet hours (a party still shows): a black screen or just the logo outside each day's slideshow hours
-  day_hours := s.quiet_days -> extract(dow from (now() at time zone 'Australia/Sydney'))::int::text;
-  if off_now or s.quiet_on and (case
-       when s.quiet_days is not null then
+  -- Quiet hours (a party still shows): a black screen or just the logo outside each day's slideshow hours.
+  -- A location with its own hours uses those instead of the screen's main ones.
+  select l.hours into hours from public.tv_locations l where l.slug = loc;
+  hours_on := hours is not null or s.quiet_on;
+  hours := coalesce(hours, s.quiet_days);
+  day_hours := hours -> extract(dow from (now() at time zone 'Australia/Sydney'))::int::text;
+  if off_now or hours_on and (case
+       when hours is not null then
          day_hours is null or jsonb_typeof(day_hours) <> 'object'
          or not (now_time >= (day_hours ->> 'on')::time and now_time < (day_hours ->> 'off')::time)
        else s.quiet_from <> s.quiet_to and (case when s.quiet_from < s.quiet_to

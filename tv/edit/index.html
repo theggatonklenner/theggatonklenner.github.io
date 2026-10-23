@@ -250,7 +250,7 @@
           <table class="days"><tbody id="qDays"></tbody></table>
           <div class="row"><button type="button" class="btn sm" id="qCopy">Copy Monday to Tuesday to Friday</button></div>
           <div class="field"><label for="setQStyle">At other times the TV shows</label><select id="setQStyle"><option value="logo">Just the AMA logo (dimmed, on black)</option><option value="black">A black screen</option></select></div>
-          <p class="hint" style="margin:0">A party still shows at any time. Many TVs also have their own off timer in their settings, which saves power.</p>
+          <p class="hint" style="margin:0">A party still shows at any time. A location can have its own hours instead (Locations, Edit, Settings). Many TVs also have their own off timer in their settings, which saves power.</p>
         </div></div>
       <div class="field" id="offBox" hidden><span class="label">Scheduled screen-off times</span>
         <p class="hint" style="margin:0">On top of the slideshow hours: the screen goes off at these times for the minutes set, e.g. Saturday 10:00 for 5 minutes. A party still shows.</p>
@@ -425,13 +425,8 @@ function draw() {
     // Each day's hours: from quiet_days, or (older setting) the same every day: on at quiet_to, off at quiet_from
     const t5 = v => String(v || '').slice(0, 5), all = { on: t5(S.quiet_to) || '07:00', off: t5(S.quiet_from) || '21:00' };
     const days = S.quiet_days || { 0: all, 1: all, 2: all, 3: all, 4: all, 5: all, 6: all };
-    $('#qDays').innerHTML = [1, 2, 3, 4, 5, 6, 0].map(d => { const h = days[d];
-      return `<tr data-day="${d}" class="${h ? '' : 'closed'}"><td><label class="check" style="min-height:0"><input type="checkbox" id="qd${d}On" ${h ? 'checked' : ''}> ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]}</label></td>
-        <td><span class="shut">Off all day</span><input type="time" id="qd${d}From" value="${esc(h ? h.on : '15:00')}" aria-label="${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d]} from"></td>
-        <td><input type="time" id="qd${d}To" value="${esc(h ? h.off : '21:00')}" aria-label="${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d]} until"></td></tr>`; }).join('');
-    $$('#qDays input[type=checkbox]').forEach(c => c.onchange = () => { const tr = c.closest('tr'); tr.classList.toggle('closed', !c.checked); });
-    $('#qCopy').onclick = () => { [2, 3, 4, 5].forEach(d => {
-      $(`#qd${d}On`).checked = $('#qd1On').checked; $(`#qd${d}From`).value = $('#qd1From').value; $(`#qd${d}To`).value = $('#qd1To').value; $(`#qd${d}On`).onchange(); }); toast('Copied. Save settings to keep it.'); };
+    $('#qDays').innerHTML = hoursRows('qd', days);
+    hoursWire('qd', '#qDays', '#qCopy', 'Copied. Save settings to keep it.');
     $('#setQuiet').checked = S.quiet_on; $('#setQStyle').value = S.quiet_style || 'logo';
     $('#quietRow').hidden = !S.quiet_on; $('#setQuiet').onchange = () => { $('#quietRow').hidden = !$('#setQuiet').checked; };
   }
@@ -1583,20 +1578,48 @@ $('#offAdd').onclick = () => {
   drawOffs();
 };
 
+/* ---------- Slideshow hours for each day (used in Settings and for each location) ---------- */
+const DAYN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function hoursRows(p, days) {
+  return [1, 2, 3, 4, 5, 6, 0].map(d => { const h = days[d];
+    return `<tr data-day="${d}" class="${h ? '' : 'closed'}"><td><label class="check" style="min-height:0"><input type="checkbox" id="${p}${d}On" ${h ? 'checked' : ''}> ${DAYN[d].slice(0, 3)}</label></td>
+      <td><span class="shut">Off all day</span><input type="time" id="${p}${d}From" value="${esc(h ? h.on : '15:00')}" aria-label="${DAYN[d]} from"></td>
+      <td><input type="time" id="${p}${d}To" value="${esc(h ? h.off : '21:00')}" aria-label="${DAYN[d]} until"></td></tr>`; }).join('');
+}
+function hoursWire(p, body, copy, msg) {
+  $$(`${body} input[type=checkbox]`).forEach(c => c.onchange = () => { c.closest('tr').classList.toggle('closed', !c.checked); });
+  $(copy).onclick = () => { [2, 3, 4, 5].forEach(d => {
+    $(`#${p}${d}On`).checked = $(`#${p}1On`).checked; $(`#${p}${d}From`).value = $(`#${p}1From`).value; $(`#${p}${d}To`).value = $(`#${p}1To`).value; $(`#${p}${d}On`).onchange(); }); toast(msg); };
+}
+// The hours as saved: {"1": {"on": "15:00", "off": "21:00"}, "0": null, ...}, or a message saying what's wrong
+function hoursRead(p) {
+  const days = {};
+  for (let d = 0; d < 7; d++) {
+    if (!$(`#${p}${d}On`).checked) { days[d] = null; continue; }
+    const on = $(`#${p}${d}From`).value, off = $(`#${p}${d}To`).value;
+    if (!on || !off) return `Fill in both times for ${DAYN[d]}.`;
+    if (off <= on) return `${DAYN[d]}: the end time must be after the start time.`;
+    days[d] = { on, off };
+  }
+  return days;
+}
+const hoursText = h => { const open = [1, 2, 3, 4, 5, 6, 0].filter(d => h[d]); return open.length ? open.map(d => `${DAYN[d].slice(0, 3)} ${h[d].on}-${h[d].off}`).join(', ') : 'Off every day'; };
+
 /* ---------- Locations ---------- */
 function drawLocations() {
   const box = $('#locCard');
   if (!state.locations) { box.hidden = true; return; }
   box.hidden = false;
   box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start"><div class="grow"><h3>Locations</h3>
-    <p class="hint">${state.locations.length ? esc(state.locations.map(l => l.name).join(', ')) : 'None yet.'} Give each ${noun()} a location in the status card above; slides and parties can be for one location or all.</p></div>
+    <p class="hint">${state.locations.length ? esc(state.locations.map(l => l.name).join(', ')) : 'None yet.'} Give each ${noun()} a location in the status card above; slides and parties can be for one location or all.</p>
+    ${state.locations.some(l => l.hours) ? `<ul class="booked">${state.locations.filter(l => l.hours).map(l => `<li><div class="grow"><b>${esc(l.name)}</b><div class="when">Own slideshow hours: ${esc(hoursText(l.hours))}</div></div></li>`).join('')}</ul>` : ''}</div>
     <button class="btn" id="locEdit">Edit</button></div>`;
   $('#locEdit').onclick = openLocations;
 }
 function openLocations() {
   const slugOf = n => n.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
   openDlg(`<div class="dlg"><div class="dlg-head"><div><h3>Locations</h3><p class="hint">Renaming keeps everything at that location. Removing one leaves its devices with no location.</p></div><button class="x" data-close>Close</button></div>
-    <ul class="saved">${state.locations.map(l => `<li><input type="text" data-loc="${esc(l.slug)}" value="${esc(l.name)}" maxlength="40" aria-label="Name of ${esc(l.name)}" class="grow"><button type="button" class="btn sm danger" data-locdel="${esc(l.slug)}" aria-label="Remove ${esc(l.name)}">Remove</button></li>`).join('')}</ul>
+    <ul class="saved">${state.locations.map(l => `<li><input type="text" data-loc="${esc(l.slug)}" value="${esc(l.name)}" maxlength="40" aria-label="Name of ${esc(l.name)}" class="grow">${'hours' in l ? `<button type="button" class="btn sm" data-locset="${esc(l.slug)}" aria-label="Settings for ${esc(l.name)}">Settings</button>` : ''}<button type="button" class="btn sm danger" data-locdel="${esc(l.slug)}" aria-label="Remove ${esc(l.name)}">Remove</button></li>`).join('')}</ul>
     <form id="locAdd" class="row"><input type="text" id="locNew" maxlength="40" placeholder="New location, e.g. Parramatta" class="grow" style="flex:1 1 160px;width:auto"><button class="btn" type="submit">Add</button></form></div>`);
   $$('#dlg [data-loc]').forEach(i => i.onchange = async () => {
     const v = i.value.trim(); if (!v) { i.value = (state.locations.find(l => l.slug === i.dataset.loc) || {}).name; return; }
@@ -1604,6 +1627,7 @@ function openLocations() {
     if (error) return toast('Not saved: ' + error.message, 5000);
     toast('Saved'); await load(); openLocations();
   });
+  $$('#dlg [data-locset]').forEach(b => b.onclick = () => openLocSettings(state.locations.find(x => x.slug === b.dataset.locset)));
   $$('#dlg [data-locdel]').forEach(b => b.onclick = async () => {
     const l = state.locations.find(x => x.slug === b.dataset.locdel);
     if (!await confirmBox(`Remove ${l.name}? Its devices will have no location until you give them one.`, 'Remove')) return openLocations();
@@ -1618,6 +1642,33 @@ function openLocations() {
     const { error } = await sb.from('tv_locations').insert({ slug, name, position: state.locations.length + 1 });
     if (error) return toast('Not added: ' + error.message, 5000);
     await load(); openLocations();
+  };
+}
+
+// A location's own settings: its slideshow hours (for the TV and the tablets there)
+function openLocSettings(l) {
+  if (!l) return;
+  let own = !!l.hours;
+  const main = (state.settings && state.settings.quiet_days) || null;
+  const start = l.hours || main || { 0: null, 1: { on: '15:00', off: '21:00' }, 2: { on: '15:00', off: '21:00' }, 3: { on: '15:00', off: '21:00' }, 4: { on: '15:00', off: '21:00' }, 5: { on: '15:00', off: '21:00' }, 6: { on: '08:00', off: '13:00' } };
+  openDlg(`<form class="dlg" id="lsForm"><div class="dlg-head"><div><h3>${esc(l.name)}</h3><p class="hint">Settings for every TV and tablet at ${esc(l.name)}.</p></div><button class="x" data-close>Close</button></div>
+    <div class="field"><span class="label">Slideshow hours</span>
+      <label class="check"><input type="radio" name="lsOwn" value="main" ${own ? '' : 'checked'}> Same as the main settings for each screen</label>
+      <label class="check"><input type="radio" name="lsOwn" value="own" id="lsOwn" ${own ? 'checked' : ''}> Its own hours</label></div>
+    <div id="lsHours" ${own ? '' : 'hidden'} style="display:flex;flex-direction:column;gap:10px">
+      <table class="days"><tbody id="lsDays">${hoursRows('ld', start)}</tbody></table>
+      <div class="row"><button type="button" class="btn sm" id="lsCopy">Copy Monday to Tuesday to Friday</button></div>
+      <p class="hint" style="margin:0">Outside these hours the screens show the logo or a black screen (as set in each screen's Settings). A party still shows at any time.</p></div>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="lsGo">Save</button></div></form>`);
+  hoursWire('ld', '#lsDays', '#lsCopy', 'Copied. Save to keep it.');
+  $$('#lsForm input[name=lsOwn]').forEach(r => r.onchange = () => { own = $('#lsOwn').checked; $('#lsHours').hidden = !own; });
+  $('#lsForm').onsubmit = async e => {
+    e.preventDefault();
+    let hours = null;
+    if (own) { hours = hoursRead('ld'); if (typeof hours === 'string') return toast(hours); }
+    const { error } = await sb.from('tv_locations').update({ hours }).eq('slug', l.slug);
+    if (error) return toast('Not saved: ' + error.message, 5000);
+    dlg.close(); toast(`Saved. Screens at ${l.name} change within a few seconds.`, 4000); await load();
   };
 }
 
@@ -1665,14 +1716,8 @@ $('#setForm').onsubmit = async e => {
   if (!$('#quietBox').hidden) {
     rec.quiet_on = $('#setQuiet').checked;
     if (rec.quiet_on) {
-      const days = {}, names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      for (let d = 0; d < 7; d++) {
-        if (!$(`#qd${d}On`).checked) { days[d] = null; continue; }
-        const on = $(`#qd${d}From`).value, off = $(`#qd${d}To`).value;
-        if (!on || !off) return toast(`Fill in both times for ${names[d]}.`);
-        if (off <= on) return toast(`${names[d]}: the end time must be after the start time.`);
-        days[d] = { on, off };
-      }
+      const days = hoursRead('qd');
+      if (typeof days === 'string') return toast(days);
       rec.quiet_days = days; rec.quiet_style = $('#setQStyle').value;
     }
   }

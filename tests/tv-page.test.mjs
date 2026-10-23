@@ -863,7 +863,20 @@ try {
   await page.fill('#locNew', 'Parramatta'); await page.click('#locAdd button[type=submit]');
   await page.waitForFunction(() => !!document.querySelector('[data-loc="parramatta"]'), null, { timeout: 5000 }).catch(() => {});
   ok((await db.query(`select name from tv_locations where slug = 'parramatta'`)).rows.length === 1, 'locations can be added (and renamed or removed)');
-  await page.evaluate(() => document.querySelector('#dlg').close());
+  // A location's own settings: slideshow hours just for Sydenham
+  await page.click('[data-locset="sydenham"]'); await page.waitForSelector('#lsForm');
+  ok(await page.isHidden('#lsHours'), 'a location uses the main slideshow hours until it is given its own');
+  await page.check('#lsOwn'); await page.waitForSelector('#ld1From');
+  const dowNow = new Date().getDay();
+  await page.uncheck(`#ld${dowNow}On`); await page.click('#lsGo'); await toastSays(page, 'Saved');
+  const lh = (await db.query(`select hours from tv_locations where slug = 'sydenham'`)).rows[0].hours;
+  ok(lh && lh[String(dowNow)] === null && Object.keys(lh).length === 7, 'Sydenham can have its own hours for each day');
+  await syd.pg.evaluate(() => window.__tv.reload()); await mkv.pg.evaluate(() => window.__tv.reload()); await syd.pg.waitForTimeout(800);
+  ok(!!(await syd.pg.evaluate(() => window.__tv.feed().quiet)) && !(await mkv.pg.evaluate(() => window.__tv.feed().quiet)), 'so Sydenham goes quiet outside its hours while other locations carry on');
+  ok((await page.textContent('#locCard')).includes('Own slideshow hours'), 'the Locations card lists locations with their own hours');
+  await page.click('#locEdit'); await page.click('[data-locset="sydenham"]'); await page.waitForSelector('#lsForm');
+  await page.check('#lsForm input[value="main"]'); await page.click('#lsGo'); await page.waitForSelector('#lsForm', { state: 'detached', timeout: 5000 }).catch(() => {}); await page.waitForTimeout(300);
+  ok((await db.query(`select hours from tv_locations where slug = 'sydenham'`)).rows[0].hours === null, 'and set back to the main hours');
   await db.query(`delete from tv_slides where title = 'Sydenham car park closed'`); await db.query(`delete from tv_locations where slug = 'parramatta'`);
   await ctx.close(); await syd.c.close(); await mkv.c.close();
 
