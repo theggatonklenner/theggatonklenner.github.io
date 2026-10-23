@@ -228,6 +228,7 @@ const LIVE = {
   next_grading: ['Next grading', 'The next black belt grading date and how long to go'],
   sessions: ['Prep sessions', 'The next prep session dates, with the sign-off marked'],
   congrats: ['Congratulations', 'Students who passed a grading in the last 45 days'],
+  month: ['Month theme', '"This is the Month of ..." for the current month'],
   events: ['Events this month', "What's left of this month's events, and next month's near the end of the month"]
 };
 const KIND = { photo: 'Photo', video: 'Video', text: 'Info slide', live: 'Live', countdown: 'Countdown' };
@@ -374,7 +375,7 @@ $('#addBtn').onclick = () => {
 };
 async function addLive(kind) {
   if (state.slides.some(s => s.kind === 'live' && s.live_kind === kind) && !await confirmBox(`There's already a "${LIVE[kind][0]}" slide. Add another?`, 'Add another')) return;
-  const { error } = await sb.from('tv_slides').insert({ kind: 'live', live_kind: kind, theme: kind === 'congrats' ? 'gold' : 'green' });
+  const { error } = await sb.from('tv_slides').insert({ kind: 'live', live_kind: kind, theme: kind === 'congrats' || kind === 'month' ? 'gold' : 'green' });
   if (error) return toast('Not added: ' + error.message, 5000);
   dlg.close(); toast(`Added: ${LIVE[kind][0]}`); load();
 }
@@ -519,9 +520,9 @@ function openSlide(s, fresh) {
         <label class="check"><input type="radio" name="cdTo" value="grading" ${x.count_to === 'grading' ? 'checked' : ''}> The next black belt grading (from Black Belt Prep)</label></div></div>
       <p class="hint" id="cdPrev"></p>
       ${themePick}`,
-    live: () => `<p class="hint">${esc(LIVE[x.live_kind][1])}. ${x.live_kind === 'events' ? 'It uses the events list (Edit events below).' : 'It fills in by itself from Black Belt Prep.'}</p>
-      <div class="field"><label for="slTitle">Heading (optional)</label><input type="text" id="slTitle" maxlength="120" value="${esc(x.title || '')}" placeholder="${esc({ next_grading: 'Next black belt grading', sessions: 'Black belt prep sessions', congrats: 'Congratulations', events: "What's on at AMA" }[x.live_kind])}"></div>${themePick}
-      ${x.live_kind === 'events' ? '<div class="row"><button type="button" class="btn" id="slEvents">Edit events</button></div>' : ''}`
+    live: () => `<p class="hint">${esc(LIVE[x.live_kind][1])}. ${x.live_kind === 'events' ? 'It uses the events list (Edit events below).' : x.live_kind === 'month' ? 'It uses the month themes in Edit events, and changes by itself each month.' : 'It fills in by itself from Black Belt Prep.'}</p>
+      <div class="field"><label for="slTitle">Heading (optional)</label><input type="text" id="slTitle" maxlength="120" value="${esc(x.title || '')}" placeholder="${esc({ next_grading: 'Next black belt grading', sessions: 'Black belt prep sessions', congrats: 'Congratulations', events: "What's on at AMA", month: 'The month name' }[x.live_kind])}"></div>${themePick}
+      ${x.live_kind === 'events' || x.live_kind === 'month' ? '<div class="row"><button type="button" class="btn" id="slEvents">Edit events</button></div>' : ''}`
   }[x.kind]();
   openDlg(`<form class="dlg" id="slForm">
     <div class="dlg-head"><div><h3>${isNew ? (x.kind === 'countdown' ? 'New countdown' : 'New info slide') : esc(x.kind === 'live' ? 'Live: ' + LIVE[x.live_kind][0] : KIND[x.kind])}</h3>${!isNew && x.updated_by ? `<p class="hint">Last changed by ${esc(x.updated_by)}</p>` : ''}</div><button class="x" data-close>Close</button></div>

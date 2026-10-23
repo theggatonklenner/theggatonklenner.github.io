@@ -156,6 +156,7 @@ await as('tate@ama.test', () => db.query(`insert into tv_months (month, theme) v
 let ev = await feedEvents();
 const titles = m => (m ? m.events.map(e => e.title) : []);
 ok(ev[0].month === D.m0 && ev[0].theme === 'Month of Testing', 'the TV gets this month with its theme');
+ok((await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f.live.month.theme === 'Month of Testing', "the month theme slide gets this month's theme");
 ok(titles(ev[0]).includes('Today thing') && ev[0].events.find(e => e.title === 'Today thing').note === '1:30 pm', "this month's events are listed, with notes");
 ok(!JSON.stringify(ev).includes('Yesterday thing'), 'events that are over are left off');
 ok(titles(ev[0]).includes('Started last month'), 'an event that started last month and is still on shows under this month');

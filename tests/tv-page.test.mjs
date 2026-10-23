@@ -447,6 +447,7 @@ try {
   ok((await db.query(`select count(*)::int n from tv_events where title like 'Pizza%'`)).rows[0].n === 0, 'and deleted');
   await page.click('#dlg [data-close]');
   await page.click('#addBtn'); await page.click('[data-add="live:events"]'); await toastSays(page, 'Added');
+  await page.waitForTimeout(300); await page.click('#addBtn'); await page.click('[data-add="live:month"]'); await toastSays(page, 'Month theme');
   await ctx.close();
 
   const tvc2 = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
@@ -469,8 +470,15 @@ try {
     ok(last10 ? evText.includes('Next Month Grading') && evText.includes('Month of Next') : !evText.includes('Next Month Grading'), `next month shows only near the end of the month (${last10 ? 'it is now' : 'not yet'})`);
   }
   ok(await tv2.evaluate(() => { const c = document.querySelector('.layer.on .card'); return c && c.scrollHeight <= c.clientHeight + 2; }), 'the events slide fits the screen');
+  let monText = '';
+  for (let i = 0; i < 12 && !monText; i++) {
+    await tv2.evaluate(() => window.__tv.next()); await tv2.waitForTimeout(400);
+    const txt = await tv2.evaluate(() => { const l = document.querySelectorAll('.layer.on'); return l[l.length - 1].textContent; });
+    if (txt.includes('This is the Month of')) { monText = txt; await tv2.waitForTimeout(900); await tv2.screenshot({ path: join(SHOTS, 'tv-month.png') }); }
+  }
+  ok(monText.includes(monthName) && /This is the Month of\s*(Testing|Health & Nutrition)/.test(monText), 'the month theme slide says "This is the Month of ..."');
   await tvc2.close();
-  await db.query(`delete from tv_slides where live_kind = 'events'`);
+  await db.query(`delete from tv_slides where live_kind in ('events', 'month')`);
 
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));

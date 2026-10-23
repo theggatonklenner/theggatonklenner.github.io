@@ -52,6 +52,7 @@
   .rows .r { display: flex; align-items: baseline; justify-content: space-between; font-size: 3.6vw; padding: 1.6vh 0; border-bottom: .25vh solid rgba(255,255,255,.25); }
   .t-gold .rows .r, .t-light .rows .r { border-bottom-color: rgba(0,0,0,.15); }
   .rows .r b { font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-size: 4.2vw; }
+  .card h1.month { font-size: 9vw; margin: 1vh 0 0; }
   .cal { display: flex; font-size: 2.2vw; margin-top: 1vh; }
   .cal .mon { flex: 1; min-width: 0; }
   .cal .mon + .mon { margin-left: 5vw; }
@@ -220,6 +221,7 @@
       }
       if (s.kind !== 'live') { out.push(s); return; }
       if (s.live_kind === 'next_grading' && live.next_grading && live.next_grading.date) out.push(s);
+      if (s.live_kind === 'month' && live.month && live.month.theme) out.push(s);
       if (s.live_kind === 'events' && live.events && live.events.some(function (m) { return m.events.length; })) out.push(s);
       if (s.live_kind === 'sessions' && live.sessions && live.sessions.length) out.push(s);
       if (s.live_kind === 'congrats' && live.congrats && live.congrats.length) {
@@ -269,6 +271,12 @@
     if (s.live_kind === 'next_grading') {
       var g = live.next_grading;
       return '<div class="card ' + themeOf(s) + '"><div class="belt"></div><div class="kicker">' + esc(s.title || 'Next black belt grading') + '</div><div class="big">' + esc(longDate(g.date)) + '</div><div class="sub">' + esc(untilText(g.date)) + '</div></div>';
+    }
+    if (s.live_kind === 'month') {
+      // "Month of Health & Nutrition" -> "This is the month of" / "Health & Nutrition"
+      var th = String(live.month.theme).trim(), m = th.match(/^(?:the\s+)?month\s+of\s+(.+)$/i);
+      return '<div class="card ' + themeOf(s) + '"><div class="belt"></div><div class="kicker">' + esc(s.title || MONTHS[d(live.month.month).getMonth()]) + '</div>' +
+        (m ? '<div class="body">This is the Month of</div><h1 class="month">' + esc(m[1]) + '</h1>' : '<h1 class="month">' + esc(th) + '</h1>') + '</div>';
     }
     if (s.live_kind === 'events') {
       var ms = live.events.filter(function (m) { return m.events.length; });

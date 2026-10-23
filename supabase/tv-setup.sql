@@ -87,7 +87,7 @@ alter table public.tv_slides drop constraint if exists tv_slides_kind_check;
 alter table public.tv_slides add constraint tv_slides_kind_check check (kind in ('photo', 'video', 'text', 'live', 'countdown'));
 alter table public.tv_slides drop constraint if exists tv_slides_countdown_check;
 alter table public.tv_slides drop constraint if exists tv_slides_live_kind_check;
-alter table public.tv_slides add constraint tv_slides_live_kind_check check (live_kind in ('next_grading', 'sessions', 'congrats', 'events'));
+alter table public.tv_slides add constraint tv_slides_live_kind_check check (live_kind in ('next_grading', 'sessions', 'congrats', 'events', 'month'));
 alter table public.tv_slides add constraint tv_slides_countdown_check check (kind <> 'countdown' or count_to = 'grading' or (count_to = 'date' and event_on is not null));
 
 -- ---------- Booked parties ----------
@@ -244,6 +244,8 @@ begin
               and greatest(date_trunc('month', e.starts_on)::date, m0) = q.mm)) order by q.mm), '[]'::jsonb)
     into v from (select m0 mm union all select m1 where two) q;
   live := live || jsonb_build_object('events', v);
+  select jsonb_build_object('month', mt.month, 'theme', mt.theme) into v from public.tv_months mt where mt.month = m0;
+  live := live || jsonb_build_object('month', v);
 
   -- Live AMA info (only if Black Belt Prep is set up in this project)
   if to_regclass('public.prep_cycles') is not null then
