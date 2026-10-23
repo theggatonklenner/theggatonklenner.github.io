@@ -101,6 +101,11 @@
   .screen input { font: 700 5vw "Barlow Semi Condensed", Arial, sans-serif; letter-spacing: .3em; text-transform: uppercase; text-align: center; width: 36vw; padding: 1.5vh 1vw; border: 0; border-radius: 1vw; color: #16211b; }
   .screen button { font: 700 2.6vw "Source Sans 3", Arial, sans-serif; margin-top: 3vh; padding: 1.5vh 4vw; border: 0; border-radius: 1vw; background: #f2d500; color: #16211b; cursor: pointer; }
   .screen .err { color: #ffd9d4; font-weight: 700; min-height: 3vh; }
+  .banner { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; text-align: center; background: #f2d500; color: #16211b; font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-weight: 700; font-size: 3vw; padding: 1.6vh 4vw; letter-spacing: .02em; }
+  body.hasbanner .card { padding-bottom: 14vh; }
+  body.hasbanner .caption { bottom: 12vh; }
+  body.hasbanner .paused { bottom: 11vh; }
+  body.hasbanner .hint { bottom: 12vh; }
   .hint { position: absolute; left: 50%; bottom: 3vh; transform: translateX(-50%); z-index: 7; background: rgba(0,0,0,.6); color: #fff; font-size: 1.8vw; padding: 1vh 2vw; border-radius: 1vw; transition: opacity .6s; }
 
   /* ---------- Upright screens (the tablets): everything a bit bigger, side-by-side parts stacked ---------- */
@@ -129,6 +134,8 @@
     .logo { width: 11vw; height: 11vw; border-radius: 2.4vw; }
     .paused { font-size: 3.6vw; }
     .hint { font-size: 3.8vw; white-space: nowrap; }
+    .banner { font-size: 6.4vw; padding: 2.2vh 6vw; }
+    body.hasbanner .card { padding-bottom: 16vh; }
     .quiet .qlogo { width: 34vw; height: 34vw; margin: -17vw 0 0 -17vw; }
     .screen .box { width: 84vw; }
     .screen h1 { font-size: 9vw; }
@@ -142,6 +149,7 @@
 <div id="stage"></div>
 <div class="logo" id="logo" style="display:none"></div>
 <div class="paused" id="pausedTag" style="display:none">Paused</div>
+<div class="banner" id="banner" style="display:none"></div>
 <div class="clock" id="clock" style="display:none"></div>
 <div class="dot" title="No connection"></div>
 <div class="hint" id="hint" style="display:none">Press OK or click for full screen</div>
@@ -292,6 +300,9 @@
     var st = feed.settings || {};
     $('logo').style.display = st.show_logo ? '' : 'none';
     $('clock').style.display = st.show_clock ? '' : 'none';
+    $('banner').innerHTML = st.banner ? esc(st.banner) : '';
+    $('banner').style.display = st.banner ? '' : 'none';
+    document.body.className = document.body.className.replace(/\bhasbanner\b/g, '') + (st.banner ? ' hasbanner' : '');
     tick();
   }
   function tick() {

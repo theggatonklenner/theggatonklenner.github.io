@@ -641,6 +641,7 @@ try {
   await page.waitForFunction(() => document.querySelector('.brand h1').textContent === 'Tablet Display' && document.querySelector('#list').textContent.includes('No slides yet'), null, { timeout: 5000 }).catch(() => {});
   ok((await page.textContent('#list')).includes('No slides yet') && (await page.textContent('.brand h1')) === 'Tablet Display', 'switching to Tablets shows their own (empty) slide list');
   ok((await page.textContent('#screenLink')) === `https://theggatonklenner.github.io/tv/?code=${TCODE}`, 'Settings shows the tablet link, with its code in it');
+  ok(await page.inputValue('#setBanner') === 'Tap to sign in', 'the bottom message is a setting (Tap to sign in for the tablets)');
   await page.click('#qrLink'); await page.waitForSelector('#linkQr');
   await page.waitForTimeout(400);
   const lq = await page.evaluate(() => { const c = document.querySelector('#linkQr'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height); return { w: c.width, h: c.height, data: Array.from(d.data) }; });
@@ -686,6 +687,7 @@ try {
   ok(tt.includes('Welcome to AMA') && /weeks to go/.test(tt) && !tt.includes('No classes on Monday'), 'the tablet shows its own slides, not the TV ones');
   ok(fits && await tabp.evaluate(() => getComputedStyle(document.querySelector('.clock')).fontSize) !== '0px', 'everything fits the upright screen');
   ok((await tabp.textContent('#hint')).includes('Tap the screen'), 'on a tablet it says to tap for full screen');
+  ok(await tabp.isVisible('#banner') && (await tabp.textContent('#banner')) === 'Tap to sign in', 'the tablet shows "Tap to sign in" along the bottom');
   await tabc.close();
   await db.query(`delete from tv_slides where display = 'tablet'`);
 

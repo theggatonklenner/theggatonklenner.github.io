@@ -215,6 +215,7 @@
         <div class="field"><label for="setSecs">Seconds per slide</label><input type="number" id="setSecs" min="3" max="600" step="1"></div>
         <div class="field"><span class="label">On screen</span><label class="check"><input type="checkbox" id="setClock"> Clock</label><label class="check" style="min-height:28px"><input type="checkbox" id="setLogo"> AMA logo</label></div>
       </div>
+      <div class="field" id="bannerBox" hidden><label for="setBanner">Message at the bottom (optional)</label><input type="text" id="setBanner" maxlength="80" placeholder="e.g. Tap to sign in"><p class="hint">Shown along the bottom of the screen with every slide. Leave it empty for none.</p></div>
       <div class="field" id="quietBox" hidden><span class="label">Slideshow hours</span>
         <label class="check"><input type="checkbox" id="setQuiet"> Only play the slideshow at set times</label>
         <div id="quietRow" style="display:flex;flex-direction:column;gap:10px">
@@ -362,6 +363,7 @@ function draw() {
   drawParty();
   $('#code').textContent = S.screen_code;
   $('#setSecs').value = S.seconds; $('#setClock').checked = S.show_clock; $('#setLogo').checked = S.show_logo;
+  $('#bannerBox').hidden = !('banner' in S); $('#setBanner').value = S.banner || '';
   $('#quietBox').hidden = !('quiet_on' in S);
   if ('quiet_on' in S) {
     // Each day's hours: from quiet_days, or (older setting) the same every day: on at quiet_to, off at quiet_from
@@ -1272,6 +1274,7 @@ $('#setForm').onsubmit = async e => {
   e.preventDefault();
   const secs = Math.max(3, Math.min(600, +$('#setSecs').value || 10));
   const rec = { seconds: secs, show_clock: $('#setClock').checked, show_logo: $('#setLogo').checked };
+  if (!$('#bannerBox').hidden) rec.banner = $('#setBanner').value.trim();
   if (!$('#quietBox').hidden) {
     rec.quiet_on = $('#setQuiet').checked;
     if (rec.quiet_on) {

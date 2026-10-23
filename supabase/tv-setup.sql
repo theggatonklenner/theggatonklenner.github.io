@@ -102,6 +102,8 @@ alter table public.tv_settings drop constraint if exists tv_settings_display_che
 alter table public.tv_settings add constraint tv_settings_display_check check ((id = 1 and display = 'tv') or (id = 2 and display = 'tablet'));
 insert into public.tv_settings (id, display) values (2, 'tablet') on conflict (id) do nothing;
 create unique index if not exists tv_settings_code_idx on public.tv_settings (screen_code);
+alter table public.tv_settings add column if not exists banner text;   -- a message along the bottom, e.g. "Tap to sign in" ('' = none)
+update public.tv_settings set banner = case when id = 2 then 'Tap to sign in' else '' end where banner is null;
 alter table public.tv_settings add column if not exists only_slide uuid;          -- party mode: the one slide to show
 alter table public.tv_settings add column if not exists only_until timestamptz;   -- ... until this time
 alter table public.tv_settings add column if not exists reload_at timestamptz;    -- "Refresh the TV" was pressed at this time
@@ -374,7 +376,7 @@ begin
   end if;
 
   return jsonb_build_object(
-    'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', s.show_clock, 'show_logo', s.show_logo),
+    'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', s.show_clock, 'show_logo', s.show_logo, 'banner', nullif(trim(coalesce(s.banner, '')), '')),
     'remote', coalesce(s.remote_until > now(), false), 'display', s.display,
     'version', greatest(coalesce(changed, s.updated_at), s.updated_at),
     'slides', slides, 'live', live, 'today', today);

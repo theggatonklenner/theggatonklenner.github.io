@@ -274,6 +274,10 @@ const tsl = (await as('tate@ama.test', () => db.query(`insert into tv_slides (ki
 let ft = await feedOf(tab.screen_code), fv = await feedOf(code);
 ok(ft.display === 'tablet' && ft.slides.map(x => x.title).join() === 'Tablet notice', 'the tablet link gets only the tablet slides');
 ok(fv.display === 'tv' && !fv.slides.some(x => x.title === 'Tablet notice'), 'and the TV does not get them');
+ok(ft.settings.banner === 'Tap to sign in' && !fv.settings.banner, 'the tablets say "Tap to sign in" along the bottom; the TV has no message');
+await as('tate@ama.test', () => db.exec(`update tv_settings set banner = '' where id = 2`)); await db.exec(SQL);
+ok(!(await feedOf(tab.screen_code)).settings.banner, 'a cleared message stays cleared after running the setup again');
+await as('tate@ama.test', () => db.exec(`update tv_settings set banner = 'Tap to sign in' where id = 2`));
 const tparty = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, display, party, theme) values ('text', 'Tablet party', 'tablet', true, 'party') returning id`))).rows[0].id;
 await as('tate@ama.test', () => db.query(`insert into tv_party_bookings (slide_id, starts_at, ends_at) values ($1, now() - interval '1 minute', now() + interval '1 hour')`, [tparty]));
 ok((await feedOf(tab.screen_code)).only === true && !(await feedOf(code)).only, "a booked party on the tablets doesn't touch the TV");
