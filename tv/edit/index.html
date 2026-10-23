@@ -132,6 +132,13 @@
   .saved { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   .saved li { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
   .saved li.pick { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .days { width: 100%; border-collapse: collapse; }
+  .days td { padding: 5px 4px; vertical-align: middle; }
+  .days td:first-child { width: 1%; white-space: nowrap; }
+  .days input[type=time] { width: 100%; min-width: 0; }
+  .days tr.closed input[type=time] { display: none; }
+  .days .shut { display: none; color: var(--muted); font-size: 14px; }
+  .days tr.closed .shut { display: inline; }
   .evnav { display: flex; align-items: center; gap: 8px; }
   .evnav b { flex: 1; text-align: center; font-size: 17px; }
   .evlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -201,14 +208,14 @@
         <div class="field"><label for="setSecs">Seconds per slide</label><input type="number" id="setSecs" min="3" max="600" step="1"></div>
         <div class="field"><span class="label">On screen</span><label class="check"><input type="checkbox" id="setClock"> Clock</label><label class="check" style="min-height:28px"><input type="checkbox" id="setLogo"> AMA logo</label></div>
       </div>
-      <div class="field" id="quietBox" hidden><span class="label">Quiet hours</span>
-        <label class="check"><input type="checkbox" id="setQuiet"> Turn the slideshow off at night</label>
-        <div class="grid2" id="quietRow">
-          <div class="field"><label for="setQFrom">From</label><input type="time" id="setQFrom"></div>
-          <div class="field"><label for="setQTo">Until</label><input type="time" id="setQTo"></div>
-          <div class="field" style="grid-column:1/-1"><label for="setQStyle">The TV shows</label><select id="setQStyle"><option value="logo">Just the AMA logo (dimmed, on black)</option><option value="black">A black screen</option></select></div>
-        </div>
-        <p class="hint">Every day. A party still shows during quiet hours. Many TVs also have their own off timer in their settings, which saves power.</p></div>
+      <div class="field" id="quietBox" hidden><span class="label">Slideshow hours</span>
+        <label class="check"><input type="checkbox" id="setQuiet"> Only play the slideshow at set times</label>
+        <div id="quietRow" style="display:flex;flex-direction:column;gap:10px">
+          <table class="days"><tbody id="qDays"></tbody></table>
+          <div class="row"><button type="button" class="btn sm" id="qCopy">Copy Monday to Tuesday to Friday</button></div>
+          <div class="field"><label for="setQStyle">At other times the TV shows</label><select id="setQStyle"><option value="logo">Just the AMA logo (dimmed, on black)</option><option value="black">A black screen</option></select></div>
+          <p class="hint" style="margin:0">A party still shows at any time. Many TVs also have their own off timer in their settings, which saves power.</p>
+        </div></div>
       <div class="row"><button class="btn primary" type="submit" id="setSave">Save settings</button></div>
     </form>
   </section>
@@ -327,7 +334,17 @@ function draw() {
   $('#setSecs').value = S.seconds; $('#setClock').checked = S.show_clock; $('#setLogo').checked = S.show_logo;
   $('#quietBox').hidden = !('quiet_on' in S);
   if ('quiet_on' in S) {
-    $('#setQuiet').checked = S.quiet_on; $('#setQFrom').value = String(S.quiet_from || '21:00').slice(0, 5); $('#setQTo').value = String(S.quiet_to || '07:00').slice(0, 5); $('#setQStyle').value = S.quiet_style || 'logo';
+    // Each day's hours: from quiet_days, or (older setting) the same every day: on at quiet_to, off at quiet_from
+    const t5 = v => String(v || '').slice(0, 5), all = { on: t5(S.quiet_to) || '07:00', off: t5(S.quiet_from) || '21:00' };
+    const days = S.quiet_days || { 0: all, 1: all, 2: all, 3: all, 4: all, 5: all, 6: all };
+    $('#qDays').innerHTML = [1, 2, 3, 4, 5, 6, 0].map(d => { const h = days[d];
+      return `<tr data-day="${d}" class="${h ? '' : 'closed'}"><td><label class="check" style="min-height:0"><input type="checkbox" id="qd${d}On" ${h ? 'checked' : ''}> ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]}</label></td>
+        <td><span class="shut">Off all day</span><input type="time" id="qd${d}From" value="${esc(h ? h.on : '15:00')}" aria-label="${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d]} from"></td>
+        <td><input type="time" id="qd${d}To" value="${esc(h ? h.off : '21:00')}" aria-label="${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d]} until"></td></tr>`; }).join('');
+    $$('#qDays input[type=checkbox]').forEach(c => c.onchange = () => { const tr = c.closest('tr'); tr.classList.toggle('closed', !c.checked); });
+    $('#qCopy').onclick = () => { [2, 3, 4, 5].forEach(d => {
+      $(`#qd${d}On`).checked = $('#qd1On').checked; $(`#qd${d}From`).value = $('#qd1From').value; $(`#qd${d}To`).value = $('#qd1To').value; $(`#qd${d}On`).onchange(); }); toast('Copied. Save settings to keep it.'); };
+    $('#setQuiet').checked = S.quiet_on; $('#setQStyle').value = S.quiet_style || 'logo';
     $('#quietRow').hidden = !S.quiet_on; $('#setQuiet').onchange = () => { $('#quietRow').hidden = !$('#setQuiet').checked; };
   }
   $('#previewBtn').href = `../?code=${encodeURIComponent(S.screen_code)}&preview=1`;
@@ -1199,9 +1216,15 @@ $('#setForm').onsubmit = async e => {
   if (!$('#quietBox').hidden) {
     rec.quiet_on = $('#setQuiet').checked;
     if (rec.quiet_on) {
-      if (!$('#setQFrom').value || !$('#setQTo').value) return toast('Fill in both quiet hours times.');
-      if ($('#setQFrom').value === $('#setQTo').value) return toast('The quiet hours start and end at the same time.');
-      rec.quiet_from = $('#setQFrom').value; rec.quiet_to = $('#setQTo').value; rec.quiet_style = $('#setQStyle').value;
+      const days = {}, names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      for (let d = 0; d < 7; d++) {
+        if (!$(`#qd${d}On`).checked) { days[d] = null; continue; }
+        const on = $(`#qd${d}From`).value, off = $(`#qd${d}To`).value;
+        if (!on || !off) return toast(`Fill in both times for ${names[d]}.`);
+        if (off <= on) return toast(`${names[d]}: the end time must be after the start time.`);
+        days[d] = { on, off };
+      }
+      rec.quiet_days = days; rec.quiet_style = $('#setQStyle').value;
     }
   }
   const { error } = await sb.from('tv_settings').update(rec).eq('id', 1);

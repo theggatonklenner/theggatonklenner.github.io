@@ -56,6 +56,9 @@ alter table public.tv_settings add column if not exists quiet_on boolean not nul
 alter table public.tv_settings add column if not exists quiet_from time not null default '21:00';
 alter table public.tv_settings add column if not exists quiet_to time not null default '07:00';
 alter table public.tv_settings add column if not exists quiet_style text not null default 'logo';
+-- Each day's slideshow hours, e.g. {"1": {"on": "15:00", "off": "21:00"}, "0": null} (0 = Sunday ... 6 = Saturday; null = closed all day).
+-- Outside them the TV is quiet. Empty: the same quiet_from/quiet_to every day.
+alter table public.tv_settings add column if not exists quiet_days jsonb;
 alter table public.tv_settings drop constraint if exists tv_settings_quiet_check;
 alter table public.tv_settings add constraint tv_settings_quiet_check check (quiet_style in ('black', 'logo'));
 alter table public.tv_settings drop constraint if exists tv_settings_code_check;
@@ -211,6 +214,7 @@ declare
   m1 date := (date_trunc('month', (now() at time zone 'Australia/Sydney')) + interval '1 month')::date;   -- next month
   two boolean;
   now_time time := (now() at time zone 'Australia/Sydney')::time;
+  day_hours jsonb;
 begin
   select * into s from public.tv_settings where id = 1;
   if not found or upper(trim(coalesce(p_code, ''))) <> s.screen_code then
@@ -237,14 +241,19 @@ begin
       'only', true, 'only_until', one_until);
   end if;
 
-  -- Quiet hours (a party still shows): a black screen or just the logo, e.g. 9 pm to 7 am
-  if s.quiet_on and s.quiet_from <> s.quiet_to and (case when s.quiet_from < s.quiet_to
-       then now_time >= s.quiet_from and now_time < s.quiet_to
-       else now_time >= s.quiet_from or now_time < s.quiet_to end) then
+  -- Quiet hours (a party still shows): a black screen or just the logo outside each day's slideshow hours
+  day_hours := s.quiet_days -> extract(dow from (now() at time zone 'Australia/Sydney'))::int::text;
+  if s.quiet_on and (case
+       when s.quiet_days is not null then
+         day_hours is null or jsonb_typeof(day_hours) <> 'object'
+         or not (now_time >= (day_hours ->> 'on')::time and now_time < (day_hours ->> 'off')::time)
+       else s.quiet_from <> s.quiet_to and (case when s.quiet_from < s.quiet_to
+         then now_time >= s.quiet_from and now_time < s.quiet_to
+         else now_time >= s.quiet_from or now_time < s.quiet_to end) end) then
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false),
       'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
-      'quiet', s.quiet_style, 'quiet_until', s.quiet_to);
+      'quiet', s.quiet_style);
   end if;
 
   select coalesce(jsonb_agg(jsonb_build_object(

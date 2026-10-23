@@ -507,11 +507,23 @@ try {
   ok(dec2 && dec2.data === 'https://www.amamartialarts.com.au/free-trial?from=tv' && !files.has(oldQr), 'changing the link makes a new code and removes the old one');
 
   // Quiet hours on now
-  const hm = d => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  await page.check('#setQuiet'); await page.fill('#setQFrom', hm(new Date(Date.now() - 3600e3))); await page.fill('#setQTo', hm(new Date(Date.now() + 3600e3)));
+  await page.check('#setQuiet');
+  ok(await page.isVisible('#qd1From') && await page.isVisible('#qd0To') && (await page.$$('#qDays tr')).length === 7, 'Settings has slideshow hours for each day of the week');
+  await page.fill('#qd1From', '15:30'); await page.fill('#qd1To', '20:45'); await page.click('#qCopy');
+  ok(await page.inputValue('#qd4From') === '15:30' && await page.inputValue('#qd5To') === '20:45', 'Copy Monday fills in Tuesday to Friday');
+  await page.fill('#qd6From', '08:00'); await page.fill('#qd6To', '13:00');
+  const todayDow = new Date().getDay();
+  await page.uncheck(`#qd${todayDow}On`);   // off all day today, so the TV is quiet now
   await page.selectOption('#setQStyle', 'logo'); await page.click('#setSave'); await toastSays(page, 'Settings saved');
-  const qs = (await db.query(`select quiet_on, quiet_style from tv_settings`)).rows[0];
-  ok(qs.quiet_on && qs.quiet_style === 'logo', 'quiet hours saved in Settings');
+  const qs = (await db.query(`select quiet_on, quiet_style, quiet_days from tv_settings`)).rows[0];
+  ok(qs.quiet_on && qs.quiet_style === 'logo' && qs.quiet_days['6'].on === '08:00' && qs.quiet_days['2'].off === '20:45' && qs.quiet_days[String(todayDow)] === null, 'each day saves its own hours, and a day can be off all day');
+  await page.waitForTimeout(1000);   // the form redraws after saving
+  await page.fill('#qd3From', '18:00'); await page.fill('#qd3To', '17:00'); if (todayDow === 3) await page.check('#qd3On');
+  await page.click('#setSave');
+  ok((await toastSays(page, 'end time')).includes('Wednesday: the end time must be after the start time'), 'an end time before the start time is caught');
+  await page.fill('#qd3To', '21:00'); if (todayDow === 3) await page.uncheck('#qd3On');
+  await page.click('#setSave'); await toastSays(page, 'Settings saved');
+  await page.waitForTimeout(500); await page.locator('#setForm').screenshot({ path: join(SHOTS, 'tv-hours.png') });
 
   const tvc3 = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
   await tvc3.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
