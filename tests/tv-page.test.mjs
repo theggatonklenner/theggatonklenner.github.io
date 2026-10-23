@@ -206,6 +206,12 @@ try {
   const tvset = (await db.query(`select only_slide, only_until > now() + interval '55 minutes' and only_until < now() + interval '65 minutes' ok from tv_settings`)).rows[0];
   ok(tvset.only_slide && tvset.ok, 'party mode is on for 1 hour');
   ok((await page.textContent('#party')).includes('Party mode is on') && !(await page.textContent('#list')).includes('Happy Birthday'), 'editor shows party mode is on; the party slide is kept out of the slide list');
+  for (const scheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const cols = await page.$$eval('#party .btn', bs => bs.map(b => { const c = getComputedStyle(b); return [c.color, c.backgroundColor]; }));
+    ok(cols.length === 2 && cols.every(([fg, bg]) => fg !== bg) && cols[1][0] === 'rgb(22, 33, 27)' && cols[1][1] === 'rgb(255, 255, 255)', `party mode buttons are readable in ${scheme} mode`);
+  }
+  await page.emulateMedia({ colorScheme: 'dark' }); await page.screenshot({ path: join(SHOTS, 'tv-party-on-dark.png') }); await page.emulateMedia({ colorScheme: 'light' });
   await page.screenshot({ path: join(SHOTS, 'tv-party-on.png') });
   const tv = await context({ width: 1280, height: 720 });
   await tv.page.goto(BASE + `/tv/index.html?code=${CODE}`); await tv.page.waitForSelector('.layer.on');
@@ -226,6 +232,7 @@ try {
   ok(img.kind === 'photo' && files.has(img.media_path), 'an uploaded image can be shown on its own');
   await tv.page.evaluate(() => window.__tv.reload()); await tv.page.waitForTimeout(800);
   ok((await tv.page.evaluate(() => window.__tv.state())).count === 1, 'and the TV switches to it');
+  ok(!(await tv.page.$('.layer.on .caption')) && !(await tv.page.textContent('#stage')).includes('Happy Birthday Sam!'), 'in party mode the picture shows on its own, with no caption over it');
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
   await page.click('#partyStart'); await page.waitForSelector('#pForm');
   ok((await page.$$('#pForm [data-m="saved"]')).length === 1, 'earlier party slides are saved to reuse');

@@ -202,7 +202,7 @@
   function themeOf(s) { return 't-' + (s.theme || 'green'); }
   function html(s) {
     var live = feed.live || {};
-    if (s.kind === 'photo') return '<div class="fill blur" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')"></div><div class="fill contain" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')"></div>' + (s.title ? '<div class="caption">' + esc(s.title) + '</div>' : '');
+    if (s.kind === 'photo') return '<div class="fill blur" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')"></div><div class="fill contain" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')"></div>' + (s.title && !feed.only ? '<div class="caption">' + esc(s.title) + '</div>' : '');   // party mode: just the picture, no caption
     if (s.kind === 'text') {
       var bg = s.media_path ? ' bgphoto" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')' : '';
       return '<div class="card ' + themeOf(s) + bg + '">' + (s.media_path ? '<div class="shade"></div>' : '') + (s.theme === 'party' ? confetti() : '') + '<div class="belt"></div>' + (s.title ? '<h1>' + esc(s.title) + '</h1>' : '') + (s.body ? '<div class="body">' + esc(s.body) + '</div>' : '') + '</div>';

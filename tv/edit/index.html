@@ -97,6 +97,9 @@
   .swatches input:checked + span { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
   #party.on { background: var(--gold); color: var(--on-gold); }
   #party.on .hint { color: var(--on-gold); opacity: .85; }
+  /* Fixed colours on the gold card, so the buttons read the same in light and dark mode */
+  #party.on .btn { background: #ffffff; color: #16211b; border-color: rgba(0,0,0,.18); }
+  #party.on .btn.primary { background: #04794b; border-color: #04794b; color: #ffffff; }
   .seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .seg button { flex: 1; border: 0; background: var(--surface); padding: 9px 6px; font-weight: 600; font-size: 14px; color: var(--muted); cursor: pointer; }
   .seg button + button { border-left: 1px solid var(--line); }
