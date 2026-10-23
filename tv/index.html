@@ -73,6 +73,9 @@
   .names .n span { font-size: 2.4vw; opacity: .85; }
 
   /* Corner bits */
+  video.vid { background: #000; opacity: 0; transition: opacity .4s; }
+  video.vid.on { opacity: 1; }
+  video::-webkit-media-controls, video::-webkit-media-controls-start-playback-button, video::-webkit-media-controls-overlay-play-button { display: none !important; -webkit-appearance: none; }
   .quiet { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: #000; }
   .quiet .qlogo { position: absolute; left: 50%; top: 50%; width: 22vh; height: 22vh; margin: -11vh 0 0 -11vh; border-radius: 3vh; background: #fff url(../icons/ama-id-cards.png) center/86% no-repeat; opacity: .55; }
   .card.qr { flex-direction: row; align-items: center; }
@@ -353,14 +356,17 @@
     };
     if (s.kind === 'video') {
       var v = document.createElement('video');
-      v.className = 'fill'; v.muted = true; v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.autoplay = true; v.preload = 'auto';
+      // Kept hidden until it's actually playing, so the browser's own big "play" icon never shows
+      v.className = 'fill vid'; v.muted = true; v.controls = false; v.setAttribute('disablepictureinpicture', '');
+      v.poster = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';   // a black dot instead of the play icon
+      v.addEventListener('playing', function () { v.className = 'fill vid on'; reveal(); }); v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.autoplay = true; v.preload = 'auto';
       v.src = MEDIA + s.media_path;
       v.onended = function () { if (!paused) next(); };
       v.onerror = function () { later(500); };
       layer.appendChild(v);
       var started = v.play && v.play(); if (started && started.catch) started.catch(function () { later(3000); });
       if (paused && v.pause) v.pause();
-      reveal();
+      setTimeout(function () { v.className = 'fill vid on'; reveal(); }, 4000);   // in case 'playing' never comes
       later(s.seconds ? secs : 10 * 60 * 1000);   // a video plays to the end (or its set time)
       return;
     }

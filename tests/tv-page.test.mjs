@@ -556,6 +556,30 @@ try {
   await tvc3.close(); await ctx.close();
   await db.query(`delete from tv_slides where kind = 'qr'`);
 
+  // Videos: hidden until they're actually playing (no big "play" icon first)
+  console.log('\nVideos');
+  const CLIP = process.env.TEST_CLIP || '/tmp/claude-0/-home-claude/eaa02a79-d300-5a00-9b7a-e09b12f5efb0/scratchpad/clip.webm';
+  files.set('videos/test-clip.webm', { type: 'video/webm', body: readFileSync(CLIP) });
+  await db.query(`update tv_slides set enabled = false`);
+  await db.query(`insert into tv_slides (kind, media_path, title) values ('video', 'videos/test-clip.webm', 'Test clip')`);
+  const tvc5 = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  await tvc5.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+  await tvc5.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+  let releaseClip; const clipGate = new Promise(r => { releaseClip = r; });
+  await tvc5.route('**/storage/v1/**', async r => { const m = new URL(r.request().url()).pathname.match(/\/tv\/(.+)$/), f = m && files.get(decodeURIComponent(m[1]));
+    if (f && f.type.startsWith('video')) await clipGate;   // hold the video back, like a slow connection
+    return f ? r.fulfill({ status: 200, contentType: f.type, body: f.body }) : r.fulfill({ status: 404, body: '' }); });
+  const tv5 = await tvc5.newPage(); tv5.on('pageerror', e => errors.push('tv: ' + e.message));
+  await tv5.goto(BASE + `/tv/index.html?code=${CODE}&preview=1`);
+  await tv5.waitForSelector('video.vid', { state: 'attached' });
+  await tv5.waitForTimeout(800);
+  ok(await tv5.evaluate(() => getComputedStyle(document.querySelector('video.vid')).opacity === '0' && !document.querySelector('video.vid').controls), 'while a video loads it stays hidden, with no controls or play icon');
+  releaseClip();
+  await tv5.waitForFunction(() => { const v = document.querySelector('video.vid.on'); return v && !v.paused && v.currentTime > 0; }, null, { timeout: 8000 }).catch(() => {});
+  ok(await tv5.evaluate(() => { const v = document.querySelector('video.vid'); return v.className.includes('on') && v.currentTime > 0; }), 'it appears once it is playing');
+  await tvc5.close();
+  await db.query(`delete from tv_slides where kind = 'video'`); await db.query(`update tv_slides set enabled = true where not party`);
+
   // Phone remote
   console.log('\nPhone remote');
   const tvc4 = await browser.newContext({ viewport: { width: 1280, height: 720 } });
