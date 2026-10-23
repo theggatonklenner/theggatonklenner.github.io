@@ -348,6 +348,16 @@ ok(fsi.settings.signin === 'https://signin.example.com/ama' && fsi.settings.sign
 ok(!(await tryAs('tate@ama.test', `update tv_settings set signin_url = 'javascript:alert(1)' where id = 2`)).ok && !(await tryAs('tate@ama.test', `update tv_settings set signin_idle = 2 where id = 2`)).ok, 'only https links, and a sensible wait');
 await as('tate@ama.test', () => db.exec(`update tv_settings set signin_url = null, signin_idle = 60 where id = 2`));
 
+console.log('\nSaving egress');
+const full1 = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
+const same1 = (await as(null, () => db.query(`select tv_feed($1, null, null, $2) f`, [code, full1.hash]))).rows[0].f;
+ok(full1.hash && same1.same === true && JSON.stringify(same1).length < 80, `when nothing has changed the screen gets ${JSON.stringify(same1).length} bytes instead of ${JSON.stringify(full1).length}`);
+await as('tate@ama.test', () => db.exec(`insert into tv_slides (kind, title) values ('text', 'Egress test')`));
+const full2 = (await as(null, () => db.query(`select tv_feed($1, null, null, $2) f`, [code, full1.hash]))).rows[0].f;
+ok(!full2.same && full2.slides.some(x => x.title === 'Egress test'), 'a change sends the whole thing again');
+ok(!(await tryAs(null, `select tv_feed_full($1)`, [code])).ok, 'the inside part is not open to the public');
+await as('tate@ama.test', () => db.exec(`delete from tv_slides where title = 'Egress test'`));
+
 console.log('\nFiles');
 const pol = (await db.query(`select policyname, roles::text r from pg_policies where tablename = 'objects' and policyname like 'tv files%'`)).rows;
 ok(pol.length === 4 && pol.every(p => p.r.includes('authenticated') && !p.r.includes('anon')), 'only signed-in staff can add, change or remove TV files');

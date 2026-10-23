@@ -924,6 +924,29 @@ try {
   await sic.close();
   await db.query(`update tv_settings set signin_url = null, signin_idle = 60 where id = 2`); await db.query(`delete from tv_slides where display = 'tablet'`);
 
+  // Saving egress: only changes are sent, and photos are kept on the screen
+  console.log('\nSaving egress');
+  {
+    const ec = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    await ec.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+    await ec.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+    const hits = {}; let feedBytes = [];
+    await ec.route('**/storage/v1/**', r => { const m = new URL(r.request().url()).pathname.match(/\/tv\/(.+)$/), k = m && decodeURIComponent(m[1]), f = k && files.get(k);
+      hits[k] = (hits[k] || 0) + 1; return f ? r.fulfill({ status: 200, contentType: f.type, headers: { 'access-control-allow-origin': '*' }, body: f.body }) : r.fulfill({ status: 404, body: '' }); });
+    const ep = await ec.newPage();
+    ep.on('response', async res => { if (res.url().includes('/rpc/tv_feed')) { try { feedBytes.push((await res.body()).length); } catch (e) { /* ignore */ } } });
+    await ep.goto(BASE + `/tv/index.html?code=${CODE}`); await ep.waitForSelector('.layer.on');
+    await ep.waitForFunction(() => navigator.serviceWorker && navigator.serviceWorker.controller, null, { timeout: 8000 }).catch(() => {});
+    await ep.reload(); await ep.waitForSelector('.layer.on');
+    const n = await ep.evaluate(() => window.__tv.state().count);
+    for (let i = 0; i < n + 1; i++) { await ep.waitForTimeout(400); await ep.evaluate(() => window.__tv.next()); }
+    await ep.evaluate(() => window.__tv.reload()); await ep.waitForTimeout(800);
+    const photos = Object.keys(hits).filter(k => k && k.startsWith('photos/'));
+    ok(photos.length > 0 && photos.every(k => hits[k] === 1), `each photo is downloaded once, even after the page reloads (${photos.map(k => hits[k]).join(',')})`);
+    ok(feedBytes.length >= 2 && feedBytes[feedBytes.length - 1] < 100 && feedBytes[0] > 300, `checks with nothing new are tiny (${feedBytes.join(', ')} bytes)`);
+    await ec.close();
+  }
+
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));
   await page.goto(BASE + '/tv/edit/index.html');

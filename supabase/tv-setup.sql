@@ -323,7 +323,9 @@ create policy "staff edit months" on public.tv_months for all to authenticated u
 
 -- ---------- What the TV gets (no sign-in, screen code only) ----------
 drop function if exists public.tv_feed(text);
-create or replace function public.tv_feed(p_code text, p_screen text default null, p_loc text default null) returns jsonb
+drop function if exists public.tv_feed(text, text, text);
+-- The whole feed. tv_feed (below) sends it only when it has changed since the screen's last copy.
+create or replace function public.tv_feed_full(p_code text, p_screen text default null, p_loc text default null) returns jsonb
   language plpgsql stable security definer set search_path = public as $$
 declare
   s public.tv_settings%rowtype;
@@ -440,7 +442,21 @@ begin
     'version', greatest(coalesce(changed, s.updated_at), s.updated_at),
     'slides', slides, 'live', live, 'today', today);
 end $$;
-grant execute on function public.tv_feed(text, text, text) to anon, authenticated;
+revoke all on function public.tv_feed_full(text, text, text) from public, anon, authenticated;
+
+-- What the screen asks for every 20 seconds. p_have is the fingerprint of the copy it already has: when nothing
+-- has changed it gets back just {"same": true}, a few bytes instead of the whole slideshow (saves Supabase egress).
+create or replace function public.tv_feed(p_code text, p_screen text default null, p_loc text default null, p_have text default null)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare f jsonb; h text;
+begin
+  f := public.tv_feed_full(p_code, p_screen, p_loc);
+  if f ? 'error' then return f; end if;
+  h := md5(f::text);
+  if p_have is not null and p_have = h then return jsonb_build_object('same', true, 'hash', h); end if;
+  return f || jsonb_build_object('hash', h);
+end $$;
+grant execute on function public.tv_feed(text, text, text, text) to anon, authenticated;
 
 -- The TV checks in: records what it's showing, and hears whether it should reload
 drop function if exists public.tv_checkin(text, text, text, timestamptz, jsonb);

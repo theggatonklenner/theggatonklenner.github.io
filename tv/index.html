@@ -235,19 +235,30 @@
     return fetch(BASE + '/rest/v1/rpc/tv_feed', {
       method: 'POST', cache: 'no-store',
       headers: { 'Content-Type': 'application/json', 'apikey': CFG.SUPABASE_KEY },
-      body: JSON.stringify({ p_code: code, p_screen: screenId, p_loc: LOC })
+      body: JSON.stringify({ p_code: code, p_screen: screenId, p_loc: LOC, p_have: haveHash() })
     }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+  }
+  // The fingerprint of the slideshow this screen already has: Supabase only sends it again when it has changed
+  var lastHash = null;
+  function haveHash() {
+    if (lastHash) return lastHash;
+    try { var c = JSON.parse(store.get('tvFeed') || 'null'); return c && c.hash || null; } catch (e) { return null; }
   }
   function load(first) {
     if (!code) return askCode();
     fetchFeed().then(function (f) {
       document.body.className = document.body.className.replace(/\boffline\b/g, '');
       if (f && f.error === 'wrong_code') {
-        store.del('tvCode'); code = null; store.del('tvFeed');
+        store.del('tvCode'); code = null; store.del('tvFeed'); lastHash = null;
         if (params.code) { params.code = null; try { history.replaceState(null, '', location.pathname); } catch (er) { /* ignore */ } }
         return askCode(first ? 'That code is not right. Check it in the TV editor.' : 'The screen code was changed. Enter the new one, or open the new link from the TV editor.');
       }
-      store.set('tvFeed', JSON.stringify(f));
+      if (f && f.same) {   // nothing has changed
+        if (!feed) { try { var c = JSON.parse(store.get('tvFeed')); if (c) apply(c, true); } catch (e) { /* ignore */ } }
+        if (!feed) { store.del('tvFeed'); lastHash = null; return load(first); }   // the saved copy is gone: ask for the whole thing
+        setTimeout(checkIn, 1500); remoteFromFeed(feed); return;
+      }
+      store.set('tvFeed', JSON.stringify(f)); lastHash = f.hash || null; tidyMedia(f);
       setTimeout(checkIn, 1500);
       apply(f, first);
       remoteFromFeed(f);
@@ -503,6 +514,22 @@
     if (e.key === 'ArrowLeft' || e.keyCode === 37) back();   // remote: back
   });
   document.addEventListener('click', function () { if ($('codeScreen').style.display === 'none') { fullScreen(); openSignin(); } });
+
+  // ---------- Photos and videos kept on the screen (see sw.js) ----------
+  if ('serviceWorker' in navigator && !PREVIEW) { try { navigator.serviceWorker.register('sw.js').catch(function () {}); } catch (e) { /* older browsers */ } }
+  // Forget files that haven't been in the slideshow for 2 weeks
+  function tidyMedia(f) {
+    if (!window.caches || !f || !f.slides) return;
+    var seen = {}; try { seen = JSON.parse(store.get('tvMediaSeen') || '{}') || {}; } catch (e) { seen = {}; }
+    var now = Date.now();
+    f.slides.forEach(function (s) { if (s.media_path) seen[MEDIA + s.media_path] = now; });
+    caches.open('ama-tv-media-v1').then(function (c) {
+      return c.keys().then(function (keys) {
+        keys.forEach(function (k) { if (!seen[k.url]) seen[k.url] = now; else if (now - seen[k.url] > 14 * 864e5) { c['delete'](k); delete seen[k.url]; } });
+        store.set('tvMediaSeen', JSON.stringify(seen));
+      });
+    })['catch'](function () {});
+  }
 
   // ---------- Sign-in mode (tablets): the sign-in page until nobody has touched it for a while, then the slides ----------
   var signinOpen = false, signinUrl = null, signinIdle = 60, signinT = null, signinBlocked = false;
