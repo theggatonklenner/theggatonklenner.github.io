@@ -556,6 +556,46 @@ try {
   await tvc3.close(); await ctx.close();
   await db.query(`delete from tv_slides where kind = 'qr'`);
 
+  // Phone remote
+  console.log('\nPhone remote');
+  const tvc4 = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  await tvc4.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+  await tvc4.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+  const tv4 = await tvc4.newPage(); tv4.on('pageerror', e => errors.push('tv: ' + e.message));
+  await tv4.goto(BASE + `/tv/index.html?code=${CODE}`); await tv4.waitForSelector('.layer.on');
+  await db.query(`update tv_settings set seconds = 30`); await tv4.evaluate(() => window.__tv.reload());   // slow, so only the remote moves it
+  ({ ctx, page } = await context({ width: 390, height: 844 }));
+  await page.goto(BASE + '/tv/remote/index.html');
+  await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+  await page.waitForSelector('#app:not([hidden])');
+  ok((await page.$$('#list [data-show]')).length >= 3, 'the remote lists the slides to show');
+  await tv4.waitForTimeout(500); await tv4.evaluate(() => window.__tv.reload());   // (the TV notices the remote at its next check, up to 20 s)
+  await page.waitForFunction(() => document.querySelector('#conn').textContent.includes('listening'), null, { timeout: 10000 }).catch(() => {});
+  ok((await page.textContent('#conn')).includes('The TV is listening'), 'once the TV notices, the remote says it is listening');
+  const idx = async () => tv4.evaluate(() => window.__tv.state().index);
+  const n0 = await tv4.evaluate(() => window.__tv.state().count), i0 = await idx();
+  await page.click('#bNext'); await tv4.waitForFunction(i => window.__tv.state().index !== i, i0, { timeout: 5000 }).catch(() => {});
+  ok(await idx() === (i0 + 1) % n0, 'Next moves the TV on one slide');
+  await page.waitForTimeout(300); await page.click('#bBack'); await tv4.waitForFunction(i => window.__tv.state().index === i, i0, { timeout: 5000 }).catch(() => {});
+  ok(await idx() === i0, 'Back goes back one');
+  await page.waitForTimeout(300); await page.click('#bPause');
+  await tv4.waitForFunction(() => window.__tv.paused(), null, { timeout: 5000 }).catch(() => {});
+  await page.waitForFunction(() => !document.querySelector('#pausedChip').hidden, null, { timeout: 5000 }).catch(() => {});
+  ok(await tv4.evaluate(() => window.__tv.paused()) && await tv4.isVisible('#pausedTag') && (await page.textContent('#bPause')).includes('Play'), 'Pause stops the slideshow, and both the TV and the remote say Paused');
+  const target = (await db.query(`select id from tv_slides where title = 'No classes on Monday'`)).rows[0].id;
+  await page.click(`[data-show="${target}"]`);
+  await tv4.waitForFunction(id => { const s = window.__tv.state(); return s.ids[s.index] === id; }, target, { timeout: 5000 }).catch(() => {});
+  ok(await tv4.evaluate(id => { const s = window.__tv.state(); return s.ids[s.index] === id; }, target) && (await tv4.textContent('.layer.on:last-child')).includes('No classes on Monday'), 'tapping a slide shows it on the TV straight away');
+  await page.waitForFunction(id => (document.querySelector(`[data-show="${id}"]`) || {}).className === 'cur', target, { timeout: 5000 }).catch(() => {});
+  ok((await page.textContent(`[data-show="${target}"]`)).includes('On the TV now'), 'the remote marks what is on the TV');
+  const iHeld = await idx(); await tv4.waitForTimeout(2500);
+  ok(await idx() === iHeld && await tv4.evaluate(() => window.__tv.paused()), 'while paused it stays on that slide');
+  await page.screenshot({ path: join(SHOTS, 'tv-remote.png') });
+  await page.click('#bDone'); await tv4.waitForFunction(() => !window.__tv.paused(), null, { timeout: 5000 }).catch(() => {});
+  ok(!(await tv4.evaluate(() => window.__tv.paused())) && await tv4.isHidden('#pausedTag'), 'Done carries on the slideshow');
+  await tvc4.close(); await ctx.close();
+  await db.query(`update tv_settings set seconds = 4, remote_until = null`);
+
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));
   await page.goto(BASE + '/tv/edit/index.html');

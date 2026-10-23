@@ -80,6 +80,7 @@
   .qr .qlink { font-size: 2.6vw; font-weight: 700; margin-top: 3vh; opacity: .9; word-break: break-all; }
   .qr .qbox { flex: none; width: 66vh; height: 66vh; max-width: 40vw; max-height: 40vw; background: #fff; border-radius: 2.4vh; padding: 1.2vh; box-sizing: border-box; }
   .qr .qbox img { display: block; width: 100%; height: 100%; }
+  .paused { position: absolute; right: 2.2vw; bottom: 2.4vh; z-index: 6; background: rgba(0,0,0,.6); color: #fff; font-size: 1.6vw; font-weight: 700; padding: .6vh 1.2vw; border-radius: 99px; }
   .logo { position: absolute; left: 2.2vw; top: 2.4vh; width: 5vw; height: 5vw; border-radius: 1vw; background: #fff url(../icons/ama-id-cards.png) center/86% no-repeat; z-index: 5; box-shadow: 0 .3vw 1vw rgba(0,0,0,.3); }
   .clock { position: absolute; right: 2.4vw; top: 2.4vh; z-index: 5; font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-weight: 700; font-size: 3vw; padding: .6vh 1.2vw; border-radius: 1vw; background: rgba(0,0,0,.45); color: #fff; }
   .dot { position: absolute; right: 1vw; bottom: 1.4vh; width: 1vw; height: 1vw; border-radius: 50%; background: #f2867d; z-index: 6; display: none; }
@@ -99,6 +100,7 @@
 <body>
 <div id="stage"></div>
 <div class="logo" id="logo" style="display:none"></div>
+<div class="paused" id="pausedTag" style="display:none">Paused</div>
 <div class="clock" id="clock" style="display:none"></div>
 <div class="dot" title="No connection"></div>
 <div class="hint" id="hint" style="display:none">Press OK or click for full screen</div>
@@ -185,6 +187,7 @@
       store.set('tvFeed', JSON.stringify(f));
       setTimeout(checkIn, 1500);
       apply(f, first);
+      remoteFromFeed(f);
     }).catch(function () {
       document.body.className += ' offline';
       if (first || !feed) { var c = store.get('tvFeed'); if (c) { try { apply(JSON.parse(c), true); } catch (e) { /* ignore */ } } else showMessage('Connecting...', 'Check the TV is on the internet.'); }
@@ -318,7 +321,11 @@
   }
   function next() {
     clearTimeout(timer);
-    if (pending) { feed = pending; version = pending.version; pending = null; build(); setCorners(); index = -1; }
+    if (pending) {   // take up changes, carrying on from the same slide
+      var curId = playlist[index] && playlist[index].id;
+      feed = pending; version = pending.version; pending = null; build(); setCorners(); index = -1;
+      for (var k = 0; k < playlist.length; k++) if (playlist[k].id === curId) index = k;
+    }
     if (feed && feed.quiet) {   // quiet hours: stays like this until the feed says otherwise
       layerOn = null; index = -1;
       stage.innerHTML = '<div class="layer on"><div class="quiet">' + (feed.quiet === 'logo' ? '<div class="qlogo"></div>' : '') + '</div></div>';
@@ -349,12 +356,13 @@
       var v = document.createElement('video');
       v.className = 'fill'; v.muted = true; v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.autoplay = true; v.preload = 'auto';
       v.src = MEDIA + s.media_path;
-      v.onended = function () { next(); };
-      v.onerror = function () { timer = setTimeout(next, 500); };
+      v.onended = function () { if (!paused) next(); };
+      v.onerror = function () { later(500); };
       layer.appendChild(v);
-      var started = v.play && v.play(); if (started && started.catch) started.catch(function () { timer = setTimeout(next, 3000); });
+      var started = v.play && v.play(); if (started && started.catch) started.catch(function () { later(3000); });
+      if (paused && v.pause) v.pause();
       reveal();
-      timer = setTimeout(next, s.seconds ? secs : 10 * 60 * 1000);   // a video plays to the end (or its set time)
+      later(s.seconds ? secs : 10 * 60 * 1000);   // a video plays to the end (or its set time)
       return;
     }
     if (s.kind === 'photo' || s.media_path) {
@@ -365,8 +373,51 @@
     // load the next photo early
     var nx = playlist[(index + 1) % playlist.length];
     if (nx && nx.media_path && nx.kind !== 'video') { var pre = new Image(); pre.src = MEDIA + nx.media_path; }
-    timer = setTimeout(next, secs);
+    later(secs);
   }
+  // Move on after ms, unless the remote has paused the slideshow
+  var paused = false, holdMs = 0;
+  function later(ms) { clearTimeout(timer); holdMs = ms; if (!paused) timer = setTimeout(next, ms); }
+  function back() { if (!playlist.length) return; index = (index - 2 + playlist.length * 2) % playlist.length; next(); }
+  function showSlide(id) {
+    if (pending) { feed = pending; version = pending.version; pending = null; build(); setCorners(); }
+    for (var i = 0; i < playlist.length; i++) if (playlist[i].id === id) { index = i - 1; next(); return true; }
+    return false;
+  }
+  function setPaused(p) {
+    paused = p;
+    var v = layerOn && layerOn.querySelector('video');
+    if (v) { try { if (p) v.pause(); else v.play(); } catch (e) { /* ignore */ } }
+    $('pausedTag').style.display = p ? '' : 'none';
+    if (p) clearTimeout(timer); else timer = setTimeout(next, Math.min(holdMs || 8000, 8000));   // carry on a few seconds after Play
+  }
+
+  // ---------- Phone remote: while it's open, check for button presses every 1.5 seconds ----------
+  var remoteSeq = null, remoteOn = false, remoteTimer = null, REMOTE_MS = 1500;
+  function remoteState() { var s = playlist[index]; return { showing: showingNow(), slide: s && !feed.only && !feed.quiet ? String(s.id).split(':')[0] : null, paused: paused }; }
+  function remotePoll() {
+    clearTimeout(remoteTimer);
+    if (!code || PREVIEW) return;
+    fetch(BASE + '/rest/v1/rpc/tv_remote_poll', {
+      method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'apikey': CFG.SUPABASE_KEY },
+      body: JSON.stringify({ p_code: code, p_screen: screenId, p_after: remoteSeq, p_state: remoteState() })
+    }).then(function (r) { return r.ok ? r.json() : null; }).then(function (r) {
+      if (!r || r.error) { remoteOn = false; return; }
+      var c = r.cmd; remoteSeq = r.seq;
+      if (c && !feed.only && !feed.quiet) {
+        if (c.cmd === 'next') next();
+        else if (c.cmd === 'back') back();
+        else if (c.cmd === 'pause') setPaused(true);
+        else if (c.cmd === 'play' || c.cmd === 'done') { if (paused) setPaused(false); }
+        else if (c.cmd === 'show' && c.slide) showSlide(c.slide);
+        if (c.cmd !== 'hello') setTimeout(remotePoll, 300);   // report the change straight back
+      }
+      remoteOn = r.on;
+      if (!remoteOn && paused) setPaused(false);   // remote closed: carry on
+      if (remoteOn) remoteTimer = setTimeout(remotePoll, REMOTE_MS);
+    }).catch(function () { if (remoteOn) remoteTimer = setTimeout(remotePoll, REMOTE_MS * 4); });
+  }
+  function remoteFromFeed(f) { if (f && f.remote && !remoteOn) { remoteOn = true; remotePoll(); } else if (f && !f.remote && remoteOn) { remoteOn = false; remotePoll(); } }
 
   // ---------- Full screen, cursor, keeping awake ----------
   function fullScreen() {
@@ -379,7 +430,7 @@
     if ($('codeScreen').style.display !== 'none') return;
     if (e.key === 'Enter' || e.keyCode === 13) fullScreen();
     if (e.key === 'ArrowRight' || e.keyCode === 39) next();                       // remote: next slide
-    if (e.key === 'ArrowLeft' || e.keyCode === 37) { index = Math.max(-1, index - 2); next(); }   // remote: back
+    if (e.key === 'ArrowLeft' || e.keyCode === 37) back();   // remote: back
   });
   document.addEventListener('click', function () { if ($('codeScreen').style.display === 'none') fullScreen(); });
   var idleT;
@@ -390,7 +441,7 @@
   // Reload once a night (picks up updates and keeps the TV browser fresh)
   setInterval(function () { var n = new Date(); if (n.getHours() === 3 && n.getMinutes() < 2) location.reload(); }, 60000);
   setInterval(function () { if (code) load(false); }, POLL_MS);
-  window.__tv = { next: next, reload: function () { load(false); }, checkIn: checkIn, started: STARTED, state: function () { return { index: index, count: playlist.length, ids: playlist.map(function (s) { return s.id; }) }; } };   // for testing
+  window.__tv = { next: next, remotePoll: remotePoll, paused: function () { return paused; }, reload: function () { load(false); }, checkIn: checkIn, started: STARTED, state: function () { return { index: index, count: playlist.length, ids: playlist.map(function (s) { return s.id; }) }; } };   // for testing
   load(true);
 })();
 </script>

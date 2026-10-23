@@ -61,6 +61,10 @@ alter table public.tv_settings add column if not exists quiet_style text not nul
 alter table public.tv_settings add column if not exists quiet_days jsonb;
 alter table public.tv_settings drop constraint if exists tv_settings_quiet_check;
 alter table public.tv_settings add constraint tv_settings_quiet_check check (quiet_style in ('black', 'logo'));
+alter table public.tv_settings add column if not exists remote_until timestamptz;               -- phone remote: the TV listens closely until then
+alter table public.tv_settings add column if not exists remote_seq bigint not null default 0;     -- ... numbers each button press
+alter table public.tv_settings add column if not exists remote_cmd jsonb;                         -- ... the last press, e.g. {"cmd": "next"}
+alter table public.tv_settings add column if not exists remote_at timestamptz;
 alter table public.tv_settings drop constraint if exists tv_settings_code_check;
 alter table public.tv_settings add constraint tv_settings_code_check check (screen_code ~ '^[A-Z0-9]{4,12}$');
 
@@ -148,6 +152,7 @@ drop trigger if exists tv_stamp on public.tv_slides;
 create trigger tv_stamp before insert or update on public.tv_slides for each row execute function public.tv_stamp();
 create or replace function public.tv_settings_stamp() returns trigger language plpgsql as $$
 begin
+  if new.remote_seq is distinct from old.remote_seq then return new; end if;   -- a remote button press isn't a change to the slideshow
   new.updated_at := now(); new.screen_code := upper(new.screen_code);
   if new.reload_at is distinct from old.reload_at and new.reload_at is not null then new.reload_at := now(); end if;   -- server time, so TV clocks don't matter
   return new;
@@ -290,6 +295,7 @@ begin
 
   return jsonb_build_object(
     'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', s.show_clock, 'show_logo', s.show_logo),
+    'remote', coalesce(s.remote_until > now(), false),
     'version', greatest(coalesce(changed, s.updated_at), s.updated_at),
     'slides', slides, 'live', live, 'today', today);
 end $$;
@@ -314,6 +320,41 @@ begin
   return jsonb_build_object('reload', s.reload_at is not null and s.reload_at > loaded);
 end $$;
 grant execute on function public.tv_checkin(text, text, text, timestamptz, jsonb) to anon, authenticated;
+
+-- ---------- Phone remote ----------
+-- The phone sends a button press; while the remote is open (10 minutes since its last use) the TV checks every
+-- second or two, carries out the newest press, and reports what's on screen.
+create or replace function public.tv_remote_send(p_cmd text, p_slide uuid default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare n bigint;
+begin
+  if not public.tv_is_staff() then raise exception 'Only AMA staff can use the TV remote' using errcode = '42501'; end if;
+  if p_cmd not in ('hello', 'next', 'back', 'pause', 'play', 'show', 'done') then raise exception 'Unknown button'; end if;
+  update public.tv_settings set
+      remote_seq = remote_seq + 1, remote_at = now(),
+      remote_cmd = jsonb_build_object('cmd', p_cmd, 'slide', p_slide),
+      remote_until = case when p_cmd = 'done' then now() + interval '30 seconds' else now() + interval '10 minutes' end
+   where id = 1 returning remote_seq into n;
+  return jsonb_build_object('seq', n);
+end $$;
+revoke all on function public.tv_remote_send(text, uuid) from public, anon;
+grant execute on function public.tv_remote_send(text, uuid) to authenticated;
+
+create or replace function public.tv_remote_poll(p_code text, p_screen text, p_after bigint, p_state jsonb default '{}'::jsonb)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare s public.tv_settings%rowtype;
+begin
+  select * into s from public.tv_settings where id = 1;
+  if not found or upper(trim(coalesce(p_code, ''))) <> s.screen_code then return jsonb_build_object('error', 'wrong_code'); end if;
+  if coalesce(p_screen, '') ~ '^[A-Za-z0-9_-]{6,40}$' then   -- what's on screen, for the remote and TV status
+    update public.tv_screens set last_seen = now(), showing = left(coalesce(p_state ->> 'showing', showing), 200),
+           details = details || (coalesce(p_state, '{}'::jsonb) - 'showing') || jsonb_build_object('remote_seq', p_after)
+     where screen_id = p_screen;
+  end if;
+  return jsonb_build_object('on', coalesce(s.remote_until > now(), false), 'seq', s.remote_seq,
+    'cmd', case when p_after is not null and s.remote_seq > p_after and s.remote_at > now() - interval '30 seconds' then s.remote_cmd end);
+end $$;
+grant execute on function public.tv_remote_poll(text, text, bigint, jsonb) to anon, authenticated;
 
 -- ---------- Photos and videos ----------
 -- Files are public by link (the TV shows them without signing in); names are random, and only staff can add,

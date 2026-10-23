@@ -200,6 +200,34 @@ await as('tate@ama.test', () => db.exec(`insert into tv_slides (kind, title, lin
 ok((await feedNow()).slides.some(x => x.kind === 'qr' && x.link === 'https://instagram.com/ama'), 'QR slides reach the TV with their link');
 await as('tate@ama.test', () => db.exec(`delete from tv_slides where kind = 'qr' or title = 'Party in quiet hours'`));
 
+console.log('\nPhone remote');
+const poll = async (after, state = {}) => (await as(null, () => db.query(`select tv_remote_poll($1, 'screen-abc123', $2, $3::jsonb) r`, [code, after, JSON.stringify(state)]))).rows[0].r;
+ok(!(await tryAs(null, `select tv_remote_send('next')`)).ok && !(await tryAs('nobody@ama.test', `select tv_remote_send('next')`)).ok, 'only staff can press the remote buttons');
+let p0 = await poll(null);
+ok(p0.on === false && !p0.cmd, 'the remote is off until someone opens it');
+const verBefore = (await feedNow()).version;
+await as('tate@ama.test', () => db.query(`select tv_remote_send('hello')`));
+const fr = await feedNow();
+ok(fr.remote === true && fr.version === verBefore, 'opening the remote tells the TV to listen closely, without restarting the slideshow');
+p0 = await poll(null);
+ok(p0.on && !p0.cmd, 'a TV that just started listening does not replay an old press');
+const s0 = p0.seq;
+const sid = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title) values ('text', 'Remote target') returning id`))).rows[0].id;
+await as('tate@ama.test', () => db.query(`select tv_remote_send('show', $1)`, [sid]));
+let p1 = await poll(s0, { showing: 'Remote target (2 of 5)', slide: sid, paused: false });
+ok(p1.cmd.cmd === 'show' && p1.cmd.slide === sid && p1.seq === s0 + 1, '"Show this slide now" reaches the TV with the slide');
+ok(!(await poll(p1.seq)).cmd, 'each press is carried out once');
+const scr2 = (await as('tate@ama.test', () => db.query(`select showing, details from tv_screens where screen_id = 'screen-abc123'`))).rows[0];
+ok(scr2.showing === 'Remote target (2 of 5)' && scr2.details.slide === sid && scr2.details.paused === false, 'the TV reports what it is showing, for the remote');
+await as('tate@ama.test', () => db.query(`select tv_remote_send('pause')`));
+await as('tate@ama.test', () => db.exec(`update tv_settings set remote_at = now() - interval '1 minute'`));
+ok(!(await poll(p1.seq)).cmd, 'a press from more than 30 seconds ago is ignored (e.g. a TV coming back online)');
+ok(!(await tryAs('tate@ama.test', `select tv_remote_send('dance')`)).ok, 'only the remote buttons');
+await as('tate@ama.test', () => db.query(`select tv_remote_send('done')`));
+await as('tate@ama.test', () => db.exec(`update tv_settings set remote_until = now() - interval '1 second'`));
+ok((await poll(null)).on === false, 'closing the remote lets the TV go back to normal');
+await as('tate@ama.test', () => db.query(`delete from tv_slides where id = $1`, [sid]));
+
 console.log('\nFiles');
 const pol = (await db.query(`select policyname, roles::text r from pg_policies where tablename = 'objects' and policyname like 'tv files%'`)).rows;
 ok(pol.length === 4 && pol.every(p => p.r.includes('authenticated') && !p.r.includes('anon')), 'only signed-in staff can add, change or remove TV files');
