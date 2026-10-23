@@ -1,7 +1,8 @@
 // AMA TV: draws a name onto a birthday poster template (a design with the name area left empty).
 // A template's settings say where the name goes and how it looks:
-//   box:   { cx, base, maxW }   centre of the name, its baseline and the widest it may be, in pixels on a
-//                                1920 x 1080 poster (or { cx, cy, h, maxW }: centre and lettering height)
+//   box:   { cx, base, maxW }   centre of the name, its baseline and the widest it may be, in pixels on the
+//                                poster (or { cx, cy, h, maxW }: centre and lettering height)
+//   w, h:  the poster's size in pixels: 1920 x 1080 for the TV (the default), e.g. 1240 x 1754 for the upright tablets
 //   size:  the design's letter size in pixels. Long names shrink to fit maxW (staying centred); short ones keep this size.
 //   font:  'Luckiest Guy' | 'Knewave' | 'Montserrat' | ...   weight: e.g. 800
 //   fill:  '#fed402'   stroke: '#000000' or ''   strokeWidth: outline thickness as a fraction of the letter size
@@ -94,11 +95,12 @@
 
   // Draw the poster: the template image with the name on it. Returns a promise once fonts are ready.
   function renderPoster(canvas, img, t, name) {
-    canvas.width = W; canvas.height = H;
+    var w = t.w || W, h = t.h || H;
+    canvas.width = w; canvas.height = h;
     var ctx = canvas.getContext('2d');
     return loadFont(t.font, t.weight).then(function () {
-      ctx.clearRect(0, 0, W, H);
-      ctx.drawImage(img, 0, 0, W, H);
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
       var text = String(name || '').trim();
       if (t.uppercase) text = text.toUpperCase();
       if (text) drawText(ctx, text, t);

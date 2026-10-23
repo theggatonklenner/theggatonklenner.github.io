@@ -229,7 +229,7 @@ try {
   await page.click('#pPick'); await page.setInputFiles('#pickParty', join(ROOT, 'icons/ama-id-cards.png'));
   await page.waitForSelector('#pForm .preview-img');
   await page.fill('#pCap', 'Happy Birthday Sam!'); await page.click('#pGo'); await page.waitForSelector('#partyStop');
-  const img = (await db.query(`select s.kind, s.media_path from tv_settings t join tv_slides s on s.id = t.only_slide`)).rows[0];
+  const img = (await db.query(`select s.kind, s.media_path from tv_settings t join tv_slides s on s.id = t.only_slide where t.id = 1`)).rows[0];
   ok(img.kind === 'photo' && files.has(img.media_path), 'an uploaded image can be shown on its own');
   await tv.page.evaluate(() => window.__tv.reload()); await tv.page.waitForTimeout(800);
   ok((await tv.page.evaluate(() => window.__tv.state())).count === 1, 'and the TV switches to it');
@@ -265,7 +265,7 @@ try {
   await page.click('#pForm [data-page="1"]'); await page.waitForSelector('#pForm .preview-img');
   ok((await page.inputValue('#pCap')) === pageNames[1], 'picking a page gets it ready, named');
   await page.click('#pGo'); await page.waitForSelector('#partyStop');
-  const pdfSlide = (await db.query(`select s.kind, s.media_path, s.title from tv_settings t join tv_slides s on s.id = t.only_slide`)).rows[0];
+  const pdfSlide = (await db.query(`select s.kind, s.media_path, s.title from tv_settings t join tv_slides s on s.id = t.only_slide where t.id = 1`)).rows[0];
   ok(pdfSlide.kind === 'photo' && pdfSlide.title === pageNames[1] && files.get(pdfSlide.media_path).type === 'image/jpeg', 'the chosen page goes on the TV as a full-screen image');
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
   const before = (await db.query(`select count(*)::int n from tv_slides where party`)).rows[0].n;
@@ -314,7 +314,7 @@ try {
   const dl = page.waitForEvent('download'); await page.click('#pDownload'); const dlf = await dl;
   ok(dlf.suggestedFilename() === 'birthday-maximilian.png', 'Download saves the poster as a picture');
   await page.selectOption('#pFor', '120'); await page.click('#pGo'); await page.waitForSelector('#partyStop', { timeout: 30000 });
-  const ps = (await db.query(`select s.kind, s.title, s.media_path from tv_settings t join tv_slides s on s.id = t.only_slide`)).rows[0];
+  const ps = (await db.query(`select s.kind, s.title, s.media_path from tv_settings t join tv_slides s on s.id = t.only_slide where t.id = 1`)).rows[0];
   ok(ps.kind === 'photo' && /^Maximilian \(/.test(ps.title) && files.get(ps.media_path).type === 'image/jpeg' && files.get(ps.media_path).body.length > 10000, 'Show on the TV makes the poster and puts it on in party mode');
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
 
@@ -392,7 +392,7 @@ try {
   ok(await page.inputValue('#bDate') !== '' && await page.isVisible('#bFrom'), 'Book for later asks for the date and times');
   await page.fill('#bDate', tmr); await page.fill('#bFrom', '14:00'); await page.fill('#bTo', '17:00'); await page.fill('#pName', 'Kian');
   await page.click('#pGo'); await toastSays(page, 'Booked');
-  const bk = (await db.query(`select b.*, s.title from tv_party_bookings b join tv_slides s on s.id = b.slide_id`)).rows;
+  const bk = (await db.query(`select b.*, s.title from tv_party_bookings b join tv_slides s on s.id = b.slide_id where s.display = 'tv'`)).rows;
   ok(bk.length === 1 && bk[0].title === 'Happy Birthday Kian!' && new Date(bk[0].starts_at).getHours() === 14 && new Date(bk[0].ends_at).getHours() === 17, 'the party is booked with its name and times');
   await page.waitForSelector('#party .booked', { timeout: 5000 }).catch(() => {});
   ok((await page.textContent('#party')).includes('Happy Birthday Kian!') && (await page.textContent('#party')).includes('2:00'), 'the booking shows under Party mode');
@@ -655,17 +655,60 @@ try {
   await page.click('#addBtn'); await page.click('[data-add="countdown"]'); await page.waitForSelector('#slEvent');
   await page.check('#slForm input[name=cdTo][value=grading]'); await page.click('#slSave'); await toastSays(page, 'Added');
   await page.waitForTimeout(400);
-  const tabSlides = (await db.query(`select title, display from tv_slides where display = 'tablet' order by position`)).rows;
+  const tabSlides = (await db.query(`select title, display from tv_slides where display = 'tablet' and not party order by position`)).rows;
   ok(tabSlides.length === 2 && tabSlides[0].title === 'Welcome to AMA', 'slides added on Tablets go to the tablets only');
   ok(!(await page.textContent('#list')).includes('No classes on Monday'), "the TV's slides aren't in the tablet list");
   await page.click('#partyStart'); await page.waitForSelector('#pForm');
   if (await page.$('#pForm [data-m="message"]')) await page.click('#pForm [data-m="message"]');
-  await page.waitForSelector('#pName'); await page.fill('#pName', 'Leo'); await page.click('#pGo'); await page.waitForSelector('#partyStop');
+  await page.waitForSelector('#pName'); await page.fill('#pName', 'Leo');
+  ok(await page.isChecked('#pBoth') && (await page.textContent('label:has(#pBoth)')).includes('Also on the TV'), 'party mode on the tablets offers "Also on the TV", ticked');
+  await page.uncheck('#pBoth'); await page.waitForSelector('#pName'); await page.fill('#pName', 'Leo');
+  await page.click('#pGo'); await page.waitForSelector('#partyStop');
   const pr = (await db.query(`select id, only_slide is not null on_ from tv_settings order by id`)).rows;
   ok(!pr[0].on_ && pr[1].on_, 'party mode on the tablets leaves the TV alone');
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
   await page.click('#dispSeg [data-disp="tv"]'); await page.waitForFunction(() => document.querySelector('#list').textContent.includes('No classes on Monday'), null, { timeout: 5000 }).catch(() => {});
   ok((await page.textContent('#list')).includes('No classes on Monday') && (await page.textContent('.brand h1')) === 'TV Display', 'switching back shows the TV again');
+
+  // Linked party: one name, the TV poster and its tablet version, on and off together
+  const TABLET_TPL = process.env.TABLET_TEMPLATES || '/tmp/claude-0/-home-claude/eaa02a79-d300-5a00-9b7a-e09b12f5efb0/scratchpad/tabpdf/AMA-birthday-poster-tablet-versions.json';
+  const jpgSize = b => { for (let i = 2; i < b.length;) { const m = b[i + 1], len = b.readUInt16BE(i + 2); if (m >= 0xc0 && m <= 0xc3) return { h: b.readUInt16BE(i + 5), w: b.readUInt16BE(i + 7) }; i += 2 + len; } return null; };
+  if ((await import('node:fs')).existsSync(TABLET_TPL)) {
+    await page.click('#partyStart'); await page.waitForSelector('#pForm');
+    await page.click('#pForm [data-m="poster"]'); await page.waitForSelector('#pManage'); await page.click('#pManage'); await page.waitForSelector('#tImport');
+    await page.click('#tImport'); await page.setInputFiles('#pickImport', TABLET_TPL);
+    await toastSays(page, 'tablet version');
+    const tt = (await db.query(`select title, tablet_settings from tv_poster_templates where title = 'Turtles'`)).rows[0];
+    ok(tt.tablet_settings && tt.tablet_settings.h > tt.tablet_settings.w, 'importing the tablet versions adds an upright design to the matching template');
+    await page.waitForFunction(() => document.querySelector('#dlg').textContent.includes('TV and tablet versions'), null, { timeout: 15000 }).catch(() => {});
+    ok((await page.textContent('#dlg')).includes('TV and tablet versions'), 'Manage templates shows which have a tablet version');
+    await page.click('#tBack'); await page.waitForSelector('#pForm');
+    await page.click('#pForm [data-m="poster"]'); await page.waitForSelector('#pForm [data-tpl]');
+    await page.click(`#pForm [data-tpl="${(await db.query(`select id from tv_poster_templates where title = 'Turtles'`)).rows[0].id}"]`);
+    await page.waitForSelector('#pPoster'); await page.fill('#pPoster', 'Ava'); await page.waitForTimeout(1200);
+    ok(await page.isChecked('#pBoth') && await page.isVisible('#pCanvas2'), 'a poster shows on the TV and the tablets together, with both previews');
+    await page.screenshot({ path: join(SHOTS, 'party-linked-editor.png') });
+    await page.click('#pGo'); await page.waitForSelector('#partyStop', { timeout: 30000 });
+    const ls = (await db.query(`select t.id, s.id sid, s.display, s.linked, s.media_path, s.title from tv_settings t join tv_slides s on s.id = t.only_slide order by t.id`)).rows;
+    ok(ls.length === 2 && ls[0].display === 'tv' && ls[1].display === 'tablet' && ls[0].linked === ls[1].sid && ls[1].linked === ls[0].sid && /^Ava/.test(ls[1].title), 'one tap puts it on both screens, linked');
+    const dims = jpgSize(files.get(ls[1].media_path).body), dimsTv = jpgSize(files.get(ls[0].media_path).body);
+    ok(dims && dims.h > dims.w && dimsTv.w > dimsTv.h, `the tablets get the upright version (${dims && dims.w}x${dims && dims.h}), the TV the wide one`);
+    ok((await page.textContent('#party')).includes('The TV and the tablets are showing'), 'the party card says it is on both');
+    await page.click('#partyMore'); await page.waitForTimeout(800);
+    const mo = (await db.query(`select only_until from tv_settings order by id`)).rows;
+    ok(Math.abs(new Date(mo[0].only_until) - new Date(mo[1].only_until)) < 2000, '1 more hour changes both');
+    await page.click('#partyStop'); await toastSays(page, 'Back to normal');
+    ok((await db.query(`select count(*)::int n from tv_settings where only_slide is not null`)).rows[0].n === 0, 'Back to normal ends it on both');
+    // Booked, linked
+    await page.click('#partyBook'); await page.waitForSelector('#bDate'); await page.click('#pForm [data-m="message"]'); await page.waitForSelector('#pName');
+    const tmr2 = new Date(Date.now() + 2 * 864e5), d2 = `${tmr2.getFullYear()}-${String(tmr2.getMonth() + 1).padStart(2, '0')}-${String(tmr2.getDate()).padStart(2, '0')}`;
+    await page.fill('#bDate', d2); await page.fill('#bFrom', '10:00'); await page.fill('#bTo', '12:00'); await page.fill('#pName', 'Noah'); await page.click('#pGo'); await toastSays(page, 'Booked');
+    const bks = (await db.query(`select s.display from tv_party_bookings b join tv_slides s on s.id = b.slide_id where b.starts_at > now() order by s.display`)).rows.map(r => r.display).join();
+    ok(bks === 'tablet,tv', 'booking a party books it on both screens');
+    await page.waitForSelector('#party [data-unbook]'); await page.click('#party [data-unbook]'); await page.click('#cfYes'); await toastSays(page, 'cancelled');
+    await page.waitForTimeout(500);
+    ok((await db.query(`select count(*)::int n from tv_party_bookings where starts_at > now()`)).rows[0].n === 0, 'cancelling it cancels both');
+  } else console.log('        (tablet templates file not found; linked poster tests skipped)');
   await ctx.close();
 
   // On a tablet: open the link, no code to type
@@ -737,7 +780,7 @@ try {
   if (await page.$('#pForm [data-m="message"]')) await page.click('#pForm [data-m="message"]');
   await page.waitForSelector('#pName'); await page.fill('#pName', 'Mia'); await page.click('#pGo');
   await page.waitForSelector('#partyStop', { timeout: 8000 }).catch(() => {});
-  const jp = (await db.query(`select s.title from tv_settings t join tv_slides s on s.id = t.only_slide`)).rows[0];
+  const jp = (await db.query(`select s.title from tv_settings t join tv_slides s on s.id = t.only_slide where t.id = 1`)).rows[0];
   ok(jp && jp.title === 'Happy Birthday Mia!', '...and can put a birthday message on the TV');
   await page.screenshot({ path: join(SHOTS, 'tv-party-only.png') });
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');

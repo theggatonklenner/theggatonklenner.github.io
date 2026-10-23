@@ -131,6 +131,11 @@
   .tpls button span { position: absolute; left: 6px; bottom: 6px; background: rgba(0,0,0,.65); color: #fff; font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
   .tpls button[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
   .posterprev { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000; display: block; touch-action: none; }
+  .posterprev.up { width: auto; height: min(56vh, 520px); aspect-ratio: auto; align-self: center; max-width: 100%; }
+  .prevs { display: flex; gap: 10px; align-items: flex-end; }
+  .prevs .posterprev { flex: 1 1 0; min-width: 0; }
+  .prevs .posterprev.up { flex: 0 0 auto; width: 28%; height: auto; }
+  .prevs .side { font-size: 12px; color: var(--muted); text-align: center; }
   .range { display: flex; align-items: center; gap: 10px; } .range input { flex: 1; accent-color: var(--accent); }
   .saved { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   .saved li { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
@@ -293,6 +298,15 @@ const ago = iso => { const s = Math.max(0, Math.round((Date.now() - new Date(iso
 
 // Bookings for this screen's party slides only
 const mine = list => { const ids = new Set(state.partySlides.concat(state.slides).map(x => x.id)); return list.filter(b => ids.has(b.slide_id)); };
+const other = () => state.display === 'tv' ? 'tablet' : 'tv';
+const otherSid = () => state.display === 'tablet' ? 1 : 2;
+const otherNoun = () => state.display === 'tv' ? 'tablets' : 'TV';
+const here = () => state.display === 'tv' ? 'the TV' : 'the tablets';
+const Here = () => state.display === 'tv' ? 'The TV is' : 'The tablets are';
+// A template's version for a screen: the upright one on the tablets (when it has one)
+const tabletOf = t => ({ id: t.id, title: t.title, image_path: t.tablet_image_path, settings: t.tablet_settings, _local: t._localTab });
+const hasTablet = t => !!(t && t.tablet_image_path && t.tablet_settings);
+const variant = (t, d) => d === 'tablet' && hasTablet(t) ? tabletOf(t) : t;
 const sid = () => state.display === 'tablet' ? 2 : 1;
 const noun = () => state.display === 'tablet' ? 'tablet' : 'TV';
 function setDisplay(d) {
@@ -329,7 +343,9 @@ async function load() {
   ]);
   state.bookings = bk.error ? null : mine(bk.data || []);    // null: database not updated for bookings yet
   state.screens = sc.error ? null : (sc.data || []);
-  const [ev, mo] = await Promise.all([sb.from('tv_events').select('*').order('starts_on'), sb.from('tv_months').select('*')]);
+  const [ev, mo, ot] = await Promise.all([sb.from('tv_events').select('*').order('starts_on'), sb.from('tv_months').select('*'),
+    sb.from('tv_settings').select('id, only_slide, only_until').eq('id', otherSid()).maybeSingle()]);
+  state.other = ot.error ? null : (Array.isArray(ot.data) ? ot.data[0] : ot.data) || null;   // the other screen, for linked parties
   state.events = ev.error ? null : (ev.data || []);   // null: database not updated for events yet
   state.months = mo.error ? [] : (mo.data || []);
   state.nextGrading = (fd && fd.data && fd.data.live && fd.data.live.next_grading && fd.data.live.next_grading.date) || null;
@@ -497,13 +513,13 @@ function guessName(text) {
   const best = Object.keys(count).sort((a, b) => count[b] - count[a] || b.length - a.length)[0];
   return best ? best[0] + best.slice(1).toLowerCase() : '';
 }
-async function pdfPages(file, onPage) {
+async function pdfPages(file, onPage, maxW = 1920, maxH = 1080) {
   const lib = await loadPdfJs();
   const doc = await lib.getDocument({ data: await file.arrayBuffer() }).promise;
   const out = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i), v1 = page.getViewport({ scale: 1 });
-    const vp = page.getViewport({ scale: Math.min(1920 / v1.width, 1080 / v1.height) });
+    const vp = page.getViewport({ scale: Math.min(maxW / v1.width, maxH / v1.height) });
     const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
     const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
     await page.render({ canvasContext: g, viewport: vp }).promise;
@@ -824,25 +840,25 @@ function drawParty() {
   if (!('only_slide' in S)) { box.hidden = true; return; }   // database not updated yet
   box.hidden = false;
   if (partyOn()) {
-    const sl = state.partySlides.concat(state.slides).find(x => x.id === S.only_slide) || {};
+    const sl = findSlide(S.only_slide), both = partnerOn(sl);
     const sameDay = new Date(S.only_until).toDateString() === new Date().toDateString();
     box.className = 'card on';
-    box.innerHTML = `<div class="row" style="justify-content:space-between"><h3>Party mode is on</h3><span class="chip" style="background:var(--on-gold);color:var(--gold)">TV</span></div>
-      <div class="row" style="align-items:center">${thumb(sl)}<p class="grow" style="margin:0">The TV is showing only <b>${esc(slideName(sl))}</b> until <b>${timeText(S.only_until)}</b>${sameDay ? '' : ' ' + new Date(S.only_until).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}. Then it goes back to the slideshow by itself.</p></div>
+    box.innerHTML = `<div class="row" style="justify-content:space-between"><h3>Party mode is on</h3><span class="chip" style="background:var(--on-gold);color:var(--gold)">${both ? 'TV + tablets' : state.display === 'tv' ? 'TV' : 'Tablets'}</span></div>
+      <div class="row" style="align-items:center">${thumb(sl)}<p class="grow" style="margin:0">${both ? 'The TV and the tablets are' : Here()} showing only <b>${esc(slideName(sl))}</b> until <b>${timeText(S.only_until)}</b>${sameDay ? '' : ' ' + new Date(S.only_until).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}. Then ${both ? 'they go' : 'it goes'} back to the slideshow by itself.</p></div>
       <div class="row"><button class="btn primary" id="partyStop">Back to normal now</button><button class="btn" id="partyMore">1 more hour</button></div>`;
-    $('#partyStop').onclick = async () => { await setParty(null, null); toast('Back to normal. The TV switches within 20 seconds.', 4000); };
-    $('#partyMore').onclick = async () => { await setParty(S.only_slide, new Date(new Date(S.only_until).getTime() + 3600e3).toISOString()); toast(`Party mode until ${timeText(state.settings.only_until)}`); };
+    $('#partyStop').onclick = async () => { await setParty(null, null, both ? null : undefined); toast('Back to normal. It switches within 20 seconds.', 4000); };
+    $('#partyMore').onclick = async () => { await setParty(S.only_slide, new Date(new Date(S.only_until).getTime() + 3600e3).toISOString(), both ? sl.linked : undefined); toast(`Party mode until ${timeText(state.settings.only_until)}`); };
   } else if (activeBooking()) {
-    const b = activeBooking(), sl = state.partySlides.concat(state.slides).find(x => x.id === b.slide_id) || {};
+    const b = activeBooking(), sl = findSlide(b.slide_id);
     box.className = 'card on';
-    box.innerHTML = `<div class="row" style="justify-content:space-between"><h3>Booked party is on</h3><span class="chip" style="background:var(--on-gold);color:var(--gold)">TV</span></div>
-      <div class="row" style="align-items:center">${thumb(sl)}<p class="grow" style="margin:0">The TV is showing only <b>${esc(slideName(sl))}</b> until <b>${timeText(b.ends_at)}</b>. Then it goes back to the slideshow by itself.</p></div>
+    box.innerHTML = `<div class="row" style="justify-content:space-between"><h3>Booked party is on</h3><span class="chip" style="background:var(--on-gold);color:var(--gold)">${sl.linked ? 'TV + tablets' : state.display === 'tv' ? 'TV' : 'Tablets'}</span></div>
+      <div class="row" style="align-items:center">${thumb(sl)}<p class="grow" style="margin:0">${sl.linked ? 'The TV and the tablets are' : Here()} showing only <b>${esc(slideName(sl))}</b> until <b>${timeText(b.ends_at)}</b>. Then ${sl.linked ? 'they go' : 'it goes'} back to the slideshow by itself.</p></div>
       <div class="row"><button class="btn primary" id="partyStop">Back to normal now</button><button class="btn" id="partyMore">1 more hour</button></div>${bookedList(b.id)}`;
     $('#partyStop').onclick = async () => { if (await moveBooking(b, new Date().toISOString())) toast('Back to normal. The TV switches within 20 seconds.', 4000); };
     $('#partyMore').onclick = async () => { const t = new Date(new Date(b.ends_at).getTime() + 3600e3).toISOString(); if (await moveBooking(b, t)) toast(`Party until ${timeText(t)}`); };
   } else {
     box.className = 'card';
-    box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start"><div class="grow"><h3>Party mode</h3><p class="hint">Show just one thing on the TV, like a birthday message, for a set time. Then it goes back to the slideshow by itself.</p></div>
+    box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start"><div class="grow"><h3>Party mode</h3><p class="hint">Show just one thing on ${here()}, like a birthday poster, for a set time. Then it goes back to the slideshow by itself.</p></div>
       <div class="row">${state.bookings ? '<button class="btn" id="partyBook">Book for later</button>' : ''}<button class="btn primary" id="partyStart">Start now</button></div></div>${bookedList()}`;
     $('#partyStart').onclick = () => openParty();
     if ($('#partyBook')) $('#partyBook').onclick = () => openParty({ book: true });
@@ -852,6 +868,8 @@ function drawParty() {
     if (!await confirmBox(`Cancel the party booked for ${whenText(bk.starts_at)}?`, 'Cancel booking')) return;
     const { error } = await sb.from('tv_party_bookings').delete().eq('id', bk.id);
     if (error) return toast('Not cancelled: ' + error.message, 5000);
+    const pl = findSlide(bk.slide_id).linked;   // and the same booking on the other screen
+    if (pl) await sb.from('tv_party_bookings').delete().eq('slide_id', pl).eq('starts_at', bk.starts_at);
     toast('Booking cancelled'); load();
   });
 }
@@ -863,7 +881,7 @@ function bookedList(skip) {
   return `<div class="label" style="margin-top:12px">Booked</div><ul class="booked">${list.map(b => {
     const sl = state.partySlides.concat(state.slides).find(x => x.id === b.slide_id) || {};
     const sameDay = new Date(b.starts_at).toDateString() === new Date(b.ends_at).toDateString();
-    return `<li>${thumb(sl)}<div class="grow"><b>${esc(slideName(sl))}</b><div class="when">${esc(whenText(b.starts_at))} to ${esc(sameDay ? timeText(b.ends_at) : whenText(b.ends_at))}</div></div><button class="btn sm" data-unbook="${b.id}">Cancel</button></li>`;
+    return `<li>${thumb(sl)}<div class="grow"><b>${esc(slideName(sl))}</b>${sl.linked ? ' <span class="tag muted">+ ' + otherNoun() + '</span>' : ''}<div class="when">${esc(whenText(b.starts_at))} to ${esc(sameDay ? timeText(b.ends_at) : whenText(b.ends_at))}</div></div><button class="btn sm" data-unbook="${b.id}">Cancel</button></li>`;
   }).join('')}</ul>`;
 }
 async function moveBooking(b, ends) {
@@ -871,6 +889,8 @@ async function moveBooking(b, ends) {
   const min = new Date(new Date(b.starts_at).getTime() + 1000).toISOString();
   const { error } = await sb.from('tv_party_bookings').update({ ends_at: ends > min ? ends : min }).eq('id', b.id);
   if (error) { toast('Not saved: ' + error.message, 5000); return false; }
+  const pl = findSlide(b.slide_id).linked;   // the same booking on the other screen
+  if (pl) await sb.from('tv_party_bookings').update({ ends_at: ends > min ? ends : min }).eq('slide_id', pl).eq('starts_at', b.starts_at);
   await load(); return true;
 }
 
@@ -941,23 +961,34 @@ async function pollStatus() {
   if (state.settings) drawParty();   // a booked party starting or ending while the page is open
 }
 setInterval(() => { if (!document.hidden) pollStatus(); }, 15e3);
-async function setParty(slideId, until) {
+// Party on this screen; partner (when given, even null) does the same on the other screen
+async function setParty(slideId, until, partner) {
   const { error } = await sb.from('tv_settings').update({ only_slide: slideId, only_until: until }).eq('id', sid());
   if (error) { toast('Not saved: ' + error.message, 5000); return false; }
+  if (partner !== undefined) {
+    const r = await sb.from('tv_settings').update({ only_slide: partner, only_until: partner ? until : null }).eq('id', otherSid());
+    if (r.error) toast(`Not changed on the ${otherNoun()}: ` + r.error.message, 5000);
+  }
   await load(); return true;
 }
+// Is this party slide's partner showing on the other screen right now?
+const partnerOn = sl => !!(sl && sl.linked && state.other && state.other.only_slide === sl.linked && state.other.only_until && new Date(state.other.only_until) > new Date());
+const findSlide = id => state.partySlides.concat(state.slides).find(x => x.id === id) || {};
 function openParty(opts) {
   let when = opts && opts.book ? 'later' : 'now', bDate = today(), bFrom = '', bTo = '';
   let mode = state.templates && state.templates.length ? 'poster' : 'message', photo = null, caption = '', pages = null, pick = (state.partySlides[0] || {}).id || null;
   let tplId = (state.templates && state.templates[0] || {}).id || null, posterName = '';
+  let both = !!state.other;   // also on the other screen (TV and tablets together)
   const render = () => {
     openDlg(`<form class="dlg" id="pForm">
-      <div class="dlg-head"><div><h3>Party mode</h3><p class="hint">The TV shows only this until the time is up.</p></div><button class="x" data-close>Close</button></div>
+      <div class="dlg-head"><div><h3>Party mode</h3><p class="hint">Only this shows on ${here()}${both ? ' and the ' + otherNoun() : ''} until the time is up.</p></div><button class="x" data-close>Close</button></div>
       <div class="seg" role="group" aria-label="What to show">${state.templates ? `<button type="button" data-m="poster" aria-pressed="${mode === 'poster'}">Poster</button>` : ''}<button type="button" data-m="message" aria-pressed="${mode === 'message'}">${state.templates ? 'Message' : 'Birthday message'}</button><button type="button" data-m="image" aria-pressed="${mode === 'image'}">Upload an image</button>${state.partySlides.length ? `<button type="button" data-m="saved" aria-pressed="${mode === 'saved'}">Saved (${state.partySlides.length})</button>` : ''}</div>
       ${mode === 'poster' ? (state.templates.length ? `
-        <div class="tpls">${state.templates.map(t => `<button type="button" data-tpl="${t.id}" aria-pressed="${t.id === tplId}"><img src="${MEDIA + esc(t.image_path)}" alt=""><span>${esc(t.title)}</span></button>`).join('')}</div>
+        <div class="tpls">${state.templates.map(t => `<button type="button" data-tpl="${t.id}" aria-pressed="${t.id === tplId}"><img src="${MEDIA + esc(variant(t, state.display).image_path)}" alt=""><span>${esc(t.title)}</span></button>`).join('')}</div>
         <div class="field"><label for="pPoster">Birthday child's name</label><input type="text" id="pPoster" maxlength="40" placeholder="e.g. Kian" autocomplete="off" value="${esc(posterName)}"></div>
-        <canvas class="posterprev" id="pCanvas" width="1920" height="1080" aria-label="Poster preview"></canvas>
+        <div class="prevs"><canvas class="posterprev${state.display === 'tablet' && hasTablet(state.templates.find(x => x.id === tplId)) ? ' up' : ''}" id="pCanvas" width="1920" height="1080" aria-label="Poster preview"></canvas>
+          ${both ? `<canvas class="posterprev${other() === 'tablet' && hasTablet(state.templates.find(x => x.id === tplId)) ? ' up' : ''}" id="pCanvas2" width="1920" height="1080" aria-label="Poster on the ${otherNoun()}"></canvas>` : ''}</div>
+        ${both && !hasTablet(state.templates.find(x => x.id === tplId)) ? `<p class="hint">This template has no tablet version yet, so the tablets show the TV poster (smaller).</p>` : ''}
         <div class="row"><button type="button" class="btn sm" id="pDownload">Download</button><span class="grow"></span>${state.partyOnly ? '' : '<button type="button" class="btn sm" id="pManage">Manage templates</button>'}</div>`
         : state.partyOnly ? `<p class="hint">No poster templates yet. Someone with the TV editor can add them.</p>`
         : `<p class="hint">No poster templates yet. Import the AMA templates file, or add a design with the name area left empty.</p>
@@ -976,6 +1007,7 @@ function openParty(opts) {
         ${photo ? `<div class="preview-img" style="background-image:url('${MEDIA + esc(photo)}')"></div>` : '<p class="hint">Use the birthday design made for the party: an image, or the PDF from Canva (you then pick the page). It fills the screen.</p>'}
         <div class="field"><label for="pCap">Name it (only shown in the editor)</label><input type="text" id="pCap" maxlength="120" value="${esc(caption)}" placeholder="e.g. Kian"></div>`
       : `<ul class="saved">${state.partySlides.map(x => `<li class="${x.id === pick ? 'pick' : ''}" data-pick="${x.id}">${thumb(x)}<span class="grow">${esc(slideName(x))}</span><button type="button" class="btn sm danger" data-forget="${x.id}">Delete</button></li>`).join('')}</ul>`}
+      ${state.other ? `<label class="check"><input type="checkbox" id="pBoth" ${both ? 'checked' : ''}> Also on the ${otherNoun()}</label>` : ''}
       ${state.bookings ? `<div class="field"><span class="label">When</span><div class="seg" role="group" aria-label="When"><button type="button" data-when="now" aria-pressed="${when === 'now'}">Now</button><button type="button" data-when="later" aria-pressed="${when === 'later'}">Book for later</button></div></div>` : ''}
       ${when === 'later' ? `<div class="grid2">
         <div class="field"><label for="bDate">Date</label><input type="date" id="bDate" min="${today()}" value="${esc(bDate)}"></div><span></span>
@@ -984,22 +1016,27 @@ function openParty(opts) {
         <p class="hint">The TV switches to this by itself at the start and back to the slideshow at the end.</p>` : `
       <div class="field"><label for="pFor">Show it for</label><select id="pFor"><option value="60">1 hour</option><option value="120">2 hours</option><option value="180" selected>3 hours</option><option value="day">The rest of today</option><option value="until">Until a set time...</option></select></div>
       <div class="field" id="pUntilRow" hidden><label for="pUntil">Until</label><input type="time" id="pUntil"></div>`}
-      <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="pGo">${when === 'later' ? 'Book it' : 'Show on the TV'}</button></div>
+      <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="pGo">${when === 'later' ? 'Book it' : 'Show it now'}</button></div>
     </form>`);
     const keep = () => { if ($('#bDate')) { bDate = $('#bDate').value; bFrom = $('#bFrom').value; bTo = $('#bTo').value; } if ($('#pPoster')) posterName = $('#pPoster').value; };
     $$('#pForm [data-m]').forEach(b => b.onclick = () => { keep(); mode = b.dataset.m; render(); });
     $$('#pForm [data-when]').forEach(b => b.onclick = () => { keep(); when = b.dataset.when; render(); });
+    if ($('#pBoth')) $('#pBoth').onchange = () => { keep(); both = $('#pBoth').checked; render(); };
     ['#bDate', '#bFrom', '#bTo'].forEach(id => { if ($(id)) $(id).oninput = keep; });
     if (mode === 'poster') {
       const imp = $('#pImport'); if (imp) imp.onclick = () => importTemplates(() => { tplId = (state.templates[0] || {}).id; openParty(); });
       const add = $('#pAddTpl'); if (add) add.onclick = () => openTemplate(null);
       const man = $('#pManage'); if (man) man.onclick = () => openTemplates();
-      const draw = () => { const t = state.templates.find(x => x.id === tplId); if (t && $('#pCanvas')) drawPoster($('#pCanvas'), t, $('#pPoster').value); };
-      $$('#pForm [data-tpl]').forEach(b => b.onclick = () => { tplId = b.dataset.tpl; posterName = $('#pPoster').value; $$('#pForm [data-tpl]').forEach(x => x.setAttribute('aria-pressed', String(x === b))); draw(); });
+      const draw = () => {
+        const t = state.templates.find(x => x.id === tplId); if (!t) return;
+        if ($('#pCanvas')) drawPoster($('#pCanvas'), variant(t, state.display), $('#pPoster').value);
+        if ($('#pCanvas2')) drawPoster($('#pCanvas2'), variant(t, other()), $('#pPoster').value);
+      };
+      $$('#pForm [data-tpl]').forEach(b => b.onclick = () => { keep(); tplId = b.dataset.tpl; render(); });
       const nm = $('#pPoster'); if (nm) { nm.oninput = () => { posterName = nm.value; draw(); }; nm.focus(); draw(); }
       const dl = $('#pDownload'); if (dl) dl.onclick = async () => {
         const t = state.templates.find(x => x.id === tplId); if (!t) return;
-        const blob = await posterBlob(t, $('#pPoster').value, 'image/png');
+        const blob = await posterBlob(variant(t, state.display), $('#pPoster').value, 'image/png');
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
         a.download = `birthday-${(($('#pPoster').value || 'poster').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')) || 'poster'}.png`; a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 3000);
@@ -1056,7 +1093,7 @@ function openParty(opts) {
         if (partyOn() && state.settings.only_slide === x.id) return toast("That's on the TV now. Go back to normal first.");
         const bk = (state.bookings || []).find(y => y.slide_id === x.id);
         if (bk) return toast(`That's booked for ${whenText(bk.starts_at)}. Cancel the booking first.`, 5000);
-        const { error } = await sb.from('tv_slides').delete().eq('id', x.id);
+        const { error } = await sb.from('tv_slides').delete().in('id', [x.id].concat(x.linked ? [x.linked] : []));   // and its partner on the other screen
         if (error) return toast('Not deleted: ' + error.message, 5000);
         if (x.media_path) sb.storage.from('tv').remove([x.media_path]).catch(() => {});
         await load(); if (pick === x.id) pick = (state.partySlides[0] || {}).id || null; if (!state.partySlides.length) mode = 'message'; render();
@@ -1081,41 +1118,52 @@ function openParty(opts) {
         if (d <= new Date()) d.setDate(d.getDate() + 1);   // a time earlier than now means tomorrow
         until = d;
       } else until = new Date(Date.now() + Number(v) * 60e3); }
-      let id = null;
+      let id = null, id2 = null, rec = null, rec2 = null;
+      const fail = msg => { $('#pGo').disabled = false; toast(msg, 6000); };
       $('#pGo').disabled = true;
-      if (mode === 'saved') id = pick;
-      else if (mode === 'poster') {
-        const t = (state.templates || []).find(x => x.id === tplId), nm = $('#pPoster') ? $('#pPoster').value.trim() : '';
-        if (!t) { $('#pGo').disabled = false; return toast('Pick a poster first.'); }
-        if (!nm) { $('#pGo').disabled = false; return toast("Type the birthday child's name."); }
-        try {
-          const path = await upload('photos', await posterBlob(t, nm, 'image/jpeg'), 'jpg', 'image/jpeg');
-          const { data, error } = await sb.from('tv_slides').insert({ display: state.display,  kind: 'photo', media_path: path, title: `${nm} (${t.title})`, party: true }).select('id').single();
-          if (error) throw error;
-          id = (Array.isArray(data) ? data[0] : data || {}).id;
-        } catch (er) { $('#pGo').disabled = false; return toast('Not saved: ' + (er.message || er), 6000); }
-      } else {
-        let rec;
-        if (mode === 'message') {
+      try {
+        if (mode === 'saved') {
+          id = pick; const sl = state.partySlides.find(x => x.id === pick) || {};
+          if (both) { if (sl.linked) id2 = sl.linked; else rec2 = { kind: sl.kind, title: sl.title, body: sl.body, media_path: sl.media_path, theme: sl.theme }; }
+        } else if (mode === 'poster') {
+          const t = (state.templates || []).find(x => x.id === tplId), nm = $('#pPoster') ? $('#pPoster').value.trim() : '';
+          if (!t) return fail('Pick a poster first.');
+          if (!nm) return fail("Type the birthday child's name.");
+          const make = async d => ({ kind: 'photo', title: `${nm} (${t.title})`, media_path: await upload('photos', await posterBlob(variant(t, d), nm, 'image/jpeg'), 'jpg', 'image/jpeg') });
+          rec = await make(state.display);
+          if (both) rec2 = await make(other());
+        } else if (mode === 'message') {
           const n = $('#pName').value.trim(), h = $('#pHead').value.trim() || 'Happy Birthday!';
           rec = { kind: 'text', theme: 'party', title: n ? h.replace(/!?\s*$/, '') + ' ' + n + '!' : h, body: $('#pLine').value.trim() || null };
+          if (both) rec2 = { ...rec };
         } else {
-          if (!photo) { $('#pGo').disabled = false; return toast(pages ? 'Tap the design to show first.' : 'Choose the image first.'); }
+          if (!photo) return fail(pages ? 'Tap the design to show first.' : 'Choose the image first.');
           rec = { kind: 'photo', media_path: photo, title: ($('#pCap') ? $('#pCap').value.trim() : caption) || null };
+          if (both) rec2 = { ...rec };
         }
-        const { data, error } = await sb.from('tv_slides').insert({ display: state.display,  ...rec, party: true }).select('id').single();
-        if (error) { $('#pGo').disabled = false; return toast('Not saved: ' + error.message, 5000); }
-        id = (Array.isArray(data) ? data[0] : data || {}).id;
-      }
+        const add = async (r, d, linked) => {
+          const { data, error } = await sb.from('tv_slides').insert({ ...r, display: d, party: true, linked: linked || null }).select('id').single();
+          if (error) throw error;
+          return (Array.isArray(data) ? data[0] : data || {}).id;
+        };
+        if (rec) id = await add(rec, state.display);
+        if (rec2) {   // the other screen's copy, linked both ways
+          id2 = await add(rec2, other(), id);
+          const { error } = await sb.from('tv_slides').update({ linked: id2 }).eq('id', id);
+          if (error) throw error;
+        }
+      } catch (er) { return fail('Not saved: ' + (er.message || er)); }
       if (!id) { $('#pGo').disabled = false; return toast('Choose what to show.'); }
       dlg.close();
+      const where = id2 ? 'The TV and the tablets switch' : (state.display === 'tv' ? 'The TV switches' : 'The tablets switch');
       if (starts) {
-        const { error } = await sb.from('tv_party_bookings').insert({ slide_id: id, starts_at: starts.toISOString(), ends_at: until.toISOString() });
+        const rows = [id].concat(id2 ? [id2] : []).map(x => ({ slide_id: x, starts_at: starts.toISOString(), ends_at: until.toISOString() }));
+        const { error } = await sb.from('tv_party_bookings').insert(rows);
         if (error) { toast('Not booked: ' + error.message, 6000); return load(); }
-        toast(`Booked for ${whenText(starts.toISOString())} to ${timeText(until.toISOString())}. The TV switches on and off by itself.`, 6000);
+        toast(`Booked for ${whenText(starts.toISOString())} to ${timeText(until.toISOString())}. ${where} on and off by itself.`, 6000);
         return load();
       }
-      if (await setParty(id, until.toISOString())) toast(`Party mode on until ${timeText(until.toISOString())}. The TV switches within 20 seconds.`, 5000);
+      if (await setParty(id, until.toISOString(), id2 ? id2 : undefined)) toast(`Party mode on until ${timeText(until.toISOString())}. ${where} within 20 seconds.`, 5000);
     };
   };
   render();
@@ -1132,10 +1180,10 @@ function loadImg(src) {
   return imgCache[src];
 }
 const tplSrc = t => t._local || (MEDIA + t.image_path);
-let drawSeq = 0;
+const drawSeq = {};
 async function drawPoster(canvas, t, name) {
-  const seq = ++drawSeq;
-  try { const im = await loadImg(tplSrc(t)); if (seq !== drawSeq && canvas.id === 'pCanvas') return; await AMAPoster.render(canvas, im, t.settings, name); }
+  const key = canvas.id || 'x', seq = drawSeq[key] = (drawSeq[key] || 0) + 1;
+  try { const im = await loadImg(tplSrc(t)); if (seq !== drawSeq[key]) return; await AMAPoster.render(canvas, im, t.settings, name); }
   catch (er) { toast(er.message || String(er), 5000); }
 }
 async function posterBlob(t, name, type) {
@@ -1146,35 +1194,43 @@ async function posterBlob(t, name, type) {
 function openTemplates() {
   const list = state.templates || [];
   openDlg(`<div class="dlg"><div class="dlg-head"><div><h3>Poster templates</h3><p class="hint">Designs with the name area left empty. The name is drawn on when you make a poster.</p></div><button class="x" data-close>Close</button></div>
-    <ul class="saved">${list.map(t => `<li>${`<div class="thumb" style="background-image:url('${MEDIA + esc(t.image_path)}')"></div>`}<span class="grow">${esc(t.title)}</span><button type="button" class="btn sm" data-edit="${t.id}">Edit</button><button type="button" class="btn sm danger" data-del="${t.id}">Delete</button></li>`).join('') || '<li class="hint">None yet.</li>'}</ul>
+    <ul class="saved">${list.map(t => `<li>${`<div class="thumb" style="background-image:url('${MEDIA + esc(t.image_path)}')"></div>`}<div class="grow"><b>${esc(t.title)}</b><div class="hint">${hasTablet(t) ? 'TV and tablet versions' : 'TV version only'}</div></div>
+      <button type="button" class="btn sm" data-edit="${t.id}">TV</button><button type="button" class="btn sm" data-tab="${t.id}">${hasTablet(t) ? 'Tablet' : 'Add tablet'}</button><button type="button" class="btn sm danger" data-del="${t.id}" aria-label="Delete ${esc(t.title)}">Delete</button></li>`).join('') || '<li class="hint">None yet.</li>'}</ul>
     <div class="row"><button type="button" class="btn primary" id="tAdd">Add template</button><button type="button" class="btn" id="tImport">Import</button><span class="grow"></span><button type="button" class="btn" id="tBack">Back to party mode</button></div></div>`);
   $('#tAdd').onclick = () => openTemplate(null);
   $('#tImport').onclick = () => importTemplates(openTemplates);
   $('#tBack').onclick = () => openParty();
   $$('#dlg [data-edit]').forEach(b => b.onclick = () => openTemplate(list.find(t => t.id === b.dataset.edit)));
+  $$('#dlg [data-tab]').forEach(b => b.onclick = () => openTemplate(list.find(t => t.id === b.dataset.tab), 'tablet'));
   $$('#dlg [data-del]').forEach(b => b.onclick = async () => {
     const t = list.find(x => x.id === b.dataset.del);
     if (!await confirmBox(`Delete the "${t.title}" template? Posters already made with it are kept.`, 'Delete')) return openTemplates();
     const { error } = await sb.from('tv_poster_templates').delete().eq('id', t.id);
     if (error) return toast('Not deleted: ' + error.message, 5000);
-    sb.storage.from('tv').remove([t.image_path]).catch(() => {});
+    sb.storage.from('tv').remove([t.image_path].concat(t.tablet_image_path ? [t.tablet_image_path] : [])).catch(() => {});
     await load(); openTemplates();
   });
 }
 // Add or change a template: the design, where the name goes (drag a box on the preview) and how it looks
-function openTemplate(existing) {
+// ver 'tablet': the template's upright version for the tablets (same lettering to start with, its own name area)
+function openTemplate(existing, ver) {
+  const tab = ver === 'tablet';
   const base = { font: 'Luckiest Guy', fill: '#ffffff', stroke: '#000000', strokeWidth: 0.09, curve: 0, spacing: 0, uppercase: true, box: { cx: 960, cy: 540, h: 180, maxW: 1200 } };
-  const t = existing ? { ...existing, settings: JSON.parse(JSON.stringify(existing.settings)) } : { title: '', settings: base, image_path: null };
+  const copy = o => JSON.parse(JSON.stringify(o));
+  const t = tab ? { title: existing.title, image_path: existing.tablet_image_path || null,
+      settings: existing.tablet_settings ? copy(existing.tablet_settings) : { ...copy(existing.settings), size: undefined, box: { cx: 620, cy: 780, h: 150, maxW: 900 }, w: 1240, h: 1754 } }
+    : existing ? { ...existing, settings: copy(existing.settings) } : { title: '', settings: base, image_path: null };
+  if (tab) delete t.settings.size;
   let blob = null, pages = null, sample = (existing && existing.settings.sample) || 'Kian';
   const S = () => t.settings;
   const view = () => {
     const st = S();
-    openDlg(`<form class="dlg" id="tForm"><div class="dlg-head"><div><h3>${existing ? 'Edit template' : 'Add template'}</h3><p class="hint">Use the design with the name area left empty (in Canva, delete the name and download it as PNG or PDF).</p></div><button class="x" data-close>Close</button></div>
+    openDlg(`<form class="dlg" id="tForm"><div class="dlg-head"><div><h3>${tab ? `${esc(t.title)}: tablet version` : existing ? 'Edit template' : 'Add template'}</h3><p class="hint">${tab ? 'The upright design for the tablets (A4 shape), with the name area left empty.' : 'Use the design with the name area left empty'} (in Canva, delete the name and download it as PNG or PDF).</p></div><button class="x" data-close>Close</button></div>
       ${pages ? `<p class="hint">Pick the page to use.</p><div class="pages">${pages.map((p, i) => `<button type="button" data-tpage="${i}"><img src="${p.url}" alt="Page ${p.page}"><span>Page ${p.page}</span></button>`).join('')}</div>`
-      : !t.image_path && !blob ? `<div class="row"><button type="button" class="btn primary" id="tPick">Choose the design</button><span class="hint">Image or PDF, 16:9 like the TV</span></div>`
-      : `<canvas class="posterprev" id="tCanvas" width="1920" height="1080"></canvas>
+      : !t.image_path && !blob ? `<div class="row"><button type="button" class="btn primary" id="tPick">Choose the design</button><span class="hint">Image or PDF, ${tab ? 'upright like the tablets' : '16:9 like the TV'}</span></div>`
+      : `<canvas class="posterprev${tab ? ' up' : ''}" id="tCanvas" width="${st.w || 1920}" height="${st.h || 1080}"></canvas>
         <p class="hint">Drag on the preview to mark where the name goes (the height of the letters, and how wide it can get).</p>
-        <div class="grid2"><div class="field"><label for="tTitle">Template name</label><input type="text" id="tTitle" maxlength="60" required value="${esc(t.title)}" placeholder="e.g. Ninja"></div>
+        <div class="grid2"><div class="field"><label for="tTitle">Template name</label><input type="text" id="tTitle" maxlength="60" required value="${esc(t.title)}" placeholder="e.g. Ninja"${tab ? ' readonly' : ''}></div>
           <div class="field"><label for="tSample">Try a name</label><input type="text" id="tSample" maxlength="40" value="${esc(sample)}"></div></div>
         <div class="grid2"><div class="field"><label for="tFont">Lettering</label><select id="tFont">${Object.keys(AMAPoster.FONTS).map(f => `<option${f === st.font ? ' selected' : ''}>${f}</option>`).join('')}</select></div>
           <div class="field"><span class="label">Colours</span><div class="row"><label class="check" style="min-height:0"><input type="color" id="tFill" value="${esc(st.fill || '#ffffff')}"> Letters</label><label class="check" style="min-height:0"><input type="color" id="tStroke" value="${esc(st.stroke || '#000000')}"> Outline</label></div></div></div>
@@ -1187,13 +1243,21 @@ function openTemplate(existing) {
     const pickBtn = $('#tPick'); if (pickBtn) pickBtn.onclick = () => { $('#pickTpl').onchange = async e => {
       const f = e.target.files[0]; e.target.value = ''; if (!f) return;
       try {
-        if (isPdf(f)) { toast('Reading the PDF...', 0); pages = await pdfPages(f); toast('Ready', 800); if (pages.length === 1) { useBlob(pages[0].blob); pages = null; } }
-        else useBlob(await resize(f));
+        if (isPdf(f)) { toast('Reading the PDF...', 0); pages = tab ? await pdfPages(f, null, 1240, 1754) : await pdfPages(f); toast('Ready', 800); if (pages.length === 1) { await useBlob(pages[0].blob); pages = null; } }
+        else await useBlob(tab ? await resize(f, 1240, 1754) : await resize(f));
         view();
       } catch (er) { toast(er.message || String(er), 6000); }
     }; $('#pickTpl').click(); };
-    const useBlob = b => { blob = b; t._local = URL.createObjectURL(b); };
-    $$('#tForm [data-tpage]').forEach(b => b.onclick = () => { useBlob(pages[+b.dataset.tpage].blob); pages = null; view(); });
+    const useBlob = async b => {
+      blob = b; t._local = URL.createObjectURL(b);
+      if (tab) {   // the poster is the design's own size; keep the name area in proportion
+        const im = await loadImg(t._local), st = S(), ow = st.w || 1240, oh = st.h || 1754;
+        st.w = im.naturalWidth; st.h = im.naturalHeight;
+        const k = st.w / ow; st.box = { ...st.box, cx: Math.round(st.box.cx * k), maxW: Math.round(st.box.maxW * k) };
+        ['cy', 'base', 'h'].forEach(c => { if (st.box[c] != null) st.box[c] = Math.round(st.box[c] * st.h / oh); });
+      }
+    };
+    $$('#tForm [data-tpage]').forEach(b => b.onclick = async () => { await useBlob(pages[+b.dataset.tpage].blob); pages = null; view(); });
     const cv = $('#tCanvas'); if (!cv) return;
     const read = () => {
       const st = S();
@@ -1213,7 +1277,7 @@ function openTemplate(existing) {
     };
     ['#tFont', '#tFill', '#tStroke', '#tSw', '#tCurve', '#tSpace', '#tCaps', '#tSample'].forEach(id => { $(id).oninput = () => { read(); redraw(); }; });
     // Drag to mark the name area (in poster pixels)
-    const at = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * 1920, y: (e.clientY - r.top) / r.height * 1080 }; };
+    const at = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * cv.width, y: (e.clientY - r.top) / r.height * cv.height }; };
     let start = null;
     cv.onpointerdown = e => { start = at(e); cv.setPointerCapture(e.pointerId); };
     cv.onpointermove = e => {
@@ -1234,11 +1298,13 @@ function openTemplate(existing) {
       try {
         let path = t.image_path;
         if (blob) path = await upload('templates', blob, 'jpg', 'image/jpeg');
-        const rec = { title: t.title.trim(), image_path: path, settings: { ...S(), sample } };
+        const st = { ...S(), sample }; if (tab) { st.w = st.w || 1240; st.h = st.h || 1754; }
+        const rec = tab ? { tablet_image_path: path, tablet_settings: st } : { title: t.title.trim(), image_path: path, settings: st };
         const { error } = existing ? await sb.from('tv_poster_templates').update({ ...rec, updated_at: new Date().toISOString() }).eq('id', existing.id)
           : await sb.from('tv_poster_templates').insert({ ...rec, position: (state.templates || []).length + 1 });
         if (error) throw error;
-        if (existing && blob && existing.image_path) sb.storage.from('tv').remove([existing.image_path]).catch(() => {});
+        const old = existing && (tab ? existing.tablet_image_path : existing.image_path);
+        if (blob && old) sb.storage.from('tv').remove([old]).catch(() => {});
         toast('Template saved'); await load(); openTemplates();
       } catch (er) { $('#tSave').disabled = false; toast('Not saved: ' + (er.message || er), 6000); }
     };
@@ -1246,26 +1312,35 @@ function openTemplate(existing) {
   };
   view();
 }
-// Import a templates file: { app: 'ama-tv-templates', templates: [{ title, settings, image: 'data:image/jpeg;base64,...' }] }
+// Import a templates file: { app: 'ama-tv-templates', templates: [{ title, settings, image: 'data:image/jpeg;base64,...',
+//   tablet: { settings, image } }] }. A template already here (same title) gets the file's tablet version added or updated.
 function importTemplates(after) {
   $('#pickImport').onchange = async e => {
     const f = e.target.files[0]; e.target.value = ''; if (!f) return;
     let list;
-    try { const j = JSON.parse(await f.text()); list = (j.templates || []).filter(x => x && x.title && x.image && x.settings); if (!list.length) throw new Error(); }
+    try { const j = JSON.parse(await f.text()); list = (j.templates || []).filter(x => x && x.title && ((x.image && x.settings) || (x.tablet && x.tablet.image && x.tablet.settings))); if (!list.length) throw new Error(); }
     catch (er) { return toast("That isn't a poster templates file.", 5000); }
-    const have = new Set((state.templates || []).map(t => t.title.toLowerCase()));
-    const add = list.filter(x => !have.has(x.title.toLowerCase()));
-    if (!add.length) return toast('Those templates are already here.');
-    let n = 0;
+    const have = new Map((state.templates || []).map(t => [t.title.toLowerCase(), t]));
+    let added = 0, tablets = 0, skipped = 0, noMatch = 0, n = 0;
+    const up = async img => { const b = await (await fetch(img)).blob(); return upload('templates', b, 'jpg', b.type || 'image/jpeg'); };
     try {
-      for (const x of add) {
-        toast(`Importing ${++n} of ${add.length}...`, 0);
-        const b = await (await fetch(x.image)).blob();
-        const path = await upload('templates', b, 'jpg', b.type || 'image/jpeg');
-        const { error } = await sb.from('tv_poster_templates').insert({ title: x.title, image_path: path, settings: x.settings, position: (state.templates || []).length + n });
-        if (error) throw error;
+      for (const x of list) {
+        toast(`Importing ${++n} of ${list.length}...`, 0);
+        const cur = have.get(x.title.toLowerCase());
+        if (!cur) {
+          if (!x.image || !x.settings) { noMatch++; continue; }   // a tablet version needs its TV template first
+          const rec = { title: x.title, image_path: await up(x.image), settings: x.settings, position: (state.templates || []).length + added + 1 };
+          if (x.tablet) { rec.tablet_image_path = await up(x.tablet.image); rec.tablet_settings = x.tablet.settings; tablets++; }
+          const { error } = await sb.from('tv_poster_templates').insert(rec); if (error) throw error; added++;
+        } else if (x.tablet) {
+          const path = await up(x.tablet.image);
+          const { error } = await sb.from('tv_poster_templates').update({ tablet_image_path: path, tablet_settings: x.tablet.settings, updated_at: new Date().toISOString() }).eq('id', cur.id);
+          if (error) throw error;
+          if (cur.tablet_image_path) sb.storage.from('tv').remove([cur.tablet_image_path]).catch(() => {});
+          tablets++;
+        } else skipped++;
       }
-      toast(`Imported ${add.length} template${add.length === 1 ? '' : 's'}${list.length > add.length ? `, skipped ${list.length - add.length} already here` : ''}`, 4000);
+      toast([added && `Imported ${added} template${added === 1 ? '' : 's'}`, tablets && `${tablets} tablet version${tablets === 1 ? '' : 's'}`, skipped && `skipped ${skipped} already here`, noMatch && `${noMatch} tablet version${noMatch === 1 ? ' has' : 's have'} no matching template here`].filter(Boolean).join(', ') || 'Nothing new in that file.', 5000);
       await load(); if (after) after();
     } catch (er) { toast('Import stopped: ' + (er.message || er), 6000); await load(); }
   };

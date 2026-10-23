@@ -156,6 +156,8 @@ alter table public.tv_slides drop constraint if exists tv_slides_kind_check;
 alter table public.tv_slides add constraint tv_slides_kind_check check (kind in ('photo', 'video', 'text', 'live', 'countdown', 'qr'));
 alter table public.tv_slides add column if not exists link text;   -- QR code slides: the link the code opens
 alter table public.tv_slides add column if not exists display text not null default 'tv';   -- which display it's on: 'tv' or 'tablet'
+-- A party slide's partner on the other screen (the TV poster and its tablet version), so they go on and off together
+alter table public.tv_slides add column if not exists linked uuid references public.tv_slides (id) on delete set null;
 alter table public.tv_slides drop constraint if exists tv_slides_display_check;
 alter table public.tv_slides add constraint tv_slides_display_check check (display in ('tv', 'tablet'));
 alter table public.tv_slides drop constraint if exists tv_slides_qr_check;
@@ -255,6 +257,8 @@ create table if not exists public.tv_poster_templates (
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
+alter table public.tv_poster_templates add column if not exists tablet_image_path text;   -- the upright version for the tablets (optional)
+alter table public.tv_poster_templates add column if not exists tablet_settings jsonb;      -- ... and where the name goes on it (with w, h)
 alter table public.tv_poster_templates enable row level security;
 drop policy if exists "staff edit poster templates" on public.tv_poster_templates;
 create policy "staff edit poster templates" on public.tv_poster_templates for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
