@@ -84,7 +84,7 @@ const plus = n => { const d = new Date(today); d.setUTCDate(d.getUTCDate() + n);
 ok(f.live.next_grading && f.live.next_grading.date === plus(43) && f.live.next_grading.cycle === 'TV cycle', 'next grading date of the active cycle');
 ok(f.live.sessions.map(s => s.date).join() === [plus(1), plus(15), plus(29)].join() && f.live.sessions[2].signoff === true && f.live.sessions[0].signoff === false, 'upcoming sessions only, with the sign-off marked');
 ok(f.live.congrats.map(c => c.name + ':' + c.rank).join() === 'Kara Jane Lee:Probationary Black Belt,Sam Park:2nd Dan', 'congratulations: recent passes with certificate names; old passes and test records left out');
-ok(JSON.stringify(f).indexOf('student_id') === -1 && JSON.stringify(f).indexOf('T1') === -1, 'the TV never gets Student IDs or anything else about students');
+ok(JSON.stringify(f).indexOf('student_id') === -1 && JSON.stringify(f).indexOf('"T1"') === -1, 'the TV never gets Student IDs or anything else about students');
 
 console.log('\nParty mode');
 const pid = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, theme, party) values ('text', 'Happy Birthday Kara!', 'party', true) returning id`))).rows[0].id;

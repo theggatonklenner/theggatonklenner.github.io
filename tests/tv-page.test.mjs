@@ -53,7 +53,14 @@ const errors = [];
 async function context(size, offline = false) {
   const ctx = await browser.newContext({ viewport: size, serviceWorkers: 'block', ...(size.width < 500 ? { isMobile: true, hasTouch: true } : {}) });
   await ctx.route('https://cdn.jsdelivr.net/**', r => r.fulfill({ contentType: 'text/javascript', body: read(join(PREP_TESTS, 'node_modules/@supabase/supabase-js/dist/umd/supabase.js')) }));
-  await ctx.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+  if (process.env.FONTS_DIR) {   // real poster fonts (from @fontsource) instead of none
+    await ctx.route('https://fonts.googleapis.com/**', r => {
+      const fam = decodeURIComponent((r.request().url().split('family=')[1] || '').split('&')[0]).split(':')[0].replace(/\+/g, ' ');
+      const file = { 'Luckiest Guy': 'luckiest-guy/files/luckiest-guy-latin-400-normal.woff2', 'Knewave': 'knewave/files/knewave-latin-400-normal.woff2', 'Montserrat': 'montserrat/files/montserrat-latin-800-normal.woff2' }[fam];
+      r.fulfill({ contentType: 'text/css', body: file ? `@font-face{font-family:"${fam}";font-weight:${fam === 'Montserrat' ? 800 : 400};src:url(https://fonts.gstatic.com/${file})}` : '' });
+    });
+    await ctx.route('https://fonts.gstatic.com/**', r => r.fulfill({ contentType: 'font/woff2', body: readFileSync(join(process.env.FONTS_DIR, r.request().url().split('gstatic.com/')[1])) }));
+  } else await ctx.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
   await ctx.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
   await ctx.route('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/**', r => r.fulfill({ contentType: 'text/javascript', body: read(join(PDFJS, r.request().url().endsWith('pdf.worker.min.js') ? 'pdf.worker.min.js' : 'pdf.min.js')) }));
   await ctx.route('**/storage/v1/**', async r => {
@@ -270,6 +277,53 @@ try {
   await page.waitForTimeout(500);
   ok((await db.query(`select count(*)::int n from tv_slides where not party and kind = 'photo'`)).rows[0].n === normalBefore + pageNames.length, 'a PDF added under Photos becomes one slide per page');
   await tv.ctx.close(); await ctx.close();
+
+  // Birthday posters: import templates, type a name, show it
+  ({ ctx, page } = await context({ width: 390, height: 844 }));
+  await page.goto(BASE + '/tv/edit/index.html');
+  await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+  await page.waitForSelector('#partyStart');
+  let tplFile = process.env.TEMPLATES_JSON;
+  if (!tplFile) {
+    const img = 'data:image/png;base64,' + readFileSync(join(ROOT, 'icons/ama-id-cards.png')).toString('base64');
+    tplFile = join(tmpdir(), 'tv-test-templates.json');
+    (await import('node:fs')).writeFileSync(tplFile, JSON.stringify({ app: 'ama-tv-templates', templates: [
+      { title: 'Classic', image: img, settings: { size: 200, box: { cx: 960, base: 560, maxW: 1240 }, font: 'Montserrat', weight: 800, fill: '#ffffff', stroke: '', strokeWidth: 0, spacing: 0.04, uppercase: true } },
+      { title: 'Turtles', image: img, settings: { size: 285, box: { cx: 960, base: 550, maxW: 1340 }, font: 'Luckiest Guy', fill: '#ffffff', stroke: '#000000', strokeWidth: 0.1, uppercase: true } }] }));
+  }
+  await page.click('#partyStart'); await page.waitForSelector('#pForm');
+  ok(await page.isVisible('#pForm [data-m="poster"]'), 'party mode has a Poster option');
+  await page.click('#pForm [data-m="poster"]'); await page.waitForSelector('#pImport');
+  await page.click('#pImport'); await page.setInputFiles('#pickImport', tplFile);
+  await page.waitForSelector('#pForm [data-tpl]', { timeout: 60000 });
+  const nT = (await db.query(`select count(*)::int n from tv_poster_templates`)).rows[0].n;
+  ok(nT >= 2 && (await page.$$('#pForm [data-tpl]')).length === nT, `templates imported (${nT}) and shown to pick from`);
+  await page.click('#pForm [data-tpl]:nth-child(2)');
+  await page.fill('#pPoster', 'Maximilian'); await page.waitForTimeout(800);
+  const painted = await page.evaluate(() => { const c = document.querySelector('#pCanvas'), d = c.getContext('2d').getImageData(0, 0, 1920, 1080).data; let n = 0; for (let i = 0; i < d.length; i += 4000) if (d[i] || d[i + 1] || d[i + 2]) n++; return n; });
+  ok(painted > 50, 'typing a name draws the poster preview');
+  await page.screenshot({ path: join(SHOTS, 'tv-poster-editor.png') });
+  const dl = page.waitForEvent('download'); await page.click('#pDownload'); const dlf = await dl;
+  ok(dlf.suggestedFilename() === 'birthday-maximilian.png', 'Download saves the poster as a picture');
+  await page.selectOption('#pFor', '120'); await page.click('#pGo'); await page.waitForSelector('#partyStop', { timeout: 30000 });
+  const ps = (await db.query(`select s.kind, s.title, s.media_path from tv_settings t join tv_slides s on s.id = t.only_slide`)).rows[0];
+  ok(ps.kind === 'photo' && /^Maximilian \(/.test(ps.title) && files.get(ps.media_path).type === 'image/jpeg' && files.get(ps.media_path).body.length > 10000, 'Show on the TV makes the poster and puts it on in party mode');
+  await page.click('#partyStop'); await toastSays(page, 'Back to normal');
+
+  // Add a template: choose a design, drag where the name goes, pick the lettering
+  await page.click('#partyStart'); await page.waitForSelector('#pManage'); await page.click('#pManage');
+  await page.waitForSelector('#tAdd'); await page.click('#tAdd');
+  await page.click('#tPick'); await page.setInputFiles('#pickTpl', join(ROOT, 'icons/clipboard.png'));
+  await page.waitForSelector('#tCanvas');
+  const box = await page.$eval('#tCanvas', c => { const r = c.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+  await page.mouse.move(box.x + box.w * 0.2, box.y + box.h * 0.4); await page.mouse.down();
+  await page.mouse.move(box.x + box.w * 0.5, box.y + box.h * 0.5, { steps: 4 }); await page.mouse.move(box.x + box.w * 0.8, box.y + box.h * 0.6, { steps: 4 }); await page.mouse.up();
+  await page.fill('#tTitle', 'Ninja'); await page.selectOption('#tFont', 'Knewave'); await page.fill('#tSample', 'Ayda');
+  await page.screenshot({ path: join(SHOTS, 'tv-template-editor.png') });
+  await page.click('#tSave'); await page.waitForSelector('#tAdd');
+  const nt = (await db.query(`select settings from tv_poster_templates where title = 'Ninja'`)).rows[0];
+  ok(nt && nt.settings.font === 'Knewave' && Math.abs(nt.settings.box.cx - 960) < 40 && Math.abs(nt.settings.box.cy - 540) < 40 && nt.settings.box.maxW > 1000, 'a new template saves the dragged name area and lettering');
+  await ctx.close();
 
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));

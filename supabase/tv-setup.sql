@@ -98,6 +98,23 @@ drop policy if exists "staff edit tv slides" on public.tv_slides;
 create policy "staff edit tv settings" on public.tv_settings for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
 create policy "staff edit tv slides"   on public.tv_slides   for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
 
+-- ---------- Birthday poster templates ----------
+-- A design with the name area left empty, plus where the name goes and how it looks (see tv/poster.js).
+-- Staff type a name in the editor; the poster is drawn there and shown with party mode.
+create table if not exists public.tv_poster_templates (
+  id          uuid primary key default gen_random_uuid(),
+  title       text not null check (length(trim(title)) > 0),
+  image_path  text not null,          -- in the "tv" storage bucket
+  settings    jsonb not null,
+  position    int not null default 0,
+  created_by  text default lower(auth.jwt() ->> 'email'),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+alter table public.tv_poster_templates enable row level security;
+drop policy if exists "staff edit poster templates" on public.tv_poster_templates;
+create policy "staff edit poster templates" on public.tv_poster_templates for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
+
 -- ---------- What the TV gets (no sign-in, screen code only) ----------
 create or replace function public.tv_feed(p_code text) returns jsonb
   language plpgsql stable security definer set search_path = public as $$
