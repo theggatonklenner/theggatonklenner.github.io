@@ -114,6 +114,9 @@ alter table public.tv_settings add column if not exists quiet_style text not nul
 -- Each day's slideshow hours, e.g. {"1": {"on": "15:00", "off": "21:00"}, "0": null} (0 = Sunday ... 6 = Saturday; null = closed all day).
 -- Outside them the TV is quiet. Empty: the same quiet_from/quiet_to every day.
 alter table public.tv_settings add column if not exists quiet_days jsonb;
+-- Scheduled screen-off times on top of the slideshow hours, e.g. Saturday 10:00 for 5 minutes:
+-- [{"days": [6], "at": "10:00", "minutes": 5, "for": "all" | "loc:sydenham" | "dev:<screen id>"}]
+alter table public.tv_settings add column if not exists offs jsonb not null default '[]'::jsonb;
 alter table public.tv_settings drop constraint if exists tv_settings_quiet_check;
 alter table public.tv_settings add constraint tv_settings_quiet_check check (quiet_style in ('black', 'logo'));
 alter table public.tv_settings add column if not exists blackout boolean not null default false;     -- "Black out the screen": black until turned back on
@@ -327,6 +330,7 @@ declare
   two boolean;
   now_time time := (now() at time zone 'Australia/Sydney')::time;
   day_hours jsonb;
+  off_now boolean := false;
 begin
   select * into s from public.tv_settings where screen_code = upper(trim(coalesce(p_code, '')));   -- the code says which display
   if not found then
@@ -367,9 +371,17 @@ begin
       'only', true, 'only_until', one_until, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
 
+  -- Scheduled screen-off times for this device (or its location, or every device)
+  off_now := exists (
+    select 1 from jsonb_array_elements(coalesce(s.offs, '[]'::jsonb)) e,
+           lateral (select (e ->> 'at')::time a, (e ->> 'at')::time + make_interval(mins => greatest(1, least(720, coalesce((e ->> 'minutes')::int, 0)))) z) w
+     where jsonb_typeof(e -> 'days') = 'array' and (e -> 'days') @> to_jsonb(extract(dow from (now() at time zone 'Australia/Sydney'))::int)
+       and (coalesce(e ->> 'for', 'all') = 'all' or e ->> 'for' = 'loc:' || coalesce(loc, '') or e ->> 'for' = 'dev:' || coalesce(p_screen, ''))
+       and (case when w.z > w.a then now_time >= w.a and now_time < w.z else now_time >= w.a or now_time < w.z end));
+
   -- Quiet hours (a party still shows): a black screen or just the logo outside each day's slideshow hours
   day_hours := s.quiet_days -> extract(dow from (now() at time zone 'Australia/Sydney'))::int::text;
-  if s.quiet_on and (case
+  if off_now or s.quiet_on and (case
        when s.quiet_days is not null then
          day_hours is null or jsonb_typeof(day_hours) <> 'object'
          or not (now_time >= (day_hours ->> 'on')::time and now_time < (day_hours ->> 'off')::time)
@@ -379,7 +391,7 @@ begin
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false),
       'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
-      'quiet', s.quiet_style, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
+      'quiet', s.quiet_style, 'off', off_now, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
 
   select coalesce(jsonb_agg(jsonb_build_object(

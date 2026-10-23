@@ -140,6 +140,15 @@
   .saved { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   .saved li { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
   .saved li.pick { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .offs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .offs li { border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .offs .dw { display: flex; gap: 3px; }
+  .offs .dw button { flex: 1 1 0; min-width: 0; padding: 0; min-height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); font-weight: 600; font-size: 13px; cursor: pointer; color: var(--muted); }
+  .offs .dw button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .offs .tm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .offs .tm input[type=time] { width: auto; }
+  .offs .tm input[type=number] { width: 80px; }
+  .offs .tm select { width: auto; flex: 1 1 140px; }
   .days { width: 100%; border-collapse: collapse; }
   .days td { padding: 5px 4px; vertical-align: middle; }
   .days td:first-child { width: 1%; white-space: nowrap; }
@@ -232,6 +241,10 @@
           <div class="field"><label for="setQStyle">At other times the TV shows</label><select id="setQStyle"><option value="logo">Just the AMA logo (dimmed, on black)</option><option value="black">A black screen</option></select></div>
           <p class="hint" style="margin:0">A party still shows at any time. Many TVs also have their own off timer in their settings, which saves power.</p>
         </div></div>
+      <div class="field" id="offBox" hidden><span class="label">Scheduled screen-off times</span>
+        <p class="hint" style="margin:0">On top of the slideshow hours: the screen goes off at these times for the minutes set, e.g. Saturday 10:00 for 5 minutes. A party still shows.</p>
+        <ul class="offs" id="offRows"></ul>
+        <div class="row"><button type="button" class="btn sm" id="offAdd">Add a time</button></div></div>
       <div class="row"><button class="btn primary" type="submit" id="setSave">Save settings</button></div>
     </form>
   </section>
@@ -388,6 +401,7 @@ function draw() {
   drawParty();
   $('#code').textContent = S.screen_code;
   $('#setSecs').value = S.seconds; $('#setClock').checked = S.show_clock; $('#setLogo').checked = S.show_logo;
+  $('#offBox').hidden = !('offs' in S); if ('offs' in S) { offState = JSON.parse(JSON.stringify(S.offs || [])); drawOffs(); }
   $('#bannerBox').hidden = !('banner' in S); $('#setBanner').value = S.banner || '';
   $('#quietBox').hidden = !('quiet_on' in S);
   if ('quiet_on' in S) {
@@ -1412,6 +1426,42 @@ function importTemplates(after) {
   $('#pickImport').click();
 }
 
+/* ---------- Scheduled screen-off times ---------- */
+let offState = [];
+const DAYS3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function offFor() {   // who it's for: every device, a location, or one named device
+  const locs = (state.locations || []).map(l => [`loc:${l.slug}`, `At ${l.name}`]);
+  const devs = (state.screens || []).map((x, i) => [`dev:${x.screen_id}`, x.name ? `Only ${x.name}` : `Only ${noun()} ${i + 1}`]);
+  return [['all', `Every ${noun()}`]].concat(locs, devs);
+}
+function drawOffs() {
+  const opts = offFor();
+  $('#offRows').innerHTML = offState.map((o, i) => {
+    const has = opts.some(([v]) => v === (o.for || 'all'));
+    return `<li data-off="${i}"><div class="dw" role="group" aria-label="Days">${[1, 2, 3, 4, 5, 6, 0].map(d => `<button type="button" data-d="${d}" aria-pressed="${o.days.includes(d)}">${DAYS3[d]}</button>`).join('')}</div>
+      <div class="tm"><label class="label" style="margin:0">At</label><input type="time" data-at value="${esc(o.at || '')}" aria-label="Time">
+        <label class="label" style="margin:0">for</label><input type="number" data-min min="1" max="720" value="${o.minutes || 5}" aria-label="Minutes"><span class="hint">min</span></div>
+      <div class="tm"><select data-for aria-label="Which screens">${opts.map(([v, t]) => `<option value="${esc(v)}"${(o.for || 'all') === v ? ' selected' : ''}>${esc(t)}</option>`).join('')}${has ? '' : `<option value="${esc(o.for)}" selected>A device no longer here</option>`}</select>
+        <button type="button" class="btn sm danger" data-offdel aria-label="Remove this time">Remove</button></div></li>`;
+  }).join('') || '<li class="hint" style="border:0;padding:0">None yet.</li>';
+  $$('#offRows [data-d]').forEach(b => b.onclick = () => { readOffs(); const o = offState[+b.closest('[data-off]').dataset.off], d = +b.dataset.d;
+    o.days = o.days.includes(d) ? o.days.filter(x => x !== d) : o.days.concat(d).sort(); drawOffs(); });
+  $$('#offRows [data-offdel]').forEach(b => b.onclick = () => { readOffs(); offState.splice(+b.closest('[data-off]').dataset.off, 1); drawOffs(); });
+}
+function readOffs() {
+  $$('#offRows [data-off]').forEach(li => { const o = offState[+li.dataset.off]; if (!o) return;
+    o.at = li.querySelector('[data-at]').value; o.minutes = +li.querySelector('[data-min]').value; o.for = li.querySelector('[data-for]').value; });
+}
+$('#offAdd').onclick = () => {
+  readOffs();
+  const last = offState[offState.length - 1];
+  // A copy of the last one, 30 minutes later (Saturday 10:00, 10:30, 11:00 ...)
+  let at = '10:00';
+  if (last && last.at) { const [h, m] = last.at.split(':').map(Number), t = (h * 60 + m + 30) % 1440; at = `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; }
+  offState.push(last ? { ...last, days: last.days.slice(), at } : { days: [6], at, minutes: 5, for: 'all' });
+  drawOffs();
+};
+
 /* ---------- Locations ---------- */
 function drawLocations() {
   const box = $('#locCard');
@@ -1468,6 +1518,15 @@ $('#setForm').onsubmit = async e => {
   const secs = Math.max(3, Math.min(600, +$('#setSecs').value || 10));
   const rec = { seconds: secs, show_clock: $('#setClock').checked, show_logo: $('#setLogo').checked };
   if (!$('#bannerBox').hidden) rec.banner = $('#setBanner').value.trim();
+  if (!$('#offBox').hidden) {
+    readOffs();
+    for (const o of offState) {
+      if (!o.days.length) return toast('Pick the days for each screen-off time.');
+      if (!o.at) return toast('Fill in the time for each screen-off time.');
+      if (!(o.minutes >= 1 && o.minutes <= 720)) return toast('Minutes off must be between 1 and 720.');
+    }
+    rec.offs = offState;
+  }
   if (!$('#quietBox').hidden) {
     rec.quiet_on = $('#setQuiet').checked;
     if (rec.quiet_on) {

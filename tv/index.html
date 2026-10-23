@@ -188,6 +188,7 @@
   // Tell the editor this TV is on and what it's showing; reload if "Refresh the TV" was pressed
   function showingNow() {
     if (feed && feed.blackout) return 'Blacked out';
+    if (feed && feed.off) return 'Screen off (scheduled)';
     if (feed && feed.quiet) return 'Quiet hours (' + (feed.quiet === 'black' ? 'black screen' : 'logo') + ')';
     var s = playlist[index]; if (!s) return feed && feed.only ? 'Party mode' : 'Waiting for slides';
     var name = s.title || (s.kind === 'live' ? { next_grading: 'Next grading', events: 'Events this month', month: 'Month theme' }[s.live_kind] : { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown', qr: 'QR code' }[s.kind]);

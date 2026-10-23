@@ -855,6 +855,35 @@ try {
   await db.query(`delete from tv_slides where title = 'Sydenham car park closed'`); await db.query(`delete from tv_locations where slug = 'parramatta'`);
   await ctx.close(); await syd.c.close(); await mkv.c.close();
 
+  // Scheduled screen-off times
+  console.log('\nScheduled screen-off times');
+  ({ ctx, page } = await context({ width: 390, height: 844 }));
+  await page.goto(BASE + '/tv/edit/index.html');
+  await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+  await page.waitForSelector('#offBox:not([hidden])');
+  await page.click('#offAdd'); await page.click('#offAdd'); await page.click('#offAdd');
+  const ats = await page.$$eval('#offRows [data-at]', xs => xs.map(x => x.value));
+  ok(ats.join() === '10:00,10:30,11:00' && (await page.$$('#offRows [data-d="6"][aria-pressed="true"]')).length === 3, '"Add a time" makes Saturday 10:00, 10:30, 11:00 in three taps');
+  await page.fill('#offRows [data-off="2"] [data-min]', '15'); await page.click('#offRows [data-off="0"] [data-d="0"]');
+  await page.selectOption('#offRows [data-off="1"] [data-for]', 'loc:sydenham');
+  await page.locator('#offBox').screenshot({ path: join(SHOTS, 'scheduled-offs.png') });
+  await page.click('#setSave'); await toastSays(page, 'Settings saved'); await page.waitForTimeout(400);
+  const offs = (await db.query(`select offs from tv_settings where id = 1`)).rows[0].offs;
+  ok(offs.length === 3 && offs[2].minutes === 15 && offs[0].days.includes(0) && offs[0].days.includes(6) && offs[1].for === 'loc:sydenham', 'saved with their days, minutes and which screens');
+  await page.click('#offRows [data-off="0"] [data-offdel]'); await page.click('#setSave'); await toastSays(page, 'Settings saved'); await page.waitForTimeout(400);
+  ok((await db.query(`select jsonb_array_length(offs) n from tv_settings where id = 1`)).rows[0].n === 2, 'a time can be removed');
+  const nd = (await db.query(`select extract(dow from (now() at time zone 'Australia/Sydney'))::int d, to_char((now() at time zone 'Australia/Sydney') - interval '1 minute', 'HH24:MI') a`)).rows[0];
+  await db.query(`update tv_settings set offs = $1::jsonb where id = 1`, [JSON.stringify([{ days: [nd.d], at: nd.a, minutes: 10, for: 'all' }])]);
+  const tvo = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  await tvo.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+  await tvo.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+  const tvop = await tvo.newPage(); await tvop.goto(BASE + `/tv/index.html?code=${CODE}`); await tvop.waitForSelector('.layer.on');
+  ok(await tvop.isVisible('.quiet') && (await tvop.evaluate(() => window.__tv.state().count)) === 0, 'at a scheduled time the TV turns off');
+  await db.query(`update tv_settings set offs = '[]'::jsonb where id = 1`);
+  await tvop.evaluate(() => window.__tv.reload()); await tvop.waitForFunction(() => !document.querySelector('.quiet'), null, { timeout: 6000 }).catch(() => {});
+  ok(!(await tvop.$('.quiet')), '...and back on after');
+  await tvo.close(); await ctx.close();
+
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));
   await page.goto(BASE + '/tv/edit/index.html');

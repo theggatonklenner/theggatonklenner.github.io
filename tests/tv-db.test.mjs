@@ -320,6 +320,27 @@ await as('tate@ama.test', () => db.query(`delete from tv_slides where id in ($1,
 await db.exec(`delete from tv_screens where screen_id in ('syd-tv-0001', 'mkv-tv-0001')`);
 ok(!(await tryAs('remote@ama.test', `insert into tv_locations (slug, name) values ('x1', 'X')`)).ok && (await tryAs('remote@ama.test', `select * from tv_locations`)).n === 5, 'everyone with TV access sees the locations; only the editor changes them');
 
+console.log('\nScheduled screen-off times');
+const nowD = (await db.query(`select extract(dow from ${syd})::int d, to_char(${syd} - interval '2 minutes', 'HH24:MI') a, to_char(${syd} + interval '30 minutes', 'HH24:MI') later`)).rows[0];
+const setOffs = async offs => as('tate@ama.test', () => db.query(`update tv_settings set offs = $1::jsonb where id = 1`, [JSON.stringify(offs)]));
+await setOffs([{ days: [nowD.d], at: nowD.a, minutes: 10, for: 'all' }]);
+let fo = await feedNow();
+ok(fo.quiet && fo.off === true && fo.slides.length === 0, 'a scheduled off time turns the screen off');
+await setOffs([{ days: [(nowD.d + 1) % 7], at: nowD.a, minutes: 10, for: 'all' }, { days: [nowD.d], at: nowD.later, minutes: 10, for: 'all' }]);
+ok(!(await feedNow()).quiet, 'other days and later times leave it on');
+await setOffs([{ days: [nowD.d], at: nowD.a, minutes: 1, for: 'all' }]);
+ok(!(await feedNow()).quiet, 'it comes back on after the minutes are up');
+await as(null, () => db.query(`select tv_checkin($1, 'off-syd-001', 'x', now(), '{}'::jsonb, 'sydenham')`, [code]));
+await setOffs([{ days: [nowD.d], at: nowD.a, minutes: 10, for: 'loc:sydenham' }]);
+ok((await feedAt('off-syd-001', null)).off === true && !(await feedNow()).quiet, 'it can be for one location only');
+await setOffs([{ days: [nowD.d], at: nowD.a, minutes: 10, for: 'dev:off-syd-001' }]);
+ok((await feedAt('off-syd-001', null)).off === true && !(await feedAt('other-dev-01', 'sydenham')).quiet, 'or one device');
+const op = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, party, theme) values ('text', 'Party in off time', true, 'party') returning id`))).rows[0].id;
+await as('tate@ama.test', () => db.query(`insert into tv_party_bookings (slide_id, starts_at, ends_at) values ($1, now() - interval '1 minute', now() + interval '1 hour')`, [op]));
+ok((await feedAt('off-syd-001', null)).only === true, 'a party still shows');
+await as('tate@ama.test', () => db.exec(`delete from tv_party_bookings`)); await as('tate@ama.test', () => db.query(`delete from tv_slides where id = $1`, [op]));
+await setOffs([]); await db.exec(`delete from tv_screens where screen_id = 'off-syd-001'`);
+
 console.log('\nFiles');
 const pol = (await db.query(`select policyname, roles::text r from pg_policies where tablename = 'objects' and policyname like 'tv files%'`)).rows;
 ok(pol.length === 4 && pol.every(p => p.r.includes('authenticated') && !p.r.includes('anon')), 'only signed-in staff can add, change or remove TV files');
