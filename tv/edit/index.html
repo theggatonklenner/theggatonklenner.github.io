@@ -114,6 +114,8 @@
   .seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .seg button { flex: 1; border: 0; background: var(--surface); padding: 9px 6px; font-weight: 600; font-size: 14px; color: var(--muted); cursor: pointer; }
   .seg button + button { border-left: 1px solid var(--line); }
+  .seg.disp button { padding: 11px 6px; font-size: 16px; }
+  .seg.disp button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
   .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
   .partyprev { aspect-ratio: 16 / 9; border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #fff; padding: 12px;
     background: linear-gradient(135deg, #e0218a 0%, #7b2ff7 55%, #1e90ff 100%); font-family: var(--font-display); }
@@ -190,6 +192,7 @@
   <section id="problem" class="card" hidden></section>
 
   <section id="app" hidden style="display:flex;flex-direction:column;gap:14px">
+    <div class="seg disp" id="dispSeg" role="group" aria-label="Which screen"><button type="button" data-disp="tv">TV</button><button type="button" data-disp="tablet">Tablets</button></div>
     <div class="card" id="partyOnly" hidden></div>
     <div class="card full" id="status" hidden></div>
     <div class="card" id="party"></div>
@@ -205,7 +208,9 @@
         <div><div class="label">Screen code</div><div class="code" id="code"></div></div>
         <button type="button" class="btn sm" id="newCode">New code</button>
       </div>
-      <p class="hint">On the TV, open the web browser and go to <b>theggatonklenner.github.io/tv</b>, type this code once, then press OK for full screen. A new code stops any TV using the old one until it's typed in again.</p>
+      <div class="field"><span class="label">Link for this screen</span><div class="row"><code id="screenLink" class="grow" style="word-break:break-all;font-size:14px"></code><button type="button" class="btn sm" id="copyLink">Copy</button><button type="button" class="btn sm" id="qrLink">QR code</button></div></div>
+      <p class="hint" id="linkHint"></p>
+      <p class="hint">A new code stops any screen using the old code or link until it gets the new one.</p>
       <div class="grid2">
         <div class="field"><label for="setSecs">Seconds per slide</label><input type="number" id="setSecs" min="3" max="600" step="1"></div>
         <div class="field"><span class="label">On screen</span><label class="check"><input type="checkbox" id="setClock"> Clock</label><label class="check" style="min-height:28px"><input type="checkbox" id="setLogo"> AMA logo</label></div>
@@ -249,7 +254,10 @@ const LIVE = {
 // An old slide of a kind that's since been removed still opens, so it can be deleted
 const liveInfo = k => LIVE[k] || ['Live', 'No longer shown on the TV'];
 const KIND = { photo: 'Photo', video: 'Video', text: 'Info slide', live: 'Live', countdown: 'Countdown', qr: 'QR code' };
-const state = { me: '', slides: [], partySlides: [], settings: null, templates: null, bookings: null, screens: null, nextGrading: null, events: null, months: null };
+// Which screen is being edited: the dojang TV (settings row 1) or the tablets (row 2)
+const urlDisp = new URLSearchParams(location.search).get('display');
+let savedDisp = null; try { savedDisp = localStorage.getItem('tvEditDisplay'); } catch (e) { /* ignore */ }
+const state = { display: (urlDisp || savedDisp) === 'tablet' ? 'tablet' : 'tv', me: '', slides: [], partySlides: [], settings: null, templates: null, bookings: null, screens: null, nextGrading: null, events: null, months: null };
 
 /* ---------- Small helpers ---------- */
 let toastTimer;
@@ -282,6 +290,17 @@ const longDate = iso => new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', 
 const whenText = iso => { const d = new Date(iso); return d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + timeText(iso); };
 const ago = iso => { const s = Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000)); return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : whenText(iso); };
 
+// Bookings for this screen's party slides only
+const mine = list => { const ids = new Set(state.partySlides.concat(state.slides).map(x => x.id)); return list.filter(b => ids.has(b.slide_id)); };
+const sid = () => state.display === 'tablet' ? 2 : 1;
+const noun = () => state.display === 'tablet' ? 'tablet' : 'TV';
+function setDisplay(d) {
+  state.display = d; try { localStorage.setItem('tvEditDisplay', d); } catch (e) { /* ignore */ }
+  try { history.replaceState(null, '', location.pathname + (d === 'tablet' ? '?display=tablet' : '')); } catch (e) { /* ignore */ }
+  load();
+}
+$$('#dispSeg [data-disp]').forEach(b => b.onclick = () => { if (b.dataset.disp !== state.display) setDisplay(b.dataset.disp); });
+
 /* ---------- Loading ---------- */
 async function load() {
   const staff = await sb.rpc('tv_is_staff');
@@ -295,8 +314,8 @@ async function load() {
   }
   document.body.classList.toggle('partyonly', state.partyOnly); $('#partyOnly').hidden = !state.partyOnly;
   const [{ data: slides, error: e1 }, { data: settings, error: e2 }] = await Promise.all([
-    sb.from('tv_slides').select('*').order('position').order('created_at'),
-    sb.from('tv_settings').select('*').eq('id', 1).maybeSingle()
+    sb.from('tv_slides').select('*').eq('display', state.display).order('position').order('created_at'),
+    sb.from('tv_settings').select('*').eq('id', sid()).maybeSingle()
   ]);
   if (e1 || e2) return problem(/tv_slides|tv_settings|schema cache|does not exist/i.test((e1 || e2).message) ? 'setup' : (e1 || e2).message);
   state.slides = (slides || []).filter(x => !x.party); state.partySlides = (slides || []).filter(x => x.party).reverse(); state.settings = settings;
@@ -304,10 +323,10 @@ async function load() {
   state.templates = tp.error ? null : (tp.data || []);   // null: database not updated for posters yet
   const [bk, sc, fd] = await Promise.all([
     sb.from('tv_party_bookings').select('*').gt('ends_at', new Date().toISOString()).order('starts_at'),
-    sb.from('tv_screens').select('*').order('last_seen', { ascending: false }),
+    sb.from('tv_screens').select('*').eq('display', state.display).order('last_seen', { ascending: false }),
     settings ? sb.rpc('tv_feed', { p_code: settings.screen_code }) : Promise.resolve({})
   ]);
-  state.bookings = bk.error ? null : (bk.data || []);    // null: database not updated for bookings yet
+  state.bookings = bk.error ? null : mine(bk.data || []);    // null: database not updated for bookings yet
   state.screens = sc.error ? null : (sc.data || []);
   const [ev, mo] = await Promise.all([sb.from('tv_events').select('*').order('starts_on'), sb.from('tv_months').select('*')]);
   state.events = ev.error ? null : (ev.data || []);   // null: database not updated for events yet
@@ -359,6 +378,13 @@ function draw() {
     $('#quietRow').hidden = !S.quiet_on; $('#setQuiet').onchange = () => { $('#quietRow').hidden = !$('#setQuiet').checked; };
   }
   $('#previewBtn').href = `../?code=${encodeURIComponent(S.screen_code)}&preview=1`;
+  $$('#dispSeg [data-disp]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.disp === state.display)));
+  $('.brand h1').textContent = state.display === 'tablet' ? 'Tablet Display' : 'TV Display';
+  $('#remoteBtn').href = state.display === 'tablet' ? '../remote/?display=tablet' : '../remote/';
+  $('#screenLink').textContent = screenLink();
+  $('#linkHint').innerHTML = state.display === 'tablet'
+    ? 'On each tablet, open this link (or scan the QR code with its camera). It starts playing straight away, upright. Tap the screen for full screen, and add it to the home screen so it opens with one tap.'
+    : 'On the TV, open the web browser and go to this link, or go to <b>theggatonklenner.github.io/tv</b> and type the code once. Press OK for full screen.';
   drawStatus(); drawEvents();
   $('#list').innerHTML = list.length ? list.map((s, i) => {
     let out = (s.starts_on && s.starts_on > t) ? `Starts ${fmtDate(s.starts_on)}` : (s.ends_on && s.ends_on < t) ? `Ended ${fmtDate(s.ends_on)}` : '';
@@ -419,7 +445,7 @@ $('#addBtn').onclick = () => {
 };
 async function addLive(kind) {
   if (state.slides.some(s => s.kind === 'live' && s.live_kind === kind) && !await confirmBox(`There's already a "${LIVE[kind][0]}" slide. Add another?`, 'Add another')) return;
-  const { error } = await sb.from('tv_slides').insert({ kind: 'live', live_kind: kind, theme: kind === 'month' ? 'gold' : 'green' });
+  const { error } = await sb.from('tv_slides').insert({ display: state.display,  kind: 'live', live_kind: kind, theme: kind === 'month' ? 'gold' : 'green' });
   if (error) return toast('Not added: ' + error.message, 5000);
   dlg.close(); toast(`Added: ${LIVE[kind][0]}`); load();
 }
@@ -520,7 +546,7 @@ $('#pickPhotos').onchange = async e => {
   for (const it of items) {
     try {
       const path = await upload('photos', it.blob || await resize(it.file), 'jpg', 'image/jpeg');
-      const { error } = await sb.from('tv_slides').insert({ kind: 'photo', media_path: path });
+      const { error } = await sb.from('tv_slides').insert({ display: state.display,  kind: 'photo', media_path: path });
       if (error) throw error;
       done++;
     } catch (er) { failed.push(it.name); }
@@ -537,7 +563,7 @@ $('#pickVideo').onchange = async e => {
   try {
     const ext = (f.name.split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4';
     const path = await upload('videos', f, ext, f.type || 'video/mp4');
-    const { error } = await sb.from('tv_slides').insert({ kind: 'video', media_path: path, title: f.name.replace(/\.[^.]+$/, '') });
+    const { error } = await sb.from('tv_slides').insert({ display: state.display,  kind: 'video', media_path: path, title: f.name.replace(/\.[^.]+$/, '') });
     if (error) throw error;
     dlg.close(); toast(ext === 'mov' ? 'Video added. If the TV won\'t play it, save it as MP4 and add it again.' : 'Video added', ext === 'mov' ? 8000 : 3000); load();
   } catch (er) { dlg.close(); toast('Video not added: ' + (er.message || er), 7000); }
@@ -641,7 +667,7 @@ function openSlide(s, fresh) {
     }
     const th = $('#slForm input[name=theme]:checked'); if (th) rec.theme = th.value;
     $('#slSave').disabled = true;
-    const { error } = isNew ? await sb.from('tv_slides').insert({ ...rec, kind: x.kind, theme: rec.theme || 'green' }) : await sb.from('tv_slides').update(rec).eq('id', s.id);
+    const { error } = isNew ? await sb.from('tv_slides').insert({ display: state.display,  ...rec, kind: x.kind, theme: rec.theme || 'green' }) : await sb.from('tv_slides').update(rec).eq('id', s.id);
     if (error) { $('#slSave').disabled = false; return toast('Not saved: ' + error.message, 5000); }
     if (!isNew && s.kind === 'qr' && rec.media_path && s.media_path && s.media_path !== rec.media_path) sb.storage.from('tv').remove([s.media_path]).catch(() => {});
     if (!isNew && s.kind === 'text' && s.media_path && s.media_path !== bgPath) sb.storage.from('tv').remove([s.media_path]).catch(() => {});
@@ -853,14 +879,15 @@ function drawStatus() {
   if (state.screens === null) { box.hidden = true; return; }   // database not updated yet
   box.hidden = false;
   const list = state.screens, on = list.filter(x => Date.now() - new Date(x.last_seen) < ONLINE_MS);
-  const head = !list.length ? 'No TV has checked in yet' : on.length ? (list.length > 1 ? `${on.length} of ${list.length} TVs online` : 'The TV is online') : (list.length > 1 ? 'The TVs are offline' : 'The TV is offline');
+  const N = noun(), Ns = N === 'TV' ? 'TVs' : 'tablets';
+  const head = !list.length ? `No ${N} has checked in yet` : on.length ? (list.length > 1 ? `${on.length} of ${list.length} ${Ns} online` : `The ${N} is online`) : (list.length > 1 ? `The ${Ns} are offline` : `The ${N} is offline`);
   box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start"><div class="grow"><h3><span class="dot${on.length ? ' on' : ''}"></span>${esc(head)}</h3>
-      ${!list.length ? '<p class="hint">Open the TV page on the TV with the screen code (under Settings). It shows up here within 20 seconds.</p>' : ''}</div>
-      <button class="btn" id="tvReload"${list.length ? '' : ' disabled'}>Refresh the TV</button></div>
+      ${!list.length ? `<p class="hint">Open the link under Settings on the ${N}. It shows up here within 20 seconds.</p>` : ''}</div>
+      <button class="btn" id="tvReload"${list.length ? '' : ' disabled'}>Refresh the ${N === 'TV' ? 'TV' : 'tablets'}</button></div>
     ${list.length ? `<ul class="screens">${list.map((x, i) => {
       const live = Date.now() - new Date(x.last_seen) < ONLINE_MS;
       const what = x.showing ? esc(x.showing) : 'Starting up';
-      return `<li><div class="grow"><b>${list.length > 1 ? `TV ${i + 1}: ` : ''}${live ? 'Showing: ' + what : 'Offline'}</b>
+      return `<li><div class="grow"><b>${list.length > 1 ? `${N === 'TV' ? 'TV' : 'Tablet'} ${i + 1}: ` : ''}${live ? 'Showing: ' + what : 'Offline'}</b>
         <div>${live ? `Checked in ${esc(ago(x.last_seen))}` : `Last seen ${esc(ago(x.last_seen))}${x.showing ? `, showing ${what}` : ''}`}${x.started_at ? ` · page loaded ${esc(ago(x.started_at))}` : ''}</div></div>
         ${!live ? `<button class="btn sm" data-forget-tv="${esc(x.screen_id)}">Remove</button>` : ''}</li>`;
     }).join('')}</ul>` : ''}
@@ -869,13 +896,13 @@ function drawStatus() {
       : `<div class="row"><button class="btn" id="tvDark" style="background:#111;border-color:#111;color:#fff">Black out the screen</button><span class="hint grow">Black until you turn it back on, even during a party.</span></div>`) : ''}`;
   if ($('#tvDark')) $('#tvDark').onclick = async () => {
     const on = !state.settings.blackout; $('#tvDark').disabled = true;
-    const { error } = await sb.rpc('tv_remote_send', { p_cmd: on ? 'blackout' : 'wake', p_slide: null });
+    const { error } = await sb.rpc('tv_remote_send', { p_cmd: on ? 'blackout' : 'wake', p_slide: null, p_display: state.display });
     if (error) { $('#tvDark').disabled = false; return toast('Not sent: ' + error.message, 5000); }
     toast(on ? 'The screen goes black within 20 seconds.' : 'The screen comes back on within 20 seconds.', 4000); load();
   };
   $('#tvReload').onclick = async () => {
     $('#tvReload').disabled = true;
-    const { error } = await sb.from('tv_settings').update({ reload_at: new Date().toISOString() }).eq('id', 1);
+    const { error } = await sb.from('tv_settings').update({ reload_at: new Date().toISOString() }).eq('id', sid());
     if (error) { $('#tvReload').disabled = false; return toast('Not sent: ' + error.message, 5000); }
     toast('Sent. The TV reloads within 20 seconds.', 4000);
     setTimeout(pollStatus, 25e3);
@@ -890,16 +917,16 @@ function drawStatus() {
 async function pollStatus() {
   if ($('#app').hidden || state.screens === null) return;
   const [{ data, error }, bk] = await Promise.all([
-    sb.from('tv_screens').select('*').order('last_seen', { ascending: false }),
+    sb.from('tv_screens').select('*').eq('display', state.display).order('last_seen', { ascending: false }),
     state.bookings ? sb.from('tv_party_bookings').select('*').gt('ends_at', new Date().toISOString()).order('starts_at') : Promise.resolve({})
   ]);
   if (!error) { state.screens = data || []; drawStatus(); }
-  if (bk.data) state.bookings = bk.data;
+  if (bk.data) state.bookings = mine(bk.data);
   if (state.settings) drawParty();   // a booked party starting or ending while the page is open
 }
 setInterval(() => { if (!document.hidden) pollStatus(); }, 15e3);
 async function setParty(slideId, until) {
-  const { error } = await sb.from('tv_settings').update({ only_slide: slideId, only_until: until }).eq('id', 1);
+  const { error } = await sb.from('tv_settings').update({ only_slide: slideId, only_until: until }).eq('id', sid());
   if (error) { toast('Not saved: ' + error.message, 5000); return false; }
   await load(); return true;
 }
@@ -997,7 +1024,7 @@ function openParty(opts) {
           for (const p of pages) {
             toast(`Saving ${++n} of ${pages.length}...`, 0);
             const path = await upload('photos', p.blob, 'jpg', 'image/jpeg');
-            const { error } = await sb.from('tv_slides').insert({ kind: 'photo', media_path: path, title: p.name || `Design ${p.page}`, party: true });
+            const { error } = await sb.from('tv_slides').insert({ display: state.display,  kind: 'photo', media_path: path, title: p.name || `Design ${p.page}`, party: true });
             if (error) throw error;
           }
           toast(`Saved ${pages.length} designs. Pick one under Saved.`, 4000);
@@ -1047,7 +1074,7 @@ function openParty(opts) {
         if (!nm) { $('#pGo').disabled = false; return toast("Type the birthday child's name."); }
         try {
           const path = await upload('photos', await posterBlob(t, nm, 'image/jpeg'), 'jpg', 'image/jpeg');
-          const { data, error } = await sb.from('tv_slides').insert({ kind: 'photo', media_path: path, title: `${nm} (${t.title})`, party: true }).select('id').single();
+          const { data, error } = await sb.from('tv_slides').insert({ display: state.display,  kind: 'photo', media_path: path, title: `${nm} (${t.title})`, party: true }).select('id').single();
           if (error) throw error;
           id = (Array.isArray(data) ? data[0] : data || {}).id;
         } catch (er) { $('#pGo').disabled = false; return toast('Not saved: ' + (er.message || er), 6000); }
@@ -1060,7 +1087,7 @@ function openParty(opts) {
           if (!photo) { $('#pGo').disabled = false; return toast(pages ? 'Tap the design to show first.' : 'Choose the image first.'); }
           rec = { kind: 'photo', media_path: photo, title: ($('#pCap') ? $('#pCap').value.trim() : caption) || null };
         }
-        const { data, error } = await sb.from('tv_slides').insert({ ...rec, party: true }).select('id').single();
+        const { data, error } = await sb.from('tv_slides').insert({ display: state.display,  ...rec, party: true }).select('id').single();
         if (error) { $('#pGo').disabled = false; return toast('Not saved: ' + error.message, 5000); }
         id = (Array.isArray(data) ? data[0] : data || {}).id;
       }
@@ -1230,6 +1257,17 @@ function importTemplates(after) {
 }
 
 /* ---------- Settings ---------- */
+const screenLink = () => `https://theggatonklenner.github.io/tv/?code=${encodeURIComponent(state.settings.screen_code)}`;
+$('#copyLink').onclick = async () => {
+  try { await navigator.clipboard.writeText(screenLink()); toast('Link copied'); }
+  catch (e) { toast('Could not copy. Press and hold the link to copy it.', 4000); }
+};
+$('#qrLink').onclick = async () => {
+  openDlg(`<div class="dlg"><div class="dlg-head"><div><h3>Scan on the ${noun()}</h3><p class="hint">Point the ${noun()}'s camera at this code and open the link.</p></div><button class="x" data-close>Close</button></div>
+    <canvas id="linkQr" width="320" height="320" style="width:min(320px,100%);aspect-ratio:1;align-self:center;background:#fff;border-radius:10px"></canvas>
+    <p class="hint" style="word-break:break-all;text-align:center">${esc(screenLink())}</p></div>`);
+  try { await drawQr($('#linkQr'), screenLink(), 640); } catch (er) { toast(er.message || String(er), 5000); }
+};
 $('#setForm').onsubmit = async e => {
   e.preventDefault();
   const secs = Math.max(3, Math.min(600, +$('#setSecs').value || 10));
@@ -1248,7 +1286,7 @@ $('#setForm').onsubmit = async e => {
       rec.quiet_days = days; rec.quiet_style = $('#setQStyle').value;
     }
   }
-  const { error } = await sb.from('tv_settings').update(rec).eq('id', 1);
+  const { error } = await sb.from('tv_settings').update(rec).eq('id', sid());
   if (error) return toast('Not saved: ' + error.message, 5000);
   toast('Settings saved'); load();
 };
@@ -1256,7 +1294,7 @@ $('#newCode').onclick = async () => {
   if (!await confirmBox('Make a new screen code? Any TV using the old code stops until the new one is typed in.', 'New code')) return;
   const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = crypto.getRandomValues(new Uint32Array(6));
   const code = Array.from(r, n => a[n % a.length]).join('');
-  const { error } = await sb.from('tv_settings').update({ screen_code: code }).eq('id', 1);
+  const { error } = await sb.from('tv_settings').update({ screen_code: code }).eq('id', sid());
   if (error) return toast('Not saved: ' + error.message, 5000);
   toast(`New code: ${code}`, 6000); load();
 };

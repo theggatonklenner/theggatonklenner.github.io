@@ -5,7 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#04794b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="AMA Display">
 <title>AMA TV</title>
+<link rel="apple-touch-icon" href="../icons/ama-id-cards.png">
 <link rel="icon" href="../icons/ama-id-cards.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -97,6 +102,40 @@
   .screen button { font: 700 2.6vw "Source Sans 3", Arial, sans-serif; margin-top: 3vh; padding: 1.5vh 4vw; border: 0; border-radius: 1vw; background: #f2d500; color: #16211b; cursor: pointer; }
   .screen .err { color: #ffd9d4; font-weight: 700; min-height: 3vh; }
   .hint { position: absolute; left: 50%; bottom: 3vh; transform: translateX(-50%); z-index: 7; background: rgba(0,0,0,.6); color: #fff; font-size: 1.8vw; padding: 1vh 2vw; border-radius: 1vw; transition: opacity .6s; }
+
+  /* ---------- Upright screens (the tablets): everything a bit bigger, side-by-side parts stacked ---------- */
+  @media (orientation: portrait) {
+    .card { padding: 12vh 8vw 10vh; }
+    .card .belt { width: 30vw; height: .8vh; }
+    .card .kicker { font-size: 4.2vw; }
+    .card h1 { font-size: 11vw; }
+    .t-party h1 { font-size: 13vw; }
+    .card .body, .t-party .body { font-size: 5.6vw; }
+    .caption { font-size: 6vw; }
+    .big { font-size: 15vw; }
+    .sub { font-size: 5.4vw; }
+    .count { flex-direction: column; align-items: flex-start; }
+    .count .num { font-size: 34vw; }
+    .count .unit { font-size: 9vw; }
+    .card h1.month { font-size: 13vw; }
+    .cal { flex-direction: column; font-size: 4.2vw; }
+    .cal .mon + .mon { margin-left: 0; margin-top: 4vh; }
+    .cal .e b { width: 5.4em; }
+    .tag { font-size: 3.4vw; }
+    .card.qr { flex-direction: column; align-items: flex-start; justify-content: center; }
+    .qr .qtext { padding-right: 0; }
+    .qr .qbox { width: 74vw; height: 74vw; max-width: none; max-height: 44vh; margin-top: 3vh; align-self: center; }
+    .clock { font-size: 5.4vw; border-radius: 2vw; }
+    .logo { width: 11vw; height: 11vw; border-radius: 2.4vw; }
+    .paused { font-size: 3.6vw; }
+    .hint { font-size: 3.8vw; white-space: nowrap; }
+    .quiet .qlogo { width: 34vw; height: 34vw; margin: -17vw 0 0 -17vw; }
+    .screen .box { width: 84vw; }
+    .screen h1 { font-size: 9vw; }
+    .screen p { font-size: 4.6vw; }
+    .screen input { font-size: 9vw; width: 70vw; }
+    .screen button { font-size: 5vw; }
+  }
 </style>
 </head>
 <body>
@@ -159,7 +198,9 @@
 
   // ---------- Screen code ----------
   var params = (function () { var o = {}; location.search.replace(/^\?/, '').split('&').forEach(function (p) { if (!p) return; var kv = p.split('='); o[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || ''); }); return o; })();
-  if (params.code) { store.set('tvCode', params.code.toUpperCase()); history.replaceState(null, '', location.pathname); }
+  // A link with ?code=... works straight away (the tablets' link). It stays in the address, so a bookmark or
+  // home screen shortcut keeps working.
+  if (params.code) store.set('tvCode', params.code.toUpperCase());
   code = store.get('tvCode');
   function askCode(msg) {
     clearTimeout(timer); stage.innerHTML = '';
@@ -171,6 +212,7 @@
     var c = $('codeInput').value.replace(/\s+/g, '').toUpperCase();
     if (!c) return;
     code = c; store.set('tvCode', c); $('codeScreen').style.display = 'none';
+    try { history.replaceState(null, '', location.pathname + '?code=' + encodeURIComponent(c) + (PREVIEW ? '&preview=1' : '')); } catch (er) { /* ignore */ }
     load(true);
   };
 
@@ -186,7 +228,11 @@
     if (!code) return askCode();
     fetchFeed().then(function (f) {
       document.body.className = document.body.className.replace(/\boffline\b/g, '');
-      if (f && f.error === 'wrong_code') { store.del('tvCode'); code = null; store.del('tvFeed'); return askCode(first ? 'That code is not right. Check it in the TV editor.' : 'The screen code was changed. Enter the new one.'); }
+      if (f && f.error === 'wrong_code') {
+        store.del('tvCode'); code = null; store.del('tvFeed');
+        if (params.code) { params.code = null; try { history.replaceState(null, '', location.pathname); } catch (er) { /* ignore */ } }
+        return askCode(first ? 'That code is not right. Check it in the TV editor.' : 'The screen code was changed. Enter the new one, or open the new link from the TV editor.');
+      }
       store.set('tvFeed', JSON.stringify(f));
       setTimeout(checkIn, 1500);
       apply(f, first);
@@ -442,6 +488,7 @@
   var idleT;
   function wake() { document.body.className = document.body.className.replace(/\bidle\b/g, ''); clearTimeout(idleT); idleT = setTimeout(function () { document.body.className += ' idle'; }, 3000); }
   document.addEventListener('mousemove', wake); wake();
+  if ('ontouchstart' in window) $('hint').innerHTML = 'Tap the screen for full screen';
   if (!(document.fullscreenElement || document.webkitFullscreenElement)) { $('hint').style.display = ''; setTimeout(function () { $('hint').style.display = 'none'; }, 12000); }
 
   // Reload once a night (picks up updates and keeps the TV browser fresh)

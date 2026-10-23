@@ -41,7 +41,7 @@ await db.exec(`reset role; select set_config('request.jwt.claims', '', false)`);
 await db.query(`insert into prep_grading (student_id, cycle_id, grading_event, grading_date, target_rank, result, eligibility_decision, decision_reason, status) values
   ('T1', $1, 'Recent', current_date - 3, 'Probationary Black Belt', 'passed', 'eligible', 'test', 'completed'),
   ('T2', $1, 'Recent', current_date - 3, '2nd Dan', 'passed', 'eligible', 'test', 'completed')`, [cid]);
-const CODE = (await db.query(`select screen_code from tv_settings`)).rows[0].screen_code;
+const CODE = (await db.query(`select screen_code from tv_settings where id = 1`)).rows[0].screen_code;
 
 const users = { 'tate@ama.test': { id: '00000000-0000-0000-0000-000000000001', password: 'pw' }, 'jo@ama.test': { id: '00000000-0000-0000-0000-000000000002', password: 'pw' } };
 let BASE;
@@ -139,7 +139,7 @@ try {
 
   // Settings
   await page.fill('#setSecs', '4'); await page.click('#setSave'); await toastSays(page, 'Settings saved');
-  ok((await db.query(`select seconds from tv_settings`)).rows[0].seconds === 4, 'seconds per slide saved');
+  ok((await db.query(`select seconds from tv_settings where id = 1`)).rows[0].seconds === 4, 'seconds per slide saved');
   ok((await page.getAttribute('#previewBtn', 'href')) === `../?code=${CODE}&preview=1`, 'Preview opens the TV page with the code');
   await ctx.close();
 
@@ -186,7 +186,7 @@ try {
   await ctx.unroute(`${BASE}/rest/**`);
 
   // New code stops the TV
-  await db.query(`update tv_settings set screen_code = 'NEWCODE'`);
+  await db.query(`update tv_settings set screen_code = 'NEWCODE' where id = 1`);
   await page.evaluate(() => window.__tv.reload());
   await page.waitForSelector('#codeScreen:not([style*="none"])', { timeout: 5000 });
   ok((await page.textContent('#codeErr')).includes('changed'), 'after a new code, the TV asks for it');
@@ -194,7 +194,7 @@ try {
 
   // Party mode
   ({ ctx, page } = await context({ width: 390, height: 844 }));
-  await db.query(`update tv_settings set screen_code = $1`, [CODE]);
+  await db.query(`update tv_settings set screen_code = $1 where id = 1`, [CODE]);
   await page.goto(BASE + '/tv/edit/index.html');
   await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
   await page.waitForSelector('#partyStart');
@@ -204,7 +204,7 @@ try {
   await page.selectOption('#pFor', '60');
   await page.screenshot({ path: join(SHOTS, 'tv-party-editor.png') });
   await page.click('#pGo'); await page.waitForSelector('#partyStop');
-  const tvset = (await db.query(`select only_slide, only_until > now() + interval '55 minutes' and only_until < now() + interval '65 minutes' ok from tv_settings`)).rows[0];
+  const tvset = (await db.query(`select only_slide, only_until > now() + interval '55 minutes' and only_until < now() + interval '65 minutes' ok from tv_settings where id = 1`)).rows[0];
   ok(tvset.only_slide && tvset.ok, 'party mode is on for 1 hour');
   ok((await page.textContent('#party')).includes('Party mode is on') && !(await page.textContent('#list')).includes('Happy Birthday'), 'editor shows party mode is on; the party slide is kept out of the slide list');
   for (const scheme of ['light', 'dark']) {
@@ -241,7 +241,7 @@ try {
   ok((await page.$$('#pForm [data-pick]')).length === 2, 'both earlier party slides are listed');
   await page.selectOption('#pFor', 'day'); await page.click('#pGo'); await page.waitForSelector('#partyStop');
   const endOfDay = await page.evaluate(() => { const d = new Date(); d.setHours(23, 59, 0, 0); return d.toISOString(); });
-  ok(Math.abs(new Date((await db.query(`select only_until from tv_settings`)).rows[0].only_until) - new Date(endOfDay)) < 60e3, '"the rest of today" runs until 11:59 pm');
+  ok(Math.abs(new Date((await db.query(`select only_until from tv_settings where id = 1`)).rows[0].only_until) - new Date(endOfDay)) < 60e3, '"the rest of today" runs until 11:59 pm');
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
 
   // A PDF of birthday designs (as exported from Canva): pick a page, or save them all
@@ -515,7 +515,7 @@ try {
   const todayDow = new Date().getDay();
   await page.uncheck(`#qd${todayDow}On`);   // off all day today, so the TV is quiet now
   await page.selectOption('#setQStyle', 'logo'); await page.click('#setSave'); await toastSays(page, 'Settings saved');
-  const qs = (await db.query(`select quiet_on, quiet_style, quiet_days from tv_settings`)).rows[0];
+  const qs = (await db.query(`select quiet_on, quiet_style, quiet_days from tv_settings where id = 1`)).rows[0];
   ok(qs.quiet_on && qs.quiet_style === 'logo' && qs.quiet_days['6'].on === '08:00' && qs.quiet_days['2'].off === '20:45' && qs.quiet_days[String(todayDow)] === null, 'each day saves its own hours, and a day can be off all day');
   await page.waitForTimeout(1000);   // the form redraws after saving
   await page.fill('#qd3From', '18:00'); await page.fill('#qd3To', '17:00'); if (todayDow === 3) await page.check('#qd3On');
@@ -534,10 +534,10 @@ try {
   await tv3.waitForTimeout(500); await tv3.screenshot({ path: join(SHOTS, 'tv-quiet.png') });
   ok(await tv3.isVisible('.quiet .qlogo') && await tv3.isHidden('#clock') && (await tv3.evaluate(() => window.__tv.state().count)) === 0, 'in quiet hours the TV shows just the dimmed logo');
   const dbIs = async (sql, tries = 30) => { for (let i = 0; i < tries; i++) { if ((await db.query(sql)).rows[0].ok) return true; await page.waitForTimeout(200); } return false; };
-  await page.selectOption('#setQStyle', 'black'); await page.click('#setSave'); await dbIs(`select quiet_style = 'black' ok from tv_settings`);
+  await page.selectOption('#setQStyle', 'black'); await page.click('#setSave'); await dbIs(`select quiet_style = 'black' ok from tv_settings where id = 1`);
   await tv3.evaluate(() => window.__tv.reload()); await tv3.waitForFunction(() => document.querySelector('.quiet') && !document.querySelector('.qlogo'), null, { timeout: 5000 }).catch(() => {});
   ok(await tv3.isVisible('.quiet') && !(await tv3.$('.qlogo')), 'or a black screen');
-  await page.uncheck('#setQuiet'); await page.click('#setSave'); await dbIs(`select not quiet_on ok from tv_settings`);
+  await page.uncheck('#setQuiet'); await page.click('#setSave'); await dbIs(`select not quiet_on ok from tv_settings where id = 1`);
   await tv3.evaluate(() => window.__tv.reload()); await tv3.waitForFunction(() => !document.querySelector('.quiet'), null, { timeout: 5000 }).catch(() => {});
   ok(!(await tv3.$('.quiet')) && (await tv3.evaluate(() => window.__tv.state().count)) > 0, 'when quiet hours end, the slideshow comes straight back');
   let qrSeen = false;
@@ -587,7 +587,7 @@ try {
   await tvc4.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
   const tv4 = await tvc4.newPage(); tv4.on('pageerror', e => errors.push('tv: ' + e.message));
   await tv4.goto(BASE + `/tv/index.html?code=${CODE}`); await tv4.waitForSelector('.layer.on');
-  await db.query(`update tv_settings set seconds = 30`); await tv4.evaluate(() => window.__tv.reload());   // slow, so only the remote moves it
+  await db.query(`update tv_settings set seconds = 30 where id = 1`); await tv4.evaluate(() => window.__tv.reload());   // slow, so only the remote moves it
   ({ ctx, page } = await context({ width: 390, height: 844 }));
   await page.goto(BASE + '/tv/remote/index.html');
   await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
@@ -628,7 +628,66 @@ try {
   await page.click('#bDone'); await tv4.waitForFunction(() => !window.__tv.paused(), null, { timeout: 5000 }).catch(() => {});
   ok(!(await tv4.evaluate(() => window.__tv.paused())) && await tv4.isHidden('#pausedTag'), 'Done carries on the slideshow');
   await tvc4.close(); await ctx.close();
-  await db.query(`update tv_settings set seconds = 4, remote_until = null`);
+  await db.query(`update tv_settings set seconds = 4, remote_until = null where id = 1`);
+
+  // Tablets: their own slides, a link with the code in it, upright layout
+  console.log('\nTablets');
+  const TCODE = (await db.query(`select screen_code from tv_settings where id = 2`)).rows[0].screen_code;
+  ({ ctx, page } = await context({ width: 390, height: 844 }));
+  await page.goto(BASE + '/tv/edit/index.html');
+  await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+  await page.waitForSelector('#list [data-open]');
+  await page.click('#dispSeg [data-disp="tablet"]');
+  await page.waitForFunction(() => document.querySelector('.brand h1').textContent === 'Tablet Display' && document.querySelector('#list').textContent.includes('No slides yet'), null, { timeout: 5000 }).catch(() => {});
+  ok((await page.textContent('#list')).includes('No slides yet') && (await page.textContent('.brand h1')) === 'Tablet Display', 'switching to Tablets shows their own (empty) slide list');
+  ok((await page.textContent('#screenLink')) === `https://theggatonklenner.github.io/tv/?code=${TCODE}`, 'Settings shows the tablet link, with its code in it');
+  await page.click('#qrLink'); await page.waitForSelector('#linkQr');
+  await page.waitForTimeout(400);
+  const lq = await page.evaluate(() => { const c = document.querySelector('#linkQr'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height); return { w: c.width, h: c.height, data: Array.from(d.data) }; });
+  const { PNG: PNG2 } = await import(join(QRDIR, 'pngjs/lib/png.js')), jsQR2 = (await import(join(QRDIR, 'jsqr/dist/jsQR.js'))).default;
+  const lqd = jsQR2(new Uint8ClampedArray(lq.data), lq.w, lq.h);
+  ok(lqd && lqd.data === `https://theggatonklenner.github.io/tv/?code=${TCODE}`, 'the QR code scans to the tablet link');
+  await page.click('#dlg [data-close]');
+  await page.click('#addBtn'); await page.click('[data-add="text"]'); await page.waitForSelector('#slForm');
+  await page.fill('#slTitle', 'Welcome to AMA'); await page.fill('#slBody', 'Please sign in at the front desk.'); await page.click('#slSave'); await toastSays(page, 'Added');
+  await page.waitForTimeout(400);
+  await page.click('#addBtn'); await page.click('[data-add="countdown"]'); await page.waitForSelector('#slEvent');
+  await page.check('#slForm input[name=cdTo][value=grading]'); await page.click('#slSave'); await toastSays(page, 'Added');
+  await page.waitForTimeout(400);
+  const tabSlides = (await db.query(`select title, display from tv_slides where display = 'tablet' order by position`)).rows;
+  ok(tabSlides.length === 2 && tabSlides[0].title === 'Welcome to AMA', 'slides added on Tablets go to the tablets only');
+  ok(!(await page.textContent('#list')).includes('No classes on Monday'), "the TV's slides aren't in the tablet list");
+  await page.click('#partyStart'); await page.waitForSelector('#pForm');
+  if (await page.$('#pForm [data-m="message"]')) await page.click('#pForm [data-m="message"]');
+  await page.waitForSelector('#pName'); await page.fill('#pName', 'Leo'); await page.click('#pGo'); await page.waitForSelector('#partyStop');
+  const pr = (await db.query(`select id, only_slide is not null on_ from tv_settings order by id`)).rows;
+  ok(!pr[0].on_ && pr[1].on_, 'party mode on the tablets leaves the TV alone');
+  await page.click('#partyStop'); await toastSays(page, 'Back to normal');
+  await page.click('#dispSeg [data-disp="tv"]'); await page.waitForFunction(() => document.querySelector('#list').textContent.includes('No classes on Monday'), null, { timeout: 5000 }).catch(() => {});
+  ok((await page.textContent('#list')).includes('No classes on Monday') && (await page.textContent('.brand h1')) === 'TV Display', 'switching back shows the TV again');
+  await ctx.close();
+
+  // On a tablet: open the link, no code to type
+  const tabc = await browser.newContext({ viewport: { width: 800, height: 1280 }, isMobile: true, hasTouch: true });
+  await tabc.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+  await tabc.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+  const tabp = await tabc.newPage(); tabp.on('pageerror', e => errors.push('tablet: ' + e.message));
+  await tabp.goto(BASE + `/tv/index.html?code=${TCODE}`); await tabp.waitForSelector('.layer.on');
+  ok(await tabp.evaluate(() => document.getElementById('codeScreen').style.display === 'none') && tabp.url().includes(`code=${TCODE}`), 'the tablet link plays straight away (no code to type), and keeps the code in the address');
+  const tabTexts = []; let fits = true;
+  for (let i = 0; i < (await tabp.evaluate(() => window.__tv.state().count)); i++) {
+    await tabp.waitForTimeout(900);
+    tabTexts.push(await tabp.evaluate(() => { const l = document.querySelectorAll('.layer.on'); return l[l.length - 1].textContent; }));
+    fits = fits && await tabp.evaluate(() => { const c = document.querySelector('.layer.on:last-child .card'); return !c || c.scrollHeight <= c.clientHeight + 2; });
+    await tabp.screenshot({ path: join(SHOTS, `tablet-slide-${i + 1}.png`) });
+    await tabp.evaluate(() => window.__tv.next());
+  }
+  const tt = tabTexts.join(' | ');
+  ok(tt.includes('Welcome to AMA') && /weeks to go/.test(tt) && !tt.includes('No classes on Monday'), 'the tablet shows its own slides, not the TV ones');
+  ok(fits && await tabp.evaluate(() => getComputedStyle(document.querySelector('.clock')).fontSize) !== '0px', 'everything fits the upright screen');
+  ok((await tabp.textContent('#hint')).includes('Tap the screen'), 'on a tablet it says to tap for full screen');
+  await tabc.close();
+  await db.query(`delete from tv_slides where display = 'tablet'`);
 
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));
@@ -663,7 +722,7 @@ try {
   ok(jp && jp.title === 'Happy Birthday Mia!', '...and can put a birthday message on the TV');
   await page.screenshot({ path: join(SHOTS, 'tv-party-only.png') });
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
-  ok(!(await db.query(`select only_slide from tv_settings`)).rows[0].only_slide, '...and stop it');
+  ok(!(await db.query(`select only_slide from tv_settings where id = 1`)).rows[0].only_slide, '...and stop it');
   await page.goto(BASE + '/tv/remote/index.html');
   await db.query(`delete from tv_permissions where email = 'jo@ama.test'`);
   await page.reload(); await page.waitForSelector('#problem:not([hidden])');

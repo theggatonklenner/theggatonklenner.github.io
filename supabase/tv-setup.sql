@@ -93,6 +93,15 @@ create table if not exists public.tv_settings (
   updated_at  timestamptz not null default now()
 );
 insert into public.tv_settings (id) values (1) on conflict (id) do nothing;
+-- Displays: 1 = the dojang TV, 2 = the tablets (upright). Each has its own slides, screen code, party mode and settings;
+-- the events calendar and poster templates are shared.
+alter table public.tv_settings add column if not exists display text not null default 'tv';
+alter table public.tv_settings drop constraint if exists tv_settings_id_check;
+alter table public.tv_settings add constraint tv_settings_id_check check (id in (1, 2));
+alter table public.tv_settings drop constraint if exists tv_settings_display_check;
+alter table public.tv_settings add constraint tv_settings_display_check check ((id = 1 and display = 'tv') or (id = 2 and display = 'tablet'));
+insert into public.tv_settings (id, display) values (2, 'tablet') on conflict (id) do nothing;
+create unique index if not exists tv_settings_code_idx on public.tv_settings (screen_code);
 alter table public.tv_settings add column if not exists only_slide uuid;          -- party mode: the one slide to show
 alter table public.tv_settings add column if not exists only_until timestamptz;   -- ... until this time
 alter table public.tv_settings add column if not exists reload_at timestamptz;    -- "Refresh the TV" was pressed at this time
@@ -144,6 +153,9 @@ alter table public.tv_slides add column if not exists count_to text;            
 alter table public.tv_slides drop constraint if exists tv_slides_kind_check;
 alter table public.tv_slides add constraint tv_slides_kind_check check (kind in ('photo', 'video', 'text', 'live', 'countdown', 'qr'));
 alter table public.tv_slides add column if not exists link text;   -- QR code slides: the link the code opens
+alter table public.tv_slides add column if not exists display text not null default 'tv';   -- which display it's on: 'tv' or 'tablet'
+alter table public.tv_slides drop constraint if exists tv_slides_display_check;
+alter table public.tv_slides add constraint tv_slides_display_check check (display in ('tv', 'tablet'));
 alter table public.tv_slides drop constraint if exists tv_slides_qr_check;
 alter table public.tv_slides add constraint tv_slides_qr_check check (kind <> 'qr' or (link ~* '^https?://' and media_path is not null));
 alter table public.tv_slides drop constraint if exists tv_slides_countdown_check;
@@ -175,7 +187,8 @@ create table if not exists public.tv_screens (
   showing     text,                      -- what's on screen now
   details     jsonb not null default '{}'::jsonb
 );
-alter table public.tv_screens add column if not exists loaded_at timestamptz;   -- server time of the first check-in after the page loaded
+alter table public.tv_screens add column if not exists loaded_at timestamptz;
+alter table public.tv_screens add column if not exists display text not null default 'tv';   -- the TV or a tablet   -- server time of the first check-in after the page loaded
 alter table public.tv_screens enable row level security;
 drop policy if exists "staff see screens" on public.tv_screens;
 drop policy if exists "staff remove screens" on public.tv_screens;
@@ -279,8 +292,8 @@ declare
   now_time time := (now() at time zone 'Australia/Sydney')::time;
   day_hours jsonb;
 begin
-  select * into s from public.tv_settings where id = 1;
-  if not found or upper(trim(coalesce(p_code, ''))) <> s.screen_code then
+  select * into s from public.tv_settings where screen_code = upper(trim(coalesce(p_code, '')));   -- the code says which display
+  if not found then
     return jsonb_build_object('error', 'wrong_code');
   end if;
 
@@ -289,7 +302,7 @@ begin
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false),
       'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
-      'quiet', 'black', 'blackout', true, 'remote', coalesce(s.remote_until > now(), false));
+      'quiet', 'black', 'blackout', true, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
 
   -- Party mode: just the one slide, until the set time. Started now in the editor, or booked ahead.
@@ -297,7 +310,8 @@ begin
     one_id := s.only_slide; one_until := s.only_until; one_changed := s.updated_at;
   else
     select b.slide_id, b.ends_at, b.updated_at into one_id, one_until, one_changed
-      from public.tv_party_bookings b where b.starts_at <= now() and b.ends_at > now()
+      from public.tv_party_bookings b join public.tv_slides bs on bs.id = b.slide_id
+     where b.starts_at <= now() and b.ends_at > now() and bs.display = s.display
      order by b.starts_at desc limit 1;
   end if;
   if one_id is not null then
@@ -309,7 +323,7 @@ begin
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false),
       'version', greatest(s.updated_at, one_changed), 'slides', jsonb_build_array(one_slide), 'live', '{}'::jsonb, 'today', today,
-      'only', true, 'only_until', one_until, 'remote', coalesce(s.remote_until > now(), false));
+      'only', true, 'only_until', one_until, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
 
   -- Quiet hours (a party still shows): a black screen or just the logo outside each day's slideshow hours
@@ -324,7 +338,7 @@ begin
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false),
       'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
-      'quiet', s.quiet_style, 'remote', coalesce(s.remote_until > now(), false));
+      'quiet', s.quiet_style, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
 
   select coalesce(jsonb_agg(jsonb_build_object(
@@ -333,7 +347,7 @@ begin
          max(t.updated_at)
     into slides, changed
     from public.tv_slides t
-   where t.enabled and not t.party and (t.starts_on is null or t.starts_on <= today) and (t.ends_on is null or t.ends_on >= today)
+   where t.enabled and not t.party and t.display = s.display and (t.starts_on is null or t.starts_on <= today) and (t.ends_on is null or t.ends_on >= today)
      and not (t.kind = 'countdown' and t.count_to = 'date' and t.event_on < today);
 
   -- Events: what's left of this month; in the last 10 days of the month (or once this month is over), next month too
@@ -361,7 +375,7 @@ begin
 
   return jsonb_build_object(
     'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', s.show_clock, 'show_logo', s.show_logo),
-    'remote', coalesce(s.remote_until > now(), false),
+    'remote', coalesce(s.remote_until > now(), false), 'display', s.display,
     'version', greatest(coalesce(changed, s.updated_at), s.updated_at),
     'slides', slides, 'live', live, 'today', today);
 end $$;
@@ -372,13 +386,13 @@ create or replace function public.tv_checkin(p_code text, p_screen text, p_showi
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare s public.tv_settings%rowtype; loaded timestamptz;
 begin
-  select * into s from public.tv_settings where id = 1;
-  if not found or upper(trim(coalesce(p_code, ''))) <> s.screen_code then return jsonb_build_object('error', 'wrong_code'); end if;
+  select * into s from public.tv_settings where screen_code = upper(trim(coalesce(p_code, '')));
+  if not found then return jsonb_build_object('error', 'wrong_code'); end if;
   if coalesce(p_screen, '') !~ '^[A-Za-z0-9_-]{6,40}$' then return jsonb_build_object('error', 'bad_screen'); end if;
   -- loaded_at is the server's time when this page load first checked in (TV clocks can be wrong)
-  insert into public.tv_screens as t (screen_id, last_seen, started_at, loaded_at, showing, details)
-    values (p_screen, now(), p_started, now(), left(p_showing, 200), coalesce(p_details, '{}'::jsonb))
-  on conflict (screen_id) do update set last_seen = now(), started_at = excluded.started_at,
+  insert into public.tv_screens as t (screen_id, display, last_seen, started_at, loaded_at, showing, details)
+    values (p_screen, s.display, now(), p_started, now(), left(p_showing, 200), coalesce(p_details, '{}'::jsonb))
+  on conflict (screen_id) do update set display = excluded.display, last_seen = now(), started_at = excluded.started_at,
     loaded_at = case when t.started_at is distinct from excluded.started_at or t.loaded_at is null then now() else t.loaded_at end,
     showing = excluded.showing, details = excluded.details
   returning t.loaded_at into loaded;
@@ -390,7 +404,8 @@ grant execute on function public.tv_checkin(text, text, text, timestamptz, jsonb
 -- ---------- Phone remote ----------
 -- The phone sends a button press; while the remote is open (10 minutes since its last use) the TV checks every
 -- second or two, carries out the newest press, and reports what's on screen.
-create or replace function public.tv_remote_send(p_cmd text, p_slide uuid default null)
+drop function if exists public.tv_remote_send(text, uuid);
+create or replace function public.tv_remote_send(p_cmd text, p_slide uuid default null, p_display text default 'tv')
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare n bigint; dark boolean;
 begin
@@ -401,18 +416,19 @@ begin
       remote_seq = remote_seq + 1, remote_at = now(),
       remote_cmd = jsonb_build_object('cmd', p_cmd, 'slide', p_slide),
       remote_until = case when p_cmd = 'done' then now() + interval '30 seconds' else now() + interval '10 minutes' end
-   where id = 1 returning remote_seq, blackout into n, dark;
+   where display = coalesce(p_display, 'tv') returning remote_seq, blackout into n, dark;
+  if n is null then raise exception 'Unknown display'; end if;
   return jsonb_build_object('seq', n, 'blackout', dark);
 end $$;
-revoke all on function public.tv_remote_send(text, uuid) from public, anon;
-grant execute on function public.tv_remote_send(text, uuid) to authenticated;
+revoke all on function public.tv_remote_send(text, uuid, text) from public, anon;
+grant execute on function public.tv_remote_send(text, uuid, text) to authenticated;
 
 create or replace function public.tv_remote_poll(p_code text, p_screen text, p_after bigint, p_state jsonb default '{}'::jsonb)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare s public.tv_settings%rowtype;
 begin
-  select * into s from public.tv_settings where id = 1;
-  if not found or upper(trim(coalesce(p_code, ''))) <> s.screen_code then return jsonb_build_object('error', 'wrong_code'); end if;
+  select * into s from public.tv_settings where screen_code = upper(trim(coalesce(p_code, '')));
+  if not found then return jsonb_build_object('error', 'wrong_code'); end if;
   if coalesce(p_screen, '') ~ '^[A-Za-z0-9_-]{6,40}$' then   -- what's on screen, for the remote and TV status
     update public.tv_screens set last_seen = now(), showing = left(coalesce(p_state ->> 'showing', showing), 200),
            details = details || (coalesce(p_state, '{}'::jsonb) - 'showing') || jsonb_build_object('remote_seq', p_after)
