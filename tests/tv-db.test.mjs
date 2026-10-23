@@ -99,6 +99,48 @@ f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
 ok(!f.only && f.slides.length > 1, 'when the time is up, the normal slideshow comes back by itself');
 ok(!(await tryAs('nobody@ama.test', `update tv_settings set only_slide = null`)).n, 'only staff can start or stop party mode');
 
+console.log('\nCountdowns');
+ok(!(await tryAs('tate@ama.test', `insert into tv_slides (kind, title, count_to) values ('countdown', 'No date', 'date')`)).ok, 'a countdown to a date needs the date');
+await as('tate@ama.test', () => db.exec(`insert into tv_slides (kind, title, count_to, event_on) values ('countdown', 'Comp', 'date', current_date + 21), ('countdown', 'Old comp', 'date', current_date - 1);
+  insert into tv_slides (kind, title, count_to) values ('countdown', 'Black belt grading', 'grading');`));
+f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
+const cds = f.slides.filter(x => x.kind === 'countdown');
+ok(cds.map(x => x.title).join() === 'Comp,Black belt grading' && cds[0].event_on && cds[1].count_to === 'grading', 'countdowns reach the TV (to a date, or to the next grading); past ones are left out');
+
+console.log('\nBooked parties');
+const bk = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, theme, party) values ('text', 'Happy Birthday Mo!', 'party', true) returning id`))).rows[0].id;
+await as('tate@ama.test', () => db.query(`insert into tv_party_bookings (slide_id, starts_at, ends_at) values ($1, now() + interval '2 hours', now() + interval '4 hours')`, [bk]));
+f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
+ok(!f.only, 'a booking later today does not change the TV yet');
+await db.exec(`update tv_party_bookings set starts_at = now() - interval '1 minute'`);
+f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
+ok(f.only && f.slides[0].title === 'Happy Birthday Mo!' && new Date(f.only_until) > new Date(), 'at the booked time, party mode switches on by itself');
+await db.exec(`update tv_party_bookings set ends_at = now() - interval '1 second'`);
+f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
+ok(!f.only, 'and off again at the end');
+ok(!(await tryAs('nobody@ama.test', `insert into tv_party_bookings (slide_id, starts_at, ends_at) values ('${bk}', now(), now() + interval '1 hour')`)).ok, 'only staff can book parties');
+ok(!(await tryAs('tate@ama.test', `insert into tv_party_bookings (slide_id, starts_at, ends_at) values ('${bk}', now(), now() - interval '1 hour')`)).ok, 'a booking must end after it starts');
+
+console.log('\nTV status and refresh');
+const ck = async (c, scr, started) => (await as(null, () => db.query(`select tv_checkin($1, $2, 'Showing: Comp', $3, '{"w":1920}'::jsonb) r`, [c, scr, started]))).rows[0].r;
+ok((await ck('WRONG1', 'screen-abc123', new Date().toISOString())).error === 'wrong_code', 'a TV with the wrong code cannot check in');
+const started = new Date(Date.now() - 60000).toISOString();
+let r = await ck(code, 'screen-abc123', started);
+ok(r.reload === false, 'checking in works, and no reload is asked for');
+const scr = (await as('tate@ama.test', () => db.query(`select * from tv_screens`))).rows;
+ok(scr.length === 1 && scr[0].showing === 'Showing: Comp' && scr[0].details.w === 1920, 'staff can see the TV is online and what it is showing');
+ok((await tryAs(null, `select * from tv_screens`)).ok === false || (await tryAs(null, `select * from tv_screens`)).n === 0, 'the public cannot see TV status');
+await as('tate@ama.test', () => db.exec(`update tv_settings set reload_at = now()`));
+ok((await ck(code, 'screen-abc123', started)).reload === true, '"Refresh the TV" asks a TV that loaded earlier to reload');
+ok((await ck(code, 'screen-abc123', new Date(Date.now() + 1000).toISOString())).reload === false, 'once it has reloaded, it is not asked again');
+// A TV whose clock is an hour fast still gets refreshed
+const fast = new Date(Date.now() + 3600e3).toISOString();
+await ck(code, 'screen-fast01', fast);
+await as('tate@ama.test', () => db.exec(`update tv_settings set reload_at = '2001-01-01'`));
+ok((await as('tate@ama.test', () => db.query(`select reload_at > now() - interval '1 minute' x from tv_settings`))).rows[0].x, 'the refresh time is the server\'s, whatever time the editor sends');
+ok((await ck(code, 'screen-fast01', fast)).reload === true, 'a TV with its clock set wrong still refreshes');
+ok((await ck(code, 'bad screen!', started)).error === 'bad_screen', 'odd screen names are refused');
+
 console.log('\nFiles');
 const pol = (await db.query(`select policyname, roles::text r from pg_policies where tablename = 'objects' and policyname like 'tv files%'`)).rows;
 ok(pol.length === 4 && pol.every(p => p.r.includes('authenticated') && !p.r.includes('anon')), 'only signed-in staff can add, change or remove TV files');

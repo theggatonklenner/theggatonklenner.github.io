@@ -11,6 +11,14 @@
 --   sessions      the next prep session dates (sign-off marked)
 --   congrats      students who passed a grading in the last 45 days, with their new rank
 --
+-- Countdown slides: "Black belt grading in 12 days", to a set date or the next grading in Black Belt Prep.
+-- They stop showing once the day has passed.
+--
+-- Booked parties: party mode switches on and off by itself at the booked times.
+--
+-- TV status: the TV checks in every 20 seconds (tv_checkin) with what it's showing, so the editor can show
+-- whether it's online. "Refresh the TV" in the editor asks it to reload.
+--
 -- Party mode: the TV shows only one slide (e.g. a birthday message) until a set time, then goes back to
 -- the normal slideshow by itself. That slide is kept out of the normal slideshow so it can be reused.
 
@@ -43,13 +51,14 @@ create table if not exists public.tv_settings (
 insert into public.tv_settings (id) values (1) on conflict (id) do nothing;
 alter table public.tv_settings add column if not exists only_slide uuid;          -- party mode: the one slide to show
 alter table public.tv_settings add column if not exists only_until timestamptz;   -- ... until this time
+alter table public.tv_settings add column if not exists reload_at timestamptz;    -- "Refresh the TV" was pressed at this time
 alter table public.tv_settings drop constraint if exists tv_settings_code_check;
 alter table public.tv_settings add constraint tv_settings_code_check check (screen_code ~ '^[A-Z0-9]{4,12}$');
 
 -- ---------- Slides ----------
 create table if not exists public.tv_slides (
   id          uuid primary key default gen_random_uuid(),
-  kind        text not null check (kind in ('photo', 'video', 'text', 'live')),
+  kind        text not null,
   title       text,
   body        text,
   media_path  text,                 -- file in the "tv" storage bucket (photos, videos, info slide backgrounds)
@@ -72,6 +81,42 @@ create index if not exists tv_slides_position_idx on public.tv_slides (position)
 alter table public.tv_slides drop constraint if exists tv_slides_theme_check;
 alter table public.tv_slides add constraint tv_slides_theme_check check (theme in ('green', 'dark', 'gold', 'light', 'party'));
 alter table public.tv_slides add column if not exists party boolean not null default false;   -- made for party mode
+alter table public.tv_slides add column if not exists event_on date;                           -- countdown: the day it counts to
+alter table public.tv_slides add column if not exists count_to text;                           -- countdown: 'date' or 'grading'
+alter table public.tv_slides drop constraint if exists tv_slides_kind_check;
+alter table public.tv_slides add constraint tv_slides_kind_check check (kind in ('photo', 'video', 'text', 'live', 'countdown'));
+alter table public.tv_slides drop constraint if exists tv_slides_countdown_check;
+alter table public.tv_slides add constraint tv_slides_countdown_check check (kind <> 'countdown' or count_to = 'grading' or (count_to = 'date' and event_on is not null));
+
+-- ---------- Booked parties ----------
+create table if not exists public.tv_party_bookings (
+  id          uuid primary key default gen_random_uuid(),
+  slide_id    uuid not null references public.tv_slides on delete cascade,
+  starts_at   timestamptz not null,
+  ends_at     timestamptz not null check (ends_at > starts_at),
+  created_by  text default lower(auth.jwt() ->> 'email'),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists tv_party_bookings_time_idx on public.tv_party_bookings (starts_at);
+alter table public.tv_party_bookings enable row level security;
+drop policy if exists "staff edit party bookings" on public.tv_party_bookings;
+create policy "staff edit party bookings" on public.tv_party_bookings for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
+
+-- ---------- TV status ----------
+create table if not exists public.tv_screens (
+  screen_id   text primary key,          -- made up by each TV the first time it starts
+  last_seen   timestamptz not null default now(),
+  started_at  timestamptz,               -- when its page last loaded
+  showing     text,                      -- what's on screen now
+  details     jsonb not null default '{}'::jsonb
+);
+alter table public.tv_screens add column if not exists loaded_at timestamptz;   -- server time of the first check-in after the page loaded
+alter table public.tv_screens enable row level security;
+drop policy if exists "staff see screens" on public.tv_screens;
+drop policy if exists "staff remove screens" on public.tv_screens;
+create policy "staff see screens" on public.tv_screens for select to authenticated using (public.tv_is_staff());
+create policy "staff remove screens" on public.tv_screens for delete to authenticated using (public.tv_is_staff());
 alter table public.tv_slides alter column position drop default;
 
 create or replace function public.tv_stamp() returns trigger language plpgsql as $$
@@ -87,7 +132,11 @@ end $$;
 drop trigger if exists tv_stamp on public.tv_slides;
 create trigger tv_stamp before insert or update on public.tv_slides for each row execute function public.tv_stamp();
 create or replace function public.tv_settings_stamp() returns trigger language plpgsql as $$
-begin new.updated_at := now(); new.screen_code := upper(new.screen_code); return new; end $$;
+begin
+  new.updated_at := now(); new.screen_code := upper(new.screen_code);
+  if new.reload_at is distinct from old.reload_at and new.reload_at is not null then new.reload_at := now(); end if;   -- server time, so TV clocks don't matter
+  return new;
+end $$;
 drop trigger if exists tv_settings_stamp on public.tv_settings;
 create trigger tv_settings_stamp before update on public.tv_settings for each row execute function public.tv_settings_stamp();
 
@@ -122,32 +171,41 @@ declare
   s public.tv_settings%rowtype;
   today date := (now() at time zone 'Australia/Sydney')::date;
   slides jsonb; live jsonb := '{}'::jsonb; v jsonb; changed timestamptz; one_slide jsonb;
+  one_id uuid; one_until timestamptz; one_changed timestamptz;
 begin
   select * into s from public.tv_settings where id = 1;
   if not found or upper(trim(coalesce(p_code, ''))) <> s.screen_code then
     return jsonb_build_object('error', 'wrong_code');
   end if;
 
-  -- Party mode: just the one slide, until the set time
+  -- Party mode: just the one slide, until the set time. Started now in the editor, or booked ahead.
   if s.only_slide is not null and s.only_until > now() then
+    one_id := s.only_slide; one_until := s.only_until; one_changed := s.updated_at;
+  else
+    select b.slide_id, b.ends_at, b.updated_at into one_id, one_until, one_changed
+      from public.tv_party_bookings b where b.starts_at <= now() and b.ends_at > now()
+     order by b.starts_at desc limit 1;
+  end if;
+  if one_id is not null then
     select jsonb_build_object('id', t.id, 'kind', t.kind, 'title', t.title, 'body', t.body, 'media_path', t.media_path,
              'theme', t.theme, 'live_kind', t.live_kind, 'seconds', t.seconds)
-      into one_slide from public.tv_slides t where t.id = s.only_slide;
+      into one_slide from public.tv_slides t where t.id = one_id;
   end if;
   if one_slide is not null then
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false),
-      'version', s.updated_at, 'slides', jsonb_build_array(one_slide), 'live', '{}'::jsonb, 'today', today,
-      'only', true, 'only_until', s.only_until);
+      'version', greatest(s.updated_at, one_changed), 'slides', jsonb_build_array(one_slide), 'live', '{}'::jsonb, 'today', today,
+      'only', true, 'only_until', one_until);
   end if;
 
   select coalesce(jsonb_agg(jsonb_build_object(
            'id', t.id, 'kind', t.kind, 'title', t.title, 'body', t.body, 'media_path', t.media_path,
-           'theme', t.theme, 'live_kind', t.live_kind, 'seconds', t.seconds) order by t.position, t.created_at), '[]'::jsonb),
+           'theme', t.theme, 'live_kind', t.live_kind, 'seconds', t.seconds, 'event_on', t.event_on, 'count_to', t.count_to) order by t.position, t.created_at), '[]'::jsonb),
          max(t.updated_at)
     into slides, changed
     from public.tv_slides t
-   where t.enabled and not t.party and (t.starts_on is null or t.starts_on <= today) and (t.ends_on is null or t.ends_on >= today);
+   where t.enabled and not t.party and (t.starts_on is null or t.starts_on <= today) and (t.ends_on is null or t.ends_on >= today)
+     and not (t.kind = 'countdown' and t.count_to = 'date' and t.event_on < today);
 
   -- Live AMA info (only if Black Belt Prep is set up in this project)
   if to_regclass('public.prep_cycles') is not null then
@@ -184,6 +242,26 @@ begin
     'slides', slides, 'live', live, 'today', today);
 end $$;
 grant execute on function public.tv_feed(text) to anon, authenticated;
+
+-- The TV checks in: records what it's showing, and hears whether it should reload
+create or replace function public.tv_checkin(p_code text, p_screen text, p_showing text, p_started timestamptz, p_details jsonb default '{}'::jsonb)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare s public.tv_settings%rowtype; loaded timestamptz;
+begin
+  select * into s from public.tv_settings where id = 1;
+  if not found or upper(trim(coalesce(p_code, ''))) <> s.screen_code then return jsonb_build_object('error', 'wrong_code'); end if;
+  if coalesce(p_screen, '') !~ '^[A-Za-z0-9_-]{6,40}$' then return jsonb_build_object('error', 'bad_screen'); end if;
+  -- loaded_at is the server's time when this page load first checked in (TV clocks can be wrong)
+  insert into public.tv_screens as t (screen_id, last_seen, started_at, loaded_at, showing, details)
+    values (p_screen, now(), p_started, now(), left(p_showing, 200), coalesce(p_details, '{}'::jsonb))
+  on conflict (screen_id) do update set last_seen = now(), started_at = excluded.started_at,
+    loaded_at = case when t.started_at is distinct from excluded.started_at or t.loaded_at is null then now() else t.loaded_at end,
+    showing = excluded.showing, details = excluded.details
+  returning t.loaded_at into loaded;
+  delete from public.tv_screens where last_seen < now() - interval '30 days';   -- forget old TVs
+  return jsonb_build_object('reload', s.reload_at is not null and s.reload_at > loaded);
+end $$;
+grant execute on function public.tv_checkin(text, text, text, timestamptz, jsonb) to anon, authenticated;
 
 -- ---------- Photos and videos ----------
 -- Files are public by link (the TV shows them without signing in); names are random, and only staff can add,

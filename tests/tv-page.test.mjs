@@ -138,7 +138,7 @@ try {
   // Settings
   await page.fill('#setSecs', '4'); await page.click('#setSave'); await toastSays(page, 'Settings saved');
   ok((await db.query(`select seconds from tv_settings`)).rows[0].seconds === 4, 'seconds per slide saved');
-  ok((await page.getAttribute('#previewBtn', 'href')) === `../?code=${CODE}`, 'Preview opens the TV page with the code');
+  ok((await page.getAttribute('#previewBtn', 'href')) === `../?code=${CODE}&preview=1`, 'Preview opens the TV page with the code');
   await ctx.close();
 
   console.log('\nTV page (1280 x 720)');
@@ -331,6 +331,88 @@ try {
   const nt = (await db.query(`select settings from tv_poster_templates where title = 'Ninja'`)).rows[0];
   ok(nt && nt.settings.font === 'Knewave' && Math.abs(nt.settings.box.cx - 960) < 40 && Math.abs(nt.settings.box.cy - 540) < 40 && nt.settings.box.maxW > 1000, 'a new template saves the dragged name area and lettering');
   await ctx.close();
+
+  // Countdowns, TV status, remote refresh and booked parties
+  console.log('\nCountdowns, TV status, refresh and bookings');
+  await db.query(`delete from tv_screens`);
+  ({ ctx, page } = await context({ width: 390, height: 844 }));
+  await page.goto(BASE + '/tv/edit/index.html');
+  await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+  await page.waitForSelector('#status:not([hidden])');
+  ok((await page.textContent('#status')).includes('No TV has checked in yet'), 'TV status says when no TV has checked in');
+  const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const in21 = ymd(new Date(Date.now() + 21 * 864e5));
+  await page.click('#addBtn'); await page.click('[data-add="countdown"]'); await page.waitForSelector('#slEvent');
+  await page.fill('#slTitle', 'Comp'); await page.fill('#slEvent', in21);
+  ok((await page.textContent('#cdPrev')).includes('Comp · 3 weeks to go'), 'countdown editor shows what the TV will say');
+  await page.click('#slSave'); await toastSays(page, 'Added');
+  await page.click('#addBtn'); await page.click('[data-add="countdown"]'); await page.waitForSelector('#slEvent');
+  await page.check('#slForm input[name=cdTo][value=grading]'); await page.click('#slSave'); await toastSays(page, 'Added');
+  await page.waitForTimeout(500);
+  const cds = (await db.query(`select title, count_to, event_on::text e from tv_slides where kind = 'countdown' order by position`)).rows;
+  ok(cds.length === 2 && cds[0].title === 'Comp' && cds[0].e === in21 && cds[1].count_to === 'grading', 'countdowns saved: one to a date, one to the next grading');
+  ok((await page.textContent('#list')).includes('Countdown to the next grading'), 'the list says what each countdown counts to');
+
+  const tvc = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  await tvc.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+  await tvc.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+  const tvp = await tvc.newPage();
+  tvp.on('pageerror', e => errors.push('tv: ' + e.message));
+  await tvp.goto(BASE + `/tv/index.html?code=${CODE}`); await tvp.waitForSelector('.layer.on');
+  const words = [];
+  for (let i = 0; i < (await tvp.evaluate(() => window.__tv.state().count)); i++) {
+    await tvp.waitForTimeout(500);
+    words.push(await tvp.evaluate(() => { const l = document.querySelectorAll('.layer.on'); return l[l.length - 1].textContent; }));
+    if (/Comp/.test(words[words.length - 1])) await tvp.screenshot({ path: join(SHOTS, 'tv-countdown.png') });
+    await tvp.evaluate(() => window.__tv.next());
+  }
+  const wall = words.join(' | ');
+  ok(/Comp\s*3\s*weeks to go/.test(wall), 'the TV shows "Comp 3 weeks to go"');
+  ok(/Black belt grading\s*6\s*weeks to go/.test(wall), 'the grading countdown uses the date from Black Belt Prep');
+
+  await tvp.waitForFunction(() => true); await page.waitForTimeout(2500);
+  await page.evaluate(() => pollStatus()); await page.waitForTimeout(400);
+  const stText = await page.textContent('#status');
+  ok(stText.includes('The TV is online') && /Checked in \d+ s ago/.test(stText) && stText.includes(' of '), 'TV status shows it online, what it is showing and when it last checked in');
+  await page.screenshot({ path: join(SHOTS, 'tv-status.png') });
+
+  const started1 = await tvp.evaluate(() => window.__tv.started);
+  await page.click('#tvReload'); await toastSays(page, 'Sent');
+  await Promise.all([tvp.waitForEvent('load', { timeout: 8000 }), tvp.evaluate(() => window.__tv.checkIn())]).catch(() => {});
+  await tvp.waitForSelector('.layer.on');
+  ok((await tvp.evaluate(() => window.__tv.started)) !== started1, 'Refresh the TV makes the TV reload');
+  await tvp.evaluate(() => window.__tv.checkIn()); await tvp.waitForTimeout(800);
+  ok((await tvp.evaluate(() => window.__tv.started)) !== started1 && (await db.query(`select count(*)::int n from tv_screens`)).rows[0].n === 1, 'and it only reloads once');
+
+  // Book a party for tomorrow afternoon
+  const tmr = ymd(new Date(Date.now() + 864e5));
+  await page.click('#partyBook'); await page.waitForSelector('#bDate');
+  await page.click('#pForm [data-m="message"]'); await page.waitForSelector('#pName');
+  ok(await page.inputValue('#bDate') !== '' && await page.isVisible('#bFrom'), 'Book for later asks for the date and times');
+  await page.fill('#bDate', tmr); await page.fill('#bFrom', '14:00'); await page.fill('#bTo', '17:00'); await page.fill('#pName', 'Kian');
+  await page.click('#pGo'); await toastSays(page, 'Booked');
+  const bk = (await db.query(`select b.*, s.title from tv_party_bookings b join tv_slides s on s.id = b.slide_id`)).rows;
+  ok(bk.length === 1 && bk[0].title === 'Happy Birthday Kian!' && new Date(bk[0].starts_at).getHours() === 14 && new Date(bk[0].ends_at).getHours() === 17, 'the party is booked with its name and times');
+  await page.waitForSelector('#party .booked', { timeout: 5000 }).catch(() => {});
+  ok((await page.textContent('#party')).includes('Happy Birthday Kian!') && (await page.textContent('#party')).includes('2:00'), 'the booking shows under Party mode');
+  await page.click('#partyBook'); await page.waitForSelector('#bDate'); await page.click('#pForm [data-m="message"]'); await page.waitForSelector('#pName');
+  await page.fill('#bDate', tmr); await page.fill('#bFrom', '16:00'); await page.fill('#bTo', '18:00'); await page.fill('#pName', 'Ava');
+  await page.click('#pGo');
+  ok((await toastSays(page, 'Another party')).includes('Another party is booked'), 'two parties cannot be booked at the same time');
+  await page.click('#pForm [data-close]');
+
+  // The time comes: the TV switches by itself, then back at the end
+  await db.query(`update tv_party_bookings set starts_at = now() - interval '1 minute', ends_at = now() + interval '2 hours'`);
+  await tvp.evaluate(() => window.__tv.reload());
+  await tvp.waitForFunction(() => window.__tv.state().count === 1, null, { timeout: 6000 }).catch(() => {});
+  ok((await tvp.evaluate(() => window.__tv.state().count)) === 1 && (await tvp.textContent('body')).includes('Kian'), 'at the start time the TV shows only the party');
+  await page.evaluate(() => pollStatus()); await page.waitForSelector('#partyStop');
+  ok((await page.textContent('#party')).includes('Booked party is on'), 'the editor shows the booked party is on');
+  await page.click('#partyStop'); await toastSays(page, 'Back to normal');
+  await tvp.evaluate(() => window.__tv.reload());
+  await tvp.waitForFunction(() => window.__tv.state().count > 1, null, { timeout: 6000 }).catch(() => {});
+  ok((await tvp.evaluate(() => window.__tv.state().count)) > 1, '"Back to normal now" ends the booked party early');
+  await tvc.close(); await ctx.close();
 
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));

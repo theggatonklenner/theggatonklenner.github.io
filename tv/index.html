@@ -45,6 +45,9 @@
   .card.bgphoto > *:not(.shade) { position: relative; color: #fff; }
   .big { font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-weight: 700; font-size: 11vw; line-height: 1; margin: 0 0 2vh; }
   .sub { font-size: 3.4vw; opacity: .9; }
+  .count { display: flex; align-items: baseline; margin: 0 0 2vh; font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-weight: 700; }
+  .count .num { font-size: 20vw; line-height: .9; margin-right: 2vw; }
+  .count .unit { font-size: 6vw; }
   .rows { margin-top: 1vh; }
   .rows .r { display: flex; align-items: baseline; justify-content: space-between; font-size: 3.6vw; padding: 1.6vh 0; border-bottom: .25vh solid rgba(255,255,255,.25); }
   .t-gold .rows .r, .t-light .rows .r { border-bottom-color: rgba(0,0,0,.15); }
@@ -106,6 +109,26 @@
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
   var code = null, feed = null, version = null, pending = null, playlist = [], index = -1, timer = null, layerOn = null;
+  var STARTED = new Date().toISOString();
+  var PREVIEW = /[?&]preview=1/.test(location.search);   // the editor's Preview: don't count it as a TV
+  var screenId = store.get('tvScreen');
+  if (!screenId) { screenId = 'tv-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); store.set('tvScreen', screenId); }
+  // Tell the editor this TV is on and what it's showing; reload if "Refresh the TV" was pressed
+  function showingNow() {
+    var s = playlist[index]; if (!s) return feed && feed.only ? 'Party mode' : 'Waiting for slides';
+    var name = s.title || (s.kind === 'live' ? { next_grading: 'Next grading', sessions: 'Prep sessions', congrats: 'Congratulations' }[s.live_kind] : { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown' }[s.kind]);
+    return (feed.only ? 'Party mode: ' : '') + name + (playlist.length > 1 ? ' (' + (index + 1) + ' of ' + playlist.length + ')' : '');
+  }
+  function checkIn() {
+    if (!code || PREVIEW) return;
+    fetch(BASE + '/rest/v1/rpc/tv_checkin', {
+      method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'apikey': CFG.SUPABASE_KEY },
+      body: JSON.stringify({ p_code: code, p_screen: screenId, p_showing: showingNow(), p_started: STARTED,
+        p_details: { w: window.innerWidth, h: window.innerHeight, slides: playlist.length, offline: /offline/.test(document.body.className), browser: navigator.userAgent.slice(0, 160) } })
+    }).then(function (r) { return r.ok ? r.json() : null; }).then(function (r) {
+      if (r && r.reload) location.reload();
+    }).catch(function () { /* not set up yet, or no connection */ });
+  }
 
   // ---------- Screen code ----------
   var params = (function () { var o = {}; location.search.replace(/^\?/, '').split('&').forEach(function (p) { if (!p) return; var kv = p.split('='); o[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || ''); }); return o; })();
@@ -138,6 +161,7 @@
       document.body.className = document.body.className.replace(/\boffline\b/g, '');
       if (f && f.error === 'wrong_code') { store.del('tvCode'); code = null; store.del('tvFeed'); return askCode(first ? 'That code is not right. Check it in the TV editor.' : 'The screen code was changed. Enter the new one.'); }
       store.set('tvFeed', JSON.stringify(f));
+      setTimeout(checkIn, 1500);
       apply(f, first);
     }).catch(function () {
       document.body.className += ' offline';
@@ -159,6 +183,7 @@
   function d(iso) { var p = String(iso).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
   function longDate(iso) { var x = d(iso); return DAYS[x.getDay()] + ' ' + x.getDate() + ' ' + MONTHS[x.getMonth()]; }
   function shortDate(iso) { var x = d(iso); return DAYS[x.getDay()].slice(0, 3) + ' ' + x.getDate() + ' ' + MONTHS[x.getMonth()].slice(0, 3); }
+  function daysTo(iso) { return Math.round((d(iso) - d(feed.today)) / 86400000); }
   function untilText(iso) {
     var days = Math.round((d(iso) - d(feed.today)) / 86400000);
     if (days <= 0) return 'Today'; if (days === 1) return 'Tomorrow';
@@ -168,6 +193,11 @@
   function build() {
     var live = feed.live || {}, out = [];
     (feed.slides || []).forEach(function (s) {
+      if (s.kind === 'countdown') {
+        var to = s.count_to === 'grading' ? (live.next_grading && live.next_grading.date) : s.event_on;
+        if (to && daysTo(to) >= 0) out.push(s);
+        return;
+      }
       if (s.kind !== 'live') { out.push(s); return; }
       if (s.live_kind === 'next_grading' && live.next_grading && live.next_grading.date) out.push(s);
       if (s.live_kind === 'sessions' && live.sessions && live.sessions.length) out.push(s);
@@ -206,6 +236,14 @@
     if (s.kind === 'text') {
       var bg = s.media_path ? ' bgphoto" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')' : '';
       return '<div class="card ' + themeOf(s) + bg + '">' + (s.media_path ? '<div class="shade"></div>' : '') + (s.theme === 'party' ? confetti() : '') + '<div class="belt"></div>' + (s.title ? '<h1>' + esc(s.title) + '</h1>' : '') + (s.body ? '<div class="body">' + esc(s.body) + '</div>' : '') + '</div>';
+    }
+    if (s.kind === 'countdown') {
+      var to = s.count_to === 'grading' ? live.next_grading.date : s.event_on, n = daysTo(to);
+      var what = s.title || (s.count_to === 'grading' ? 'Black belt grading' : 'Countdown');
+      var big = n === 0 ? '<span class="num">Today</span>' : n === 1 ? '<span class="num">Tomorrow</span>'
+        : n < 21 ? '<span class="num">' + n + '</span><span class="unit">days to go</span>'
+        : '<span class="num">' + Math.round(n / 7) + '</span><span class="unit">weeks to go</span>';
+      return '<div class="card ' + themeOf(s) + '"><div class="belt"></div><div class="kicker">' + esc(what) + '</div><div class="count">' + big + '</div><div class="sub">' + esc(longDate(to)) + '</div></div>';
     }
     if (s.live_kind === 'next_grading') {
       var g = live.next_grading;
@@ -303,7 +341,7 @@
   // Reload once a night (picks up updates and keeps the TV browser fresh)
   setInterval(function () { var n = new Date(); if (n.getHours() === 3 && n.getMinutes() < 2) location.reload(); }, 60000);
   setInterval(function () { if (code) load(false); }, POLL_MS);
-  window.__tv = { next: next, reload: function () { load(false); }, state: function () { return { index: index, count: playlist.length, ids: playlist.map(function (s) { return s.id; }) }; } };   // for testing
+  window.__tv = { next: next, reload: function () { load(false); }, checkIn: checkIn, started: STARTED, state: function () { return { index: index, count: playlist.length, ids: playlist.map(function (s) { return s.id; }) }; } };   // for testing
   load(true);
 })();
 </script>

@@ -96,6 +96,16 @@
   .swatches span { display: block; width: 44px; height: 32px; border-radius: 8px; border: 2px solid var(--line); }
   .swatches input:checked + span { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
   #party.on { background: var(--gold); color: var(--on-gold); }
+  .booked { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .booked li { display: flex; align-items: center; gap: 10px; }
+  .booked .thumb { width: 64px; height: 36px; font-size: 10px; }
+  .booked .when { font-size: 13px; color: var(--muted); }
+  #status .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: 1px; }
+  #status .dot.on { background: #1fa85c; box-shadow: 0 0 0 3px rgba(31,168,92,.2); }
+  #status .screens { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  #status .screens li { display: flex; gap: 10px; align-items: flex-start; }
+  #status .screens .grow > div { font-size: 13px; color: var(--muted); }
+  .cd-to { display: flex; flex-direction: column; gap: 6px; }
   #party.on .hint { color: var(--on-gold); opacity: .85; }
   /* Fixed colours on the gold card, so the buttons read the same in light and dark mode */
   #party.on .btn { background: #ffffff; color: #16211b; border-color: rgba(0,0,0,.18); }
@@ -165,6 +175,7 @@
   <section id="problem" class="card" hidden></section>
 
   <section id="app" hidden style="display:flex;flex-direction:column;gap:14px">
+    <div class="card" id="status" hidden></div>
     <div class="card" id="party"></div>
     <div class="view-head"><h2>Slides</h2><div class="row"><a class="btn sm" id="previewBtn" target="_blank" rel="noopener">Preview</a><button class="btn primary sm" id="addBtn">Add</button></div></div>
     <p class="hint">The TV shows these in order, on a loop, and picks up changes within 20 seconds.</p>
@@ -208,8 +219,8 @@ const LIVE = {
   sessions: ['Prep sessions', 'The next prep session dates, with the sign-off marked'],
   congrats: ['Congratulations', 'Students who passed a grading in the last 45 days']
 };
-const KIND = { photo: 'Photo', video: 'Video', text: 'Info slide', live: 'Live' };
-const state = { me: '', slides: [], partySlides: [], settings: null, templates: null };
+const KIND = { photo: 'Photo', video: 'Video', text: 'Info slide', live: 'Live', countdown: 'Countdown' };
+const state = { me: '', slides: [], partySlides: [], settings: null, templates: null, bookings: null, screens: null, nextGrading: null };
 
 /* ---------- Small helpers ---------- */
 let toastTimer;
@@ -236,6 +247,12 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'x' + Date.now().t
 const fmtDate = iso => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
+const daysFromToday = iso => Math.round((new Date(iso + 'T00:00:00') - new Date(today() + 'T00:00:00')) / 86400000);
+const countText = n => n <= 0 ? 'Today' : n === 1 ? 'Tomorrow' : n < 21 ? `${n} days to go` : `${Math.round(n / 7)} weeks to go`;
+const longDate = iso => new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+const whenText = iso => { const d = new Date(iso); return d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + timeText(iso); };
+const ago = iso => { const s = Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000)); return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : whenText(iso); };
+
 /* ---------- Loading ---------- */
 async function load() {
   const staff = await sb.rpc('tv_is_staff');
@@ -249,6 +266,14 @@ async function load() {
   state.slides = (slides || []).filter(x => !x.party); state.partySlides = (slides || []).filter(x => x.party).reverse(); state.settings = settings;
   const tp = await sb.from('tv_poster_templates').select('*').order('position').order('created_at');
   state.templates = tp.error ? null : (tp.data || []);   // null: database not updated for posters yet
+  const [bk, sc, fd] = await Promise.all([
+    sb.from('tv_party_bookings').select('*').gt('ends_at', new Date().toISOString()).order('starts_at'),
+    sb.from('tv_screens').select('*').order('last_seen', { ascending: false }),
+    settings ? sb.rpc('tv_feed', { p_code: settings.screen_code }) : Promise.resolve({})
+  ]);
+  state.bookings = bk.error ? null : (bk.data || []);    // null: database not updated for bookings yet
+  state.screens = sc.error ? null : (sc.data || []);
+  state.nextGrading = (fd && fd.data && fd.data.live && fd.data.live.next_grading && fd.data.live.next_grading.date) || null;
   show('#app'); draw();
 }
 function problem(kind) {
@@ -266,21 +291,26 @@ function thumb(s) {
   if (s.kind === 'photo') return `<div class="thumb" style="background-image:url('${MEDIA + esc(s.media_path)}')"></div>`;
   if (s.kind === 'video') return `<div class="thumb"><span class="play"></span></div>`;
   if (s.kind === 'text') return `<div class="thumb t-${esc(s.theme)}"${s.media_path ? ` style="background-image:linear-gradient(rgba(0,0,0,.45),rgba(0,0,0,.45)),url('${MEDIA + esc(s.media_path)}')"` : ''}>${esc((s.title || 'Info').slice(0, 24))}</div>`;
+  if (s.kind === 'countdown') { const to = countTo(s); return `<div class="thumb t-${esc(s.theme)}">${esc(to ? countText(daysFromToday(to)) : 'Countdown')}</div>`; }
   return `<div class="thumb t-${esc(s.theme)}">${esc(LIVE[s.live_kind] ? LIVE[s.live_kind][0] : 'Live')}</div>`;
 }
-function slideName(s) { return s.title || (s.kind === 'live' ? LIVE[s.live_kind][0] : KIND[s.kind]); }
+const countTo = s => s.count_to === 'grading' ? state.nextGrading : s.event_on;
+function slideName(s) { return s.title || (s.kind === 'live' ? LIVE[s.live_kind][0] : s.kind === 'countdown' && s.count_to === 'grading' ? 'Black belt grading' : KIND[s.kind] || 'Slide'); }
 function draw() {
   const S = state.settings, list = state.slides, t = today();
   drawParty();
   $('#code').textContent = S.screen_code;
   $('#setSecs').value = S.seconds; $('#setClock').checked = S.show_clock; $('#setLogo').checked = S.show_logo;
-  $('#previewBtn').href = `../?code=${encodeURIComponent(S.screen_code)}`;
+  $('#previewBtn').href = `../?code=${encodeURIComponent(S.screen_code)}&preview=1`;
+  drawStatus();
   $('#list').innerHTML = list.length ? list.map((s, i) => {
-    const out = (s.starts_on && s.starts_on > t) ? `Starts ${fmtDate(s.starts_on)}` : (s.ends_on && s.ends_on < t) ? `Ended ${fmtDate(s.ends_on)}` : '';
+    let out = (s.starts_on && s.starts_on > t) ? `Starts ${fmtDate(s.starts_on)}` : (s.ends_on && s.ends_on < t) ? `Ended ${fmtDate(s.ends_on)}` : '';
+    if (!out && s.kind === 'countdown') { const to = countTo(s); if (s.count_to === 'date' && to < t) out = `Passed ${fmtDate(to)}`; else if (!to) out = 'No grading date set'; }
+    const what = s.kind === 'countdown' ? (s.count_to === 'grading' ? 'Countdown to the next grading' : `Countdown to ${fmtDate(s.event_on)}`) : s.kind === 'live' ? 'Live' : KIND[s.kind];
     return `<li class="slide${!s.enabled || out ? ' off' : ''}" data-id="${s.id}">
       ${thumb(s)}
       <div class="main" data-open="${s.id}"><div class="name">${esc(slideName(s))}</div>
-        <div class="meta"><span>${esc(s.kind === 'live' ? 'Live' : KIND[s.kind])}</span><span>· ${s.kind === 'video' && !s.seconds ? 'plays to the end' : (s.seconds || S.seconds) + ' s'}</span>
+        <div class="meta"><span>${esc(what)}</span><span>· ${s.kind === 'video' && !s.seconds ? 'plays to the end' : (s.seconds || S.seconds) + ' s'}</span>
           ${!s.enabled ? '<span class="tag muted">Off</span>' : ''}${out ? `<span class="tag warn">${out}</span>` : (s.ends_on ? `<span class="tag muted">Until ${fmtDate(s.ends_on)}</span>` : '')}</div></div>
       <label class="check" style="min-height:0" title="Show on the TV"><input type="checkbox" data-on="${s.id}" ${s.enabled ? 'checked' : ''} aria-label="Show ${esc(slideName(s))} on the TV"></label>
       <div class="moves"><button data-up="${s.id}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">▲</button><button data-down="${s.id}" ${i === list.length - 1 ? 'disabled' : ''} aria-label="Move down">▼</button></div></li>`;
@@ -315,6 +345,7 @@ $('#addBtn').onclick = () => {
       <button data-add="photos"><b>Photos</b><span>One or several at once, or a PDF (each page becomes a slide)</span></button>
       <button data-add="video"><b>Video</b><span>MP4, up to 50 MB, plays without sound</span></button>
       <button data-add="text"><b>Info slide</b><span>Announcements, class times, notices</span></button>
+      <button data-add="countdown"><b>Countdown</b><span>"Grading in 12 days", "Comp in 3 weeks"</span></button>
       ${Object.entries(LIVE).map(([k, [n, d]]) => `<button data-add="live:${k}"><b>Live: ${esc(n)}</b><span>${esc(d)}</span></button>`).join('')}
     </div>
     <p class="hint">Live slides fill themselves in from Black Belt Prep and only show when there's something to show.</p></div>`);
@@ -323,6 +354,7 @@ $('#addBtn').onclick = () => {
     if (a === 'photos') { dlg.close(); $('#pickPhotos').click(); }
     else if (a === 'video') { dlg.close(); $('#pickVideo').click(); }
     else if (a === 'text') openSlide(null, { kind: 'text', theme: 'green' });
+    else if (a === 'countdown') openSlide(null, { kind: 'countdown', theme: 'green', count_to: 'date' });
     else addLive(a.split(':')[1]);
   });
 };
@@ -466,11 +498,18 @@ function openSlide(s, fresh) {
       <div class="field"><label for="slBody">Text</label><textarea id="slBody" placeholder="e.g. The dojang is closed for the public holiday. Classes are back on Tuesday.">${esc(x.body || '')}</textarea></div>
       ${themePick}
       <div class="field"><span class="label">Background photo (optional)</span><div class="row"><span class="hint grow" id="bgName">${bgPath ? 'Photo added' : 'None'}</span><button type="button" class="btn sm" id="bgPick">${bgPath ? 'Change' : 'Add photo'}</button><button type="button" class="btn sm danger" id="bgClear" ${bgPath ? '' : 'hidden'}>Remove</button></div></div>`,
+    countdown: () => `<div class="field"><label for="slTitle">Event</label><input type="text" id="slTitle" maxlength="120" value="${esc(x.title || '')}" placeholder="e.g. Comp, Christmas break"></div>
+      <div class="field"><span class="label">Count down to</span><div class="cd-to">
+        <label class="check"><input type="radio" name="cdTo" value="date" ${x.count_to !== 'grading' ? 'checked' : ''}> A date</label>
+        <input type="date" id="slEvent" value="${esc(x.event_on || '')}" min="${today()}">
+        <label class="check"><input type="radio" name="cdTo" value="grading" ${x.count_to === 'grading' ? 'checked' : ''}> The next black belt grading (from Black Belt Prep)</label></div></div>
+      <p class="hint" id="cdPrev"></p>
+      ${themePick}`,
     live: () => `<p class="hint">${esc(LIVE[x.live_kind][1])}. It fills in by itself from Black Belt Prep.</p>
       <div class="field"><label for="slTitle">Heading (optional)</label><input type="text" id="slTitle" maxlength="120" value="${esc(x.title || '')}" placeholder="${esc({ next_grading: 'Next black belt grading', sessions: 'Black belt prep sessions', congrats: 'Congratulations' }[x.live_kind])}"></div>${themePick}`
   }[x.kind]();
   openDlg(`<form class="dlg" id="slForm">
-    <div class="dlg-head"><div><h3>${isNew ? 'New info slide' : esc(x.kind === 'live' ? 'Live: ' + LIVE[x.live_kind][0] : KIND[x.kind])}</h3>${!isNew && x.updated_by ? `<p class="hint">Last changed by ${esc(x.updated_by)}</p>` : ''}</div><button class="x" data-close>Close</button></div>
+    <div class="dlg-head"><div><h3>${isNew ? (x.kind === 'countdown' ? 'New countdown' : 'New info slide') : esc(x.kind === 'live' ? 'Live: ' + LIVE[x.live_kind][0] : KIND[x.kind])}</h3>${!isNew && x.updated_by ? `<p class="hint">Last changed by ${esc(x.updated_by)}</p>` : ''}</div><button class="x" data-close>Close</button></div>
     ${body}
     <div class="grid2">
       <div class="field"><label for="slSecs">Seconds on screen</label><input type="number" id="slSecs" min="3" max="600" step="1" value="${x.seconds || ''}" placeholder="${x.kind === 'video' ? 'Whole video' : 'Default (' + state.settings.seconds + ')'}"></div>
@@ -481,6 +520,17 @@ function openSlide(s, fresh) {
     <div class="row">${!isNew ? '<button type="button" class="btn danger" id="slDel">Delete</button>' : ''}<span class="grow"></span><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="slSave">${isNew ? 'Add' : 'Save'}</button></div>
   </form>`);
   const t = $('#slTitle'); if (t && isNew) t.focus();
+  if (x.kind === 'countdown') {
+    const cdTo = () => $('#slForm input[name=cdTo]:checked').value;
+    const prev = () => {
+      const g = cdTo() === 'grading', to = g ? state.nextGrading : $('#slEvent').value;
+      $('#slEvent').disabled = g;
+      const what = t.value.trim() || (g ? 'Black belt grading' : 'Countdown');
+      $('#cdPrev').textContent = !to ? (g ? 'No grading date is set in Black Belt Prep yet, so it stays off the TV until there is one.' : 'Pick the date.')
+        : to < today() ? 'That date has passed.' : `The TV shows: ${what} · ${countText(daysFromToday(to))} · ${longDate(to)}. It goes away by itself after the day.`;
+    };
+    $$('#slForm input[name=cdTo]').forEach(r => r.onchange = prev); $('#slEvent').oninput = prev; t.oninput = prev; prev();
+  }
   if (x.kind === 'text') {
     $('#bgPick').onclick = () => { $('#pickBg').onchange = async e => {
       const f = e.target.files[0]; e.target.value = ''; if (!f) return;
@@ -496,6 +546,13 @@ function openSlide(s, fresh) {
     if (from && until && until < from) return toast('"Show until" is before "Show from".');
     const rec = { title: t ? (t.value.trim() || null) : x.title, seconds: $('#slSecs').value ? Math.max(3, Math.min(600, +$('#slSecs').value)) : null, enabled: $('#slOn').checked, starts_on: from, ends_on: until };
     if (x.kind === 'text') { rec.body = $('#slBody').value.trim() || null; rec.media_path = bgPath; if (!rec.title && !rec.body) return toast('Add a heading or some text.'); }
+    if (x.kind === 'countdown') {
+      rec.count_to = $('#slForm input[name=cdTo]:checked').value;
+      rec.event_on = rec.count_to === 'date' ? ($('#slEvent').value || null) : null;
+      if (rec.count_to === 'date' && !rec.event_on) return toast('Pick the date to count down to.');
+      if (rec.count_to === 'date' && rec.event_on < today()) return toast('That date has passed.');
+      if (rec.count_to === 'date' && !rec.title) return toast('Name the event, e.g. Comp.');
+    }
     const th = $('#slForm input[name=theme]:checked'); if (th) rec.theme = th.value;
     $('#slSave').disabled = true;
     const { error } = isNew ? await sb.from('tv_slides').insert({ ...rec, kind: x.kind, theme: rec.theme || 'green' }) : await sb.from('tv_slides').update(rec).eq('id', s.id);
@@ -528,19 +585,98 @@ function drawParty() {
       <div class="row"><button class="btn primary" id="partyStop">Back to normal now</button><button class="btn" id="partyMore">1 more hour</button></div>`;
     $('#partyStop').onclick = async () => { await setParty(null, null); toast('Back to normal. The TV switches within 20 seconds.', 4000); };
     $('#partyMore').onclick = async () => { await setParty(S.only_slide, new Date(new Date(S.only_until).getTime() + 3600e3).toISOString()); toast(`Party mode until ${timeText(state.settings.only_until)}`); };
+  } else if (activeBooking()) {
+    const b = activeBooking(), sl = state.partySlides.concat(state.slides).find(x => x.id === b.slide_id) || {};
+    box.className = 'card on';
+    box.innerHTML = `<div class="row" style="justify-content:space-between"><h3>Booked party is on</h3><span class="chip" style="background:var(--on-gold);color:var(--gold)">TV</span></div>
+      <div class="row" style="align-items:center">${thumb(sl)}<p class="grow" style="margin:0">The TV is showing only <b>${esc(slideName(sl))}</b> until <b>${timeText(b.ends_at)}</b>. Then it goes back to the slideshow by itself.</p></div>
+      <div class="row"><button class="btn primary" id="partyStop">Back to normal now</button><button class="btn" id="partyMore">1 more hour</button></div>${bookedList(b.id)}`;
+    $('#partyStop').onclick = async () => { if (await moveBooking(b, new Date().toISOString())) toast('Back to normal. The TV switches within 20 seconds.', 4000); };
+    $('#partyMore').onclick = async () => { const t = new Date(new Date(b.ends_at).getTime() + 3600e3).toISOString(); if (await moveBooking(b, t)) toast(`Party until ${timeText(t)}`); };
   } else {
     box.className = 'card';
     box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start"><div class="grow"><h3>Party mode</h3><p class="hint">Show just one thing on the TV, like a birthday message, for a set time. Then it goes back to the slideshow by itself.</p></div>
-      <button class="btn primary" id="partyStart">Start</button></div>`;
-    $('#partyStart').onclick = openParty;
+      <div class="row">${state.bookings ? '<button class="btn" id="partyBook">Book for later</button>' : ''}<button class="btn primary" id="partyStart">Start now</button></div></div>${bookedList()}`;
+    $('#partyStart').onclick = () => openParty();
+    if ($('#partyBook')) $('#partyBook').onclick = () => openParty({ book: true });
   }
+  $$('#party [data-unbook]').forEach(b => b.onclick = async () => {
+    const bk = state.bookings.find(x => x.id === b.dataset.unbook);
+    if (!await confirmBox(`Cancel the party booked for ${whenText(bk.starts_at)}?`, 'Cancel booking')) return;
+    const { error } = await sb.from('tv_party_bookings').delete().eq('id', bk.id);
+    if (error) return toast('Not cancelled: ' + error.message, 5000);
+    toast('Booking cancelled'); load();
+  });
 }
+// Bookings: a party that switches itself on at the start time and off at the end
+const activeBooking = () => (state.bookings || []).find(b => new Date(b.starts_at) <= new Date() && new Date(b.ends_at) > new Date());
+function bookedList(skip) {
+  const list = (state.bookings || []).filter(b => b.id !== skip && new Date(b.starts_at) > new Date());
+  if (!list.length) return '';
+  return `<div class="label" style="margin-top:12px">Booked</div><ul class="booked">${list.map(b => {
+    const sl = state.partySlides.concat(state.slides).find(x => x.id === b.slide_id) || {};
+    const sameDay = new Date(b.starts_at).toDateString() === new Date(b.ends_at).toDateString();
+    return `<li>${thumb(sl)}<div class="grow"><b>${esc(slideName(sl))}</b><div class="when">${esc(whenText(b.starts_at))} to ${esc(sameDay ? timeText(b.ends_at) : whenText(b.ends_at))}</div></div><button class="btn sm" data-unbook="${b.id}">Cancel</button></li>`;
+  }).join('')}</ul>`;
+}
+async function moveBooking(b, ends) {
+  // Ending it now: the end must stay after the start, so a party ended in its first second ends a moment later
+  const min = new Date(new Date(b.starts_at).getTime() + 1000).toISOString();
+  const { error } = await sb.from('tv_party_bookings').update({ ends_at: ends > min ? ends : min }).eq('id', b.id);
+  if (error) { toast('Not saved: ' + error.message, 5000); return false; }
+  await load(); return true;
+}
+
+/* ---------- TV status: is it on, what's it showing, and a remote refresh ---------- */
+const ONLINE_MS = 75e3;   // the TV checks in every 20 seconds
+function drawStatus() {
+  const box = $('#status');
+  if (state.screens === null) { box.hidden = true; return; }   // database not updated yet
+  box.hidden = false;
+  const list = state.screens, on = list.filter(x => Date.now() - new Date(x.last_seen) < ONLINE_MS);
+  const head = !list.length ? 'No TV has checked in yet' : on.length ? (list.length > 1 ? `${on.length} of ${list.length} TVs online` : 'The TV is online') : (list.length > 1 ? 'The TVs are offline' : 'The TV is offline');
+  box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start"><div class="grow"><h3><span class="dot${on.length ? ' on' : ''}"></span>${esc(head)}</h3>
+      ${!list.length ? '<p class="hint">Open the TV page on the TV with the screen code (under Settings). It shows up here within 20 seconds.</p>' : ''}</div>
+      <button class="btn" id="tvReload"${list.length ? '' : ' disabled'}>Refresh the TV</button></div>
+    ${list.length ? `<ul class="screens">${list.map((x, i) => {
+      const live = Date.now() - new Date(x.last_seen) < ONLINE_MS;
+      const what = x.showing ? esc(x.showing) : 'Starting up';
+      return `<li><div class="grow"><b>${list.length > 1 ? `TV ${i + 1}: ` : ''}${live ? 'Showing: ' + what : 'Offline'}</b>
+        <div>${live ? `Checked in ${esc(ago(x.last_seen))}` : `Last seen ${esc(ago(x.last_seen))}${x.showing ? `, showing ${what}` : ''}`}${x.started_at ? ` · page loaded ${esc(ago(x.started_at))}` : ''}</div></div>
+        ${!live ? `<button class="btn sm" data-forget-tv="${esc(x.screen_id)}">Remove</button>` : ''}</li>`;
+    }).join('')}</ul>` : ''}`;
+  $('#tvReload').onclick = async () => {
+    $('#tvReload').disabled = true;
+    const { error } = await sb.from('tv_settings').update({ reload_at: new Date().toISOString() }).eq('id', 1);
+    if (error) { $('#tvReload').disabled = false; return toast('Not sent: ' + error.message, 5000); }
+    toast('Sent. The TV reloads within 20 seconds.', 4000);
+    setTimeout(pollStatus, 25e3);
+    setTimeout(() => { const b = $('#tvReload'); if (b) b.disabled = false; }, 5000);
+  };
+  $$('#status [data-forget-tv]').forEach(b => b.onclick = async () => {
+    const { error } = await sb.from('tv_screens').delete().eq('screen_id', b.dataset.forgetTv);
+    if (error) return toast('Not removed: ' + error.message, 5000);
+    pollStatus();
+  });
+}
+async function pollStatus() {
+  if ($('#app').hidden || state.screens === null) return;
+  const [{ data, error }, bk] = await Promise.all([
+    sb.from('tv_screens').select('*').order('last_seen', { ascending: false }),
+    state.bookings ? sb.from('tv_party_bookings').select('*').gt('ends_at', new Date().toISOString()).order('starts_at') : Promise.resolve({})
+  ]);
+  if (!error) { state.screens = data || []; drawStatus(); }
+  if (bk.data) state.bookings = bk.data;
+  if (state.settings) drawParty();   // a booked party starting or ending while the page is open
+}
+setInterval(() => { if (!document.hidden) pollStatus(); }, 15e3);
 async function setParty(slideId, until) {
   const { error } = await sb.from('tv_settings').update({ only_slide: slideId, only_until: until }).eq('id', 1);
   if (error) { toast('Not saved: ' + error.message, 5000); return false; }
   await load(); return true;
 }
-function openParty() {
+function openParty(opts) {
+  let when = opts && opts.book ? 'later' : 'now', bDate = today(), bFrom = '', bTo = '';
   let mode = state.templates && state.templates.length ? 'poster' : 'message', photo = null, caption = '', pages = null, pick = (state.partySlides[0] || {}).id || null;
   let tplId = (state.templates && state.templates[0] || {}).id || null, posterName = '';
   const render = () => {
@@ -568,11 +704,20 @@ function openParty() {
         ${photo ? `<div class="preview-img" style="background-image:url('${MEDIA + esc(photo)}')"></div>` : '<p class="hint">Use the birthday design made for the party: an image, or the PDF from Canva (you then pick the page). It fills the screen.</p>'}
         <div class="field"><label for="pCap">Name it (only shown in the editor)</label><input type="text" id="pCap" maxlength="120" value="${esc(caption)}" placeholder="e.g. Kian"></div>`
       : `<ul class="saved">${state.partySlides.map(x => `<li class="${x.id === pick ? 'pick' : ''}" data-pick="${x.id}">${thumb(x)}<span class="grow">${esc(slideName(x))}</span><button type="button" class="btn sm danger" data-forget="${x.id}">Delete</button></li>`).join('')}</ul>`}
+      ${state.bookings ? `<div class="field"><span class="label">When</span><div class="seg" role="group" aria-label="When"><button type="button" data-when="now" aria-pressed="${when === 'now'}">Now</button><button type="button" data-when="later" aria-pressed="${when === 'later'}">Book for later</button></div></div>` : ''}
+      ${when === 'later' ? `<div class="grid2">
+        <div class="field"><label for="bDate">Date</label><input type="date" id="bDate" min="${today()}" value="${esc(bDate)}"></div><span></span>
+        <div class="field"><label for="bFrom">Starts</label><input type="time" id="bFrom" value="${esc(bFrom)}"></div>
+        <div class="field"><label for="bTo">Ends</label><input type="time" id="bTo" value="${esc(bTo)}"></div></div>
+        <p class="hint">The TV switches to this by itself at the start and back to the slideshow at the end.</p>` : `
       <div class="field"><label for="pFor">Show it for</label><select id="pFor"><option value="60">1 hour</option><option value="120">2 hours</option><option value="180" selected>3 hours</option><option value="day">The rest of today</option><option value="until">Until a set time...</option></select></div>
-      <div class="field" id="pUntilRow" hidden><label for="pUntil">Until</label><input type="time" id="pUntil"></div>
-      <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="pGo">Show on the TV</button></div>
+      <div class="field" id="pUntilRow" hidden><label for="pUntil">Until</label><input type="time" id="pUntil"></div>`}
+      <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="pGo">${when === 'later' ? 'Book it' : 'Show on the TV'}</button></div>
     </form>`);
-    $$('#pForm [data-m]').forEach(b => b.onclick = () => { mode = b.dataset.m; render(); });
+    const keep = () => { if ($('#bDate')) { bDate = $('#bDate').value; bFrom = $('#bFrom').value; bTo = $('#bTo').value; } if ($('#pPoster')) posterName = $('#pPoster').value; };
+    $$('#pForm [data-m]').forEach(b => b.onclick = () => { keep(); mode = b.dataset.m; render(); });
+    $$('#pForm [data-when]').forEach(b => b.onclick = () => { keep(); when = b.dataset.when; render(); });
+    ['#bDate', '#bFrom', '#bTo'].forEach(id => { if ($(id)) $(id).oninput = keep; });
     if (mode === 'poster') {
       const imp = $('#pImport'); if (imp) imp.onclick = () => importTemplates(() => { tplId = (state.templates[0] || {}).id; openParty(); });
       const add = $('#pAddTpl'); if (add) add.onclick = () => openTemplate(null);
@@ -588,7 +733,7 @@ function openParty() {
         setTimeout(() => URL.revokeObjectURL(a.href), 3000);
       };
     }
-    $('#pFor').onchange = () => { $('#pUntilRow').hidden = $('#pFor').value !== 'until'; };
+    if ($('#pFor')) $('#pFor').onchange = () => { $('#pUntilRow').hidden = $('#pFor').value !== 'until'; };
     if (mode === 'message') {
       const prev = () => { const n = $('#pName').value.trim(), h = $('#pHead').value.trim() || 'Happy Birthday!';
         $('#pPrev b').textContent = n ? h.replace(/!?\s*$/, '') + ' ' + n + '!' : h; $('#pPrev span').textContent = $('#pLine').value.trim(); };
@@ -637,6 +782,8 @@ function openParty() {
       $$('#pForm [data-forget]').forEach(b => b.onclick = async () => {
         const x = state.partySlides.find(y => y.id === b.dataset.forget);
         if (partyOn() && state.settings.only_slide === x.id) return toast("That's on the TV now. Go back to normal first.");
+        const bk = (state.bookings || []).find(y => y.slide_id === x.id);
+        if (bk) return toast(`That's booked for ${whenText(bk.starts_at)}. Cancel the booking first.`, 5000);
         const { error } = await sb.from('tv_slides').delete().eq('id', x.id);
         if (error) return toast('Not deleted: ' + error.message, 5000);
         if (x.media_path) sb.storage.from('tv').remove([x.media_path]).catch(() => {});
@@ -645,14 +792,23 @@ function openParty() {
     }
     $('#pForm').onsubmit = async e => {
       e.preventDefault();
-      const v = $('#pFor').value; let until;
+      let until, starts = null;
+      if (when === 'later') {
+        keep();
+        if (!bDate || !bFrom || !bTo) return toast('Fill in the date, start and end times.');
+        starts = new Date(`${bDate}T${bFrom}`); until = new Date(`${bDate}T${bTo}`);
+        if (until <= starts) until.setDate(until.getDate() + 1);   // ends after midnight
+        if (until <= new Date()) return toast('That time has already passed.');
+        const clash = (state.bookings || []).find(b => new Date(b.starts_at) < until && new Date(b.ends_at) > starts);
+        if (clash) return toast(`Another party is booked then (${whenText(clash.starts_at)} to ${timeText(clash.ends_at)}).`, 6000);
+      } else { const v = $('#pFor').value;
       if (v === 'day') { const d = new Date(); d.setHours(23, 59, 0, 0); until = d; }
       else if (v === 'until') {
         if (!$('#pUntil').value) return toast('Choose the time to stop.');
         const [h, m] = $('#pUntil').value.split(':').map(Number), d = new Date(); d.setHours(h, m, 0, 0);
         if (d <= new Date()) d.setDate(d.getDate() + 1);   // a time earlier than now means tomorrow
         until = d;
-      } else until = new Date(Date.now() + Number(v) * 60e3);
+      } else until = new Date(Date.now() + Number(v) * 60e3); }
       let id = null;
       $('#pGo').disabled = true;
       if (mode === 'saved') id = pick;
@@ -681,6 +837,12 @@ function openParty() {
       }
       if (!id) { $('#pGo').disabled = false; return toast('Choose what to show.'); }
       dlg.close();
+      if (starts) {
+        const { error } = await sb.from('tv_party_bookings').insert({ slide_id: id, starts_at: starts.toISOString(), ends_at: until.toISOString() });
+        if (error) { toast('Not booked: ' + error.message, 6000); return load(); }
+        toast(`Booked for ${whenText(starts.toISOString())} to ${timeText(until.toISOString())}. The TV switches on and off by itself.`, 6000);
+        return load();
+      }
       if (await setParty(id, until.toISOString())) toast(`Party mode on until ${timeText(until.toISOString())}. The TV switches within 20 seconds.`, 5000);
     };
   };
