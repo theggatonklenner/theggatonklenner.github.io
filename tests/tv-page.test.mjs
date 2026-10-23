@@ -884,6 +884,46 @@ try {
   ok(!(await tvop.$('.quiet')), '...and back on after');
   await tvo.close(); await ctx.close();
 
+  // Sign-in mode on the tablets
+  console.log('\nSign-in mode');
+  ({ ctx, page } = await context({ width: 390, height: 844 }));
+  await page.goto(BASE + '/tv/edit/index.html?display=tablet');
+  await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+  await page.waitForSelector('#signinBox:not([hidden])');
+  await page.fill('#setSignin', 'signin.test/ama'); await page.selectOption('#setSigninIdle', '30');
+  await page.click('#setSave'); await toastSays(page, 'Settings saved'); await page.waitForTimeout(400);
+  const sgn = (await db.query(`select signin_url, signin_idle from tv_settings where id = 2`)).rows[0];
+  ok(sgn.signin_url === 'https://signin.test/ama' && sgn.signin_idle === 30, 'the tablets get a sign-in page and how long to wait');
+  await ctx.close();
+  await db.query(`update tv_settings set signin_idle = 10 where id = 2`);   // quicker for the test
+  await db.query(`insert into tv_slides (kind, title, display) values ('text', 'Tablet welcome', 'tablet')`);
+  const sic = await browser.newContext({ viewport: { width: 800, height: 1280 }, isMobile: true, hasTouch: true });
+  await sic.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+  await sic.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+  await sic.route('https://signin.test/**', r => r.fulfill({ contentType: 'text/html', body: '<!doctype html><body style="font:40px sans-serif"><h1>ESC sign in</h1><input id="q" placeholder="Your name"></body>' }));
+  const sp2 = await sic.newPage(); sp2.on('pageerror', e => errors.push('tablet: ' + e.message));
+  const TC = (await db.query(`select screen_code from tv_settings where id = 2`)).rows[0].screen_code;
+  await sp2.goto(BASE + `/tv/index.html?code=${TC}`); await sp2.waitForSelector('.layer.on');
+  await sp2.waitForSelector('#signin', { state: 'visible', timeout: 5000 }).catch(() => {});
+  const fr = sp2.frames().find(f => f.url().startsWith('https://signin.test'));
+  ok(await sp2.isVisible('#signin') && fr && (await fr.textContent('h1')) === 'ESC sign in', 'the tablet opens on the sign-in page');
+  await sp2.screenshot({ path: join(SHOTS, 'signin-page.png') });
+  await sp2.waitForSelector('#signin', { state: 'hidden', timeout: 14000 }).catch(() => {});
+  ok(await sp2.isHidden('#signin') && (await sp2.textContent('.layer.on:last-child')).includes('Tablet welcome'), 'with no taps for the set time, it shows the slides');
+  await sp2.click('.layer.on', { force: true }); await sp2.waitForTimeout(400);
+  ok(await sp2.isVisible('#signin'), 'a tap brings the sign-in page back');
+  const tpid = (await db.query(`insert into tv_slides (kind, title, theme, party, display) values ('text', 'Happy Birthday Zoe!', 'party', true, 'tablet') returning id`)).rows[0].id;
+  await db.query(`insert into tv_party_bookings (slide_id, starts_at, ends_at) values ($1, now() - interval '1 minute', now() + interval '1 hour')`, [tpid]);
+  await sp2.evaluate(() => window.__tv.reload()); await sp2.waitForTimeout(1000);
+  ok(await sp2.isHidden('#signin') && (await sp2.textContent('#stage')).includes('Happy Birthday Zoe!'), 'when a party starts, the tablet goes to the party');
+  await sp2.click('.layer.on', { force: true }); await sp2.waitForTimeout(400);
+  ok(await sp2.isHidden('#signin'), 'and taps do nothing during the party');
+  await db.query(`delete from tv_party_bookings`); await sp2.evaluate(() => window.__tv.reload()); await sp2.waitForTimeout(1000);
+  await sp2.click('.layer.on', { force: true }); await sp2.waitForTimeout(400);
+  ok(await sp2.isVisible('#signin'), 'after the party, a tap opens the sign-in page again');
+  await sic.close();
+  await db.query(`update tv_settings set signin_url = null, signin_idle = 60 where id = 2`); await db.query(`delete from tv_slides where display = 'tablet'`);
+
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));
   await page.goto(BASE + '/tv/edit/index.html');

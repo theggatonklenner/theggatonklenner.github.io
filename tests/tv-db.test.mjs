@@ -341,6 +341,13 @@ ok((await feedAt('off-syd-001', null)).only === true, 'a party still shows');
 await as('tate@ama.test', () => db.exec(`delete from tv_party_bookings`)); await as('tate@ama.test', () => db.query(`delete from tv_slides where id = $1`, [op]));
 await setOffs([]); await db.exec(`delete from tv_screens where screen_id = 'off-syd-001'`);
 
+console.log('\nSign-in mode');
+await as('tate@ama.test', () => db.exec(`update tv_settings set signin_url = 'https://signin.example.com/ama', signin_idle = 45 where id = 2`));
+const fsi = await feedOf(tab.screen_code);
+ok(fsi.settings.signin === 'https://signin.example.com/ama' && fsi.settings.signin_idle === 45 && !(await feedNow()).settings.signin, 'the tablets get the sign-in page and how long to wait; the TV has none');
+ok(!(await tryAs('tate@ama.test', `update tv_settings set signin_url = 'javascript:alert(1)' where id = 2`)).ok && !(await tryAs('tate@ama.test', `update tv_settings set signin_idle = 2 where id = 2`)).ok, 'only https links, and a sensible wait');
+await as('tate@ama.test', () => db.exec(`update tv_settings set signin_url = null, signin_idle = 60 where id = 2`));
+
 console.log('\nFiles');
 const pol = (await db.query(`select policyname, roles::text r from pg_policies where tablename = 'objects' and policyname like 'tv files%'`)).rows;
 ok(pol.length === 4 && pol.every(p => p.r.includes('authenticated') && !p.r.includes('anon')), 'only signed-in staff can add, change or remove TV files');

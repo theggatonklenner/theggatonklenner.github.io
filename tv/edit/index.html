@@ -233,6 +233,10 @@
         <div class="field"><span class="label">On screen</span><label class="check"><input type="checkbox" id="setClock"> Clock</label><label class="check" style="min-height:28px"><input type="checkbox" id="setLogo"> AMA logo</label></div>
       </div>
       <div class="field" id="bannerBox" hidden><label for="setBanner">Message at the bottom (optional)</label><input type="text" id="setBanner" maxlength="80" placeholder="e.g. Tap to sign in"><p class="hint">Shown along the bottom of the screen with every slide. Leave it empty for none.</p></div>
+      <div class="field" id="signinBox" hidden><label for="setSignin">Sign-in page (optional)</label>
+        <div class="row"><input type="text" id="setSignin" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="e.g. https://kiosk.efcaquila.net/" class="grow" style="flex:1 1 200px;width:auto"><button type="button" class="btn sm" id="signinTest">Test</button></div>
+        <div class="row"><label for="setSigninIdle" class="label" style="margin:0">Back to the slides after</label><select id="setSigninIdle" style="width:auto"><option value="30">30 seconds</option><option value="45">45 seconds</option><option value="60">1 minute</option><option value="90">1.5 minutes</option><option value="120">2 minutes</option><option value="180">3 minutes</option><option value="300">5 minutes</option></select><span class="hint">with no taps</span></div>
+        <p class="hint">The screen shows this page. When nobody has used it for that long, it shows the slides; a tap brings the sign-in page back, fresh for the next person. During a party (or a blackout) it stays on that and taps do nothing.</p></div>
       <div class="field" id="quietBox" hidden><span class="label">Slideshow hours</span>
         <label class="check"><input type="checkbox" id="setQuiet"> Only play the slideshow at set times</label>
         <div id="quietRow" style="display:flex;flex-direction:column;gap:10px">
@@ -403,6 +407,8 @@ function draw() {
   $('#setSecs').value = S.seconds; $('#setClock').checked = S.show_clock; $('#setLogo').checked = S.show_logo;
   $('#offBox').hidden = !('offs' in S); if ('offs' in S) { offState = JSON.parse(JSON.stringify(S.offs || [])); drawOffs(); }
   $('#bannerBox').hidden = !('banner' in S); $('#setBanner').value = S.banner || '';
+  $('#signinBox').hidden = !('signin_url' in S);
+  if ('signin_url' in S) { $('#setSignin').value = S.signin_url || ''; const iv = String(S.signin_idle || 60); if (![...$('#setSigninIdle').options].some(o => o.value === iv)) $('#setSigninIdle').insertAdjacentHTML('beforeend', `<option value="${iv}">${iv} seconds</option>`); $('#setSigninIdle').value = iv; }
   $('#quietBox').hidden = !('quiet_on' in S);
   if ('quiet_on' in S) {
     // Each day's hours: from quiet_days, or (older setting) the same every day: on at quiet_to, off at quiet_from
@@ -1426,6 +1432,15 @@ function importTemplates(after) {
   $('#pickImport').click();
 }
 
+/* ---------- Sign-in page: test it shows inside the display ---------- */
+$('#signinTest').onclick = () => {
+  const raw = $('#setSignin').value.trim(), url = raw ? cleanLink(raw) : '';
+  if (!url) return toast('Paste the sign-in link first.');
+  openDlg(`<div class="dlg"><div class="dlg-head"><div><h3>Sign-in page test</h3><p class="hint">If the sign-in page shows below, it will work on the ${noun()}. If this stays blank or says it refused to connect, that site doesn't allow being shown inside another page.</p></div><button class="x" data-close>Close</button></div>
+    <iframe src="${esc(url)}" title="Sign-in page test" style="width:100%;height:min(60vh,560px);border:1px solid var(--line);border-radius:10px;background:#fff"></iframe>
+    <div class="row"><a class="btn sm" href="${esc(url)}" target="_blank" rel="noopener">Open it on its own</a></div></div>`);
+};
+
 /* ---------- Scheduled screen-off times ---------- */
 let offState = [];
 const DAYS3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -1518,6 +1533,12 @@ $('#setForm').onsubmit = async e => {
   const secs = Math.max(3, Math.min(600, +$('#setSecs').value || 10));
   const rec = { seconds: secs, show_clock: $('#setClock').checked, show_logo: $('#setLogo').checked };
   if (!$('#bannerBox').hidden) rec.banner = $('#setBanner').value.trim();
+  if (!$('#signinBox').hidden) {
+    const raw = $('#setSignin').value.trim(), url = raw ? cleanLink(raw) : '';
+    if (raw && !url) return toast("That doesn't look like a link.");
+    if (url && !/^https:/i.test(url)) return toast('The sign-in page needs a secure link (https://).');
+    rec.signin_url = url || null; rec.signin_idle = +$('#setSigninIdle').value;
+  }
   if (!$('#offBox').hidden) {
     readOffs();
     for (const o of offState) {
