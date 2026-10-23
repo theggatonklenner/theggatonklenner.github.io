@@ -88,6 +88,8 @@
   .pad button.main { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   .pad button:active { transform: scale(.97); }
   .pad button:disabled { opacity: .45; }
+  .btn.dark { background: #111; border-color: #111; color: #fff; min-height: 52px; }
+  .btn.wake { background: var(--gold); border-color: var(--gold); color: var(--on-gold); min-height: 52px; }
   .slides { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   .slides button { width: 100%; display: flex; align-items: center; gap: 12px; text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 8px; cursor: pointer; }
   .slides button.cur { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
@@ -132,6 +134,7 @@
       <button type="button" id="bPause" class="main"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg><span>Pause</span></button>
       <button type="button" id="bNext" aria-label="Next"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>Next</button>
     </div>
+    <button type="button" class="btn dark" id="bDark">Black out the screen</button>
     <h2 style="margin-top:6px">Show now</h2>
     <p class="hint">Tap a slide to put it on the TV straight away. Pause first to keep it there while you talk.</p>
     <ul class="slides" id="list"></ul>
@@ -148,7 +151,7 @@ const sb = supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY);
 const MEDIA = (CFG.SUPABASE_URL || '').replace(/\/$/, '') + '/storage/v1/object/public/tv/';
 const KIND = { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown', qr: 'QR code' };
 const LIVE = { next_grading: 'Next grading', events: 'Events this month', month: 'Month theme' };
-let slides = [], screen = null, lastPress = 0, pollT = null, helloT = null;
+let slides = [], screen = null, lastPress = 0, pollT = null, helloT = null, dark = false, darkAt = 0;
 
 let toastTimer;
 function toast(msg, ms = 2000) {
@@ -186,14 +189,18 @@ function drawList() {
 // Keeps the TV listening closely (for 10 minutes after the last use)
 async function hello() {
   clearTimeout(helloT);
-  const { error } = await sb.rpc('tv_remote_send', { p_cmd: 'hello', p_slide: null });
+  const { data, error } = await sb.rpc('tv_remote_send', { p_cmd: 'hello', p_slide: null });
   if (error && /function|schema cache/i.test(error.message)) return problem('The remote needs the latest database update: run supabase/tv-setup.sql again in Supabase.');
+  if (data && 'blackout' in data) { dark = !!data.blackout; darkAt = Date.now(); }
   helloT = setTimeout(hello, 4 * 60e3);
 }
 async function press(cmd, slide = null) {
   if (Date.now() - lastPress < 250) return; lastPress = Date.now();
-  const { error } = await sb.rpc('tv_remote_send', { p_cmd: cmd, p_slide: slide });
-  if (error) return toast('Not sent: ' + error.message, 5000);
+  const { data, error } = await sb.rpc('tv_remote_send', { p_cmd: cmd, p_slide: slide });
+  if (error) return toast(/Unknown button/.test(error.message) ? 'Blackout needs the latest database update: run supabase/tv-setup.sql again in Supabase.' : 'Not sent: ' + error.message, 6000);
+  if (data && 'blackout' in data) { dark = !!data.blackout; darkAt = Date.now(); }
+  if (cmd === 'blackout') toast('Blacking out the screen...');
+  if (cmd === 'wake') toast('Turning the screen back on...');
   clearTimeout(helloT); helloT = setTimeout(hello, 4 * 60e3);
   if (navigator.vibrate) try { navigator.vibrate(15); } catch (e) { /* ignore */ }
   if (cmd === 'done') toast('The slideshow carries on.');
@@ -208,8 +215,11 @@ async function poll() {
   $('#conn').innerHTML = listening ? '<span class="dot on"></span>The TV is listening' : online ? '<span class="dot wait"></span>Waking the TV up (up to 20 seconds)...' : '<span class="dot"></span>' + (screen ? 'The TV is offline' : 'No TV has checked in yet');
   const what = screen ? (screen.showing || 'Starting up') : 'Open the TV page on the TV';
   $('#what').textContent = online ? what : '-';
-  const blocked = /^(Party mode|Quiet hours)/.test(what);
-  $('#note').textContent = blocked && online ? 'The remote works again when party mode or quiet hours end.' : '';
+  if (listening && Date.now() - darkAt > 6000) dark = what === 'Blacked out';   // someone else may have changed it
+  $('#bDark').textContent = dark ? 'Turn the screen back on' : 'Black out the screen';
+  $('#bDark').className = 'btn ' + (dark ? 'wake' : 'dark');
+  const blocked = dark || /^(Party mode|Quiet hours)/.test(what);
+  $('#note').textContent = dark ? 'The screen is blacked out until you turn it back on.' : blocked && online ? 'The remote works again when party mode or quiet hours end.' : '';
   const paused = listening && !!d.paused;
   $('#pausedChip').hidden = !paused;
   $('#bPause').querySelector('span').textContent = paused ? 'Play' : 'Pause';
@@ -223,6 +233,7 @@ $('#bNext').onclick = () => press('next');
 $('#bBack').onclick = () => press('back');
 $('#bPause').onclick = () => press($('#bPause').dataset.paused ? 'play' : 'pause');
 $('#bDone').onclick = () => press('done');
+$('#bDark').onclick = () => press(dark ? 'wake' : 'blackout');
 document.addEventListener('visibilitychange', () => { if (!document.hidden && !$('#app').hidden) { hello(); poll(); } });
 
 $('#signInForm').onsubmit = async e => {

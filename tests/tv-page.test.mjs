@@ -591,6 +591,16 @@ try {
   const iHeld = await idx(); await tv4.waitForTimeout(2500);
   ok(await idx() === iHeld && await tv4.evaluate(() => window.__tv.paused()), 'while paused it stays on that slide');
   await page.screenshot({ path: join(SHOTS, 'tv-remote.png') });
+  await page.click('#bDark');
+  await tv4.waitForFunction(() => !!document.querySelector('.quiet') && !document.querySelector('.qlogo'), null, { timeout: 6000 }).catch(() => {});
+  ok(await tv4.isVisible('.quiet') && await tv4.isHidden('#clock'), 'Black out the screen turns the TV black within a few seconds');
+  await page.waitForFunction(() => document.querySelector('#bDark').textContent.includes('back on'), null, { timeout: 5000 }).catch(() => {});
+  ok((await page.textContent('#bDark')).includes('Turn the screen back on') && await page.isDisabled('#bNext'), 'the remote then offers to turn it back on (and the other buttons wait)');
+  await page.screenshot({ path: join(SHOTS, 'tv-remote-dark.png') });
+  await page.click('#bDark');
+  await tv4.waitForFunction(() => !document.querySelector('.quiet'), null, { timeout: 6000 }).catch(() => {});
+  ok(!(await tv4.$('.quiet')) && (await tv4.evaluate(() => window.__tv.state().count)) > 0, 'Turn the screen back on brings the slideshow back');
+  await page.waitForTimeout(1500);
   await page.click('#bDone'); await tv4.waitForFunction(() => !window.__tv.paused(), null, { timeout: 5000 }).catch(() => {});
   ok(!(await tv4.evaluate(() => window.__tv.paused())) && await tv4.isHidden('#pausedTag'), 'Done carries on the slideshow');
   await tvc4.close(); await ctx.close();

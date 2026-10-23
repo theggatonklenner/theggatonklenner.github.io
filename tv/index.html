@@ -137,6 +137,7 @@
   if (!screenId) { screenId = 'tv-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); store.set('tvScreen', screenId); }
   // Tell the editor this TV is on and what it's showing; reload if "Refresh the TV" was pressed
   function showingNow() {
+    if (feed && feed.blackout) return 'Blacked out';
     if (feed && feed.quiet) return 'Quiet hours (' + (feed.quiet === 'black' ? 'black screen' : 'logo') + ')';
     var s = playlist[index]; if (!s) return feed && feed.only ? 'Party mode' : 'Waiting for slides';
     var name = s.title || (s.kind === 'live' ? { next_grading: 'Next grading', events: 'Events this month', month: 'Month theme' }[s.live_kind] : { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown', qr: 'QR code' }[s.kind]);
@@ -402,7 +403,8 @@
     }).then(function (r) { return r.ok ? r.json() : null; }).then(function (r) {
       if (!r || r.error) { remoteOn = false; return; }
       var c = r.cmd; remoteSeq = r.seq;
-      if (c && !feed.only && !feed.quiet) {
+      if (c && (c.cmd === 'blackout' || c.cmd === 'wake')) { load(false); setTimeout(remotePoll, 1200); }   // black out / back on: straight away
+      else if (c && !feed.only && !feed.quiet) {
         if (c.cmd === 'next') next();
         else if (c.cmd === 'back') back();
         else if (c.cmd === 'pause') setPaused(true);

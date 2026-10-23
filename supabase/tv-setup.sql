@@ -101,6 +101,7 @@ alter table public.tv_settings add column if not exists quiet_style text not nul
 alter table public.tv_settings add column if not exists quiet_days jsonb;
 alter table public.tv_settings drop constraint if exists tv_settings_quiet_check;
 alter table public.tv_settings add constraint tv_settings_quiet_check check (quiet_style in ('black', 'logo'));
+alter table public.tv_settings add column if not exists blackout boolean not null default false;     -- "Black out the screen": black until turned back on
 alter table public.tv_settings add column if not exists remote_until timestamptz;               -- phone remote: the TV listens closely until then
 alter table public.tv_settings add column if not exists remote_seq bigint not null default 0;     -- ... numbers each button press
 alter table public.tv_settings add column if not exists remote_cmd jsonb;                         -- ... the last press, e.g. {"cmd": "next"}
@@ -268,6 +269,14 @@ begin
     return jsonb_build_object('error', 'wrong_code');
   end if;
 
+  -- Blacked out from the remote or the editor: a black screen, whatever else is on
+  if s.blackout then
+    return jsonb_build_object(
+      'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false),
+      'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
+      'quiet', 'black', 'blackout', true, 'remote', coalesce(s.remote_until > now(), false));
+  end if;
+
   -- Party mode: just the one slide, until the set time. Started now in the editor, or booked ahead.
   if s.only_slide is not null and s.only_until > now() then
     one_id := s.only_slide; one_until := s.only_until; one_changed := s.updated_at;
@@ -285,7 +294,7 @@ begin
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false),
       'version', greatest(s.updated_at, one_changed), 'slides', jsonb_build_array(one_slide), 'live', '{}'::jsonb, 'today', today,
-      'only', true, 'only_until', one_until);
+      'only', true, 'only_until', one_until, 'remote', coalesce(s.remote_until > now(), false));
   end if;
 
   -- Quiet hours (a party still shows): a black screen or just the logo outside each day's slideshow hours
@@ -300,7 +309,7 @@ begin
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false),
       'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
-      'quiet', s.quiet_style);
+      'quiet', s.quiet_style, 'remote', coalesce(s.remote_until > now(), false));
   end if;
 
   select coalesce(jsonb_agg(jsonb_build_object(
@@ -368,16 +377,17 @@ grant execute on function public.tv_checkin(text, text, text, timestamptz, jsonb
 -- second or two, carries out the newest press, and reports what's on screen.
 create or replace function public.tv_remote_send(p_cmd text, p_slide uuid default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
-declare n bigint;
+declare n bigint; dark boolean;
 begin
   if not public.tv_can('remote') then raise exception 'Your login doesn''t have the TV remote ticked' using errcode = '42501'; end if;
-  if p_cmd not in ('hello', 'next', 'back', 'pause', 'play', 'show', 'done') then raise exception 'Unknown button'; end if;
+  if p_cmd not in ('hello', 'next', 'back', 'pause', 'play', 'show', 'done', 'blackout', 'wake') then raise exception 'Unknown button'; end if;
   update public.tv_settings set
+      blackout = case p_cmd when 'blackout' then true when 'wake' then false else blackout end,
       remote_seq = remote_seq + 1, remote_at = now(),
       remote_cmd = jsonb_build_object('cmd', p_cmd, 'slide', p_slide),
       remote_until = case when p_cmd = 'done' then now() + interval '30 seconds' else now() + interval '10 minutes' end
-   where id = 1 returning remote_seq into n;
-  return jsonb_build_object('seq', n);
+   where id = 1 returning remote_seq, blackout into n, dark;
+  return jsonb_build_object('seq', n, 'blackout', dark);
 end $$;
 revoke all on function public.tv_remote_send(text, uuid) from public, anon;
 grant execute on function public.tv_remote_send(text, uuid) to authenticated;

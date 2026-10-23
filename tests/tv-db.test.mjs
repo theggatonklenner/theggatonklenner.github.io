@@ -243,6 +243,18 @@ await as('tate@ama.test', () => db.query(`select tv_remote_send('done')`));
 await as('tate@ama.test', () => db.exec(`update tv_settings set remote_until = now() - interval '1 second'`));
 ok((await poll(null)).on === false, 'closing the remote lets the TV go back to normal');
 await as('tate@ama.test', () => db.query(`delete from tv_slides where id = $1`, [sid]));
+const bo = (await as('tate@ama.test', () => db.query(`select tv_remote_send('blackout') r`))).rows[0].r;
+let fb = await feedNow();
+ok(bo.blackout === true && fb.blackout && fb.quiet === 'black' && fb.slides.length === 0, 'Black out the screen: the TV gets a black screen');
+const bp = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, theme, party) values ('text', 'Party under blackout', 'party', true) returning id`))).rows[0].id;
+await as('tate@ama.test', () => db.query(`update tv_settings set only_slide = $1, only_until = now() + interval '1 hour'`, [bp]));
+ok((await feedNow()).blackout === true, 'it stays black even during a party');
+ok(!(await tryAs('nobody@ama.test', `select tv_remote_send('wake')`)).ok, 'only people with TV access can black it out or turn it back on');
+await as('remote@ama.test', () => db.query(`select tv_remote_send('wake')`));
+fb = await feedNow();
+ok(!fb.blackout && fb.only === true && fb.remote === true, 'Turn the screen back on (from the remote) brings back what was showing');
+await as('tate@ama.test', () => db.exec(`update tv_settings set only_slide = null, only_until = null`));
+await as('tate@ama.test', () => db.query(`delete from tv_slides where id = $1`, [bp]));
 
 console.log('\nFiles');
 const pol = (await db.query(`select policyname, roles::text r from pg_policies where tablename = 'objects' and policyname like 'tv files%'`)).rows;
