@@ -130,7 +130,7 @@
   // Tell the editor this TV is on and what it's showing; reload if "Refresh the TV" was pressed
   function showingNow() {
     var s = playlist[index]; if (!s) return feed && feed.only ? 'Party mode' : 'Waiting for slides';
-    var name = s.title || (s.kind === 'live' ? { next_grading: 'Next grading', sessions: 'Prep sessions', congrats: 'Congratulations' }[s.live_kind] : { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown' }[s.kind]);
+    var name = s.title || (s.kind === 'live' ? { next_grading: 'Next grading', events: 'Events this month', month: 'Month theme' }[s.live_kind] : { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown' }[s.kind]);
     return (feed.only ? 'Party mode: ' : '') + name + (playlist.length > 1 ? ' (' + (index + 1) + ' of ' + playlist.length + ')' : '');
   }
   function checkIn() {
@@ -223,10 +223,6 @@
       if (s.live_kind === 'next_grading' && live.next_grading && live.next_grading.date) out.push(s);
       if (s.live_kind === 'month' && live.month && live.month.theme) out.push(s);
       if (s.live_kind === 'events' && live.events && live.events.some(function (m) { return m.events.length; })) out.push(s);
-      if (s.live_kind === 'sessions' && live.sessions && live.sessions.length) out.push(s);
-      if (s.live_kind === 'congrats' && live.congrats && live.congrats.length) {
-        for (var i = 0; i < live.congrats.length; i += 10) out.push({ id: s.id + ':' + i, kind: 'live', live_kind: 'congrats', title: s.title, theme: s.theme, seconds: s.seconds, page: live.congrats.slice(i, i + 10) });
-      }
     });
     playlist = out;
   }
@@ -289,14 +285,6 @@
                 (e.note ? '<small>' + esc(e.note) + '</small>' : '') + '</span></div>';
             }).join('') + '</div>';
         }).join('') + '</div></div>';
-    }
-    if (s.live_kind === 'sessions') {
-      return '<div class="card ' + themeOf(s) + '"><div class="belt"></div><div class="kicker">' + esc(s.title || 'Black belt prep sessions') + '</div><div class="rows">' +
-        live.sessions.map(function (x) { return '<div class="r"><b>' + esc(longDate(x.date)) + '</b><span>' + (x.signoff ? 'Sign-off<span class="tag">Must attend</span>' : 'Session ' + esc(x.number)) + '</span></div>'; }).join('') + '</div></div>';
-    }
-    if (s.live_kind === 'congrats') {
-      return '<div class="card ' + themeOf(s) + '"><div class="belt"></div><h1>' + esc(s.title || 'Congratulations') + '</h1><div class="names">' +
-        s.page.map(function (x) { return '<div class="n"><b>' + esc(x.name) + '</b><span>' + esc(x.rank || '') + '</span></div>'; }).join('') + '</div></div>';
     }
     return '';
   }

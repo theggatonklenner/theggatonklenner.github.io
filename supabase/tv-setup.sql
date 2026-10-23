@@ -6,10 +6,10 @@
 -- it shows the slideshow once the screen code (Settings on the editor page) is entered, and only
 -- gets what's on screen (slides, plus the live AMA info below).
 --
--- Live slides fill themselves in from Black Belt Prep:
---   next_grading  the next grading date of the active cycle
---   sessions      the next prep session dates (sign-off marked)
---   congrats      students who passed a grading in the last 45 days, with their new rank
+-- Live slides fill themselves in:
+--   next_grading  the next grading date of the active cycle (from Black Belt Prep)
+--   events        this month's events (and next month's near the end of the month), from tv_events
+--   month         "This is the Month of ...", from tv_months
 --
 -- Countdown slides: "Black belt grading in 12 days", to a set date or the next grading in Black Belt Prep.
 -- They stop showing once the day has passed.
@@ -63,7 +63,7 @@ create table if not exists public.tv_slides (
   body        text,
   media_path  text,                 -- file in the "tv" storage bucket (photos, videos, info slide backgrounds)
   theme       text not null default 'green',
-  live_kind   text check (live_kind in ('next_grading', 'sessions', 'congrats')),
+  live_kind   text check (live_kind in ('next_grading', 'events', 'month')),
   seconds     int check (seconds is null or seconds between 3 and 600),   -- blank = the default
   position    int not null,         -- filled in automatically: new slides go at the end
   enabled     boolean not null default true,
@@ -86,8 +86,9 @@ alter table public.tv_slides add column if not exists count_to text;            
 alter table public.tv_slides drop constraint if exists tv_slides_kind_check;
 alter table public.tv_slides add constraint tv_slides_kind_check check (kind in ('photo', 'video', 'text', 'live', 'countdown'));
 alter table public.tv_slides drop constraint if exists tv_slides_countdown_check;
+delete from public.tv_slides where kind = 'live' and live_kind in ('congrats', 'sessions');   -- these slides were removed
 alter table public.tv_slides drop constraint if exists tv_slides_live_kind_check;
-alter table public.tv_slides add constraint tv_slides_live_kind_check check (live_kind in ('next_grading', 'sessions', 'congrats', 'events', 'month'));
+alter table public.tv_slides add constraint tv_slides_live_kind_check check (live_kind in ('next_grading', 'events', 'month'));
 alter table public.tv_slides add constraint tv_slides_countdown_check check (kind <> 'countdown' or count_to = 'grading' or (count_to = 'date' and event_on is not null));
 
 -- ---------- Booked parties ----------
@@ -256,24 +257,6 @@ begin
        order by c.grading_date limit 1 $q$ into v using today;
     live := live || jsonb_build_object('next_grading', v);
 
-    execute $q$
-      select coalesce(jsonb_agg(x order by x->>'date'), '[]'::jsonb) from (
-        select jsonb_build_object('date', se.session_date, 'number', se.session_number,
-                 'signoff', se.session_number = (select max(s2.session_number) from public.prep_sessions s2 where s2.cycle_id = se.cycle_id)) x
-          from public.prep_sessions se join public.prep_cycles c on c.cycle_id = se.cycle_id
-         where c.status = 'active' and se.session_date >= $1
-         order by se.session_date limit 4) q $q$ into v using today;
-    live := live || jsonb_build_object('sessions', v);
-
-    execute $q$
-      select coalesce(jsonb_agg(jsonb_build_object('name', n, 'rank', r) order by n), '[]'::jsonb) from (
-        select distinct coalesce(nullif(trim(st.certificate_name), ''), st.full_name) n, g.target_rank r
-          from public.prep_grading g
-          join public.prep_students st on st.student_id = g.student_id
-          left join public.prep_cycles c on c.cycle_id = g.cycle_id
-         where g.result = 'passed' and not st.is_test
-           and coalesce(g.grading_date, c.grading_date) between $1 - 45 and $1) q $q$ into v using today;
-    live := live || jsonb_build_object('congrats', v);
   end if;
 
   return jsonb_build_object(

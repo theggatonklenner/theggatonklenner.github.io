@@ -40,7 +40,7 @@ The TV picks up changes within 20 seconds, keeps playing its last slides if the 
 
 - **Photos** are resized to TV size before uploading. A **PDF** (e.g. exported from Canva) works too: each page becomes a slide. **Videos** (MP4 works best) play without sound, up to 50 MB each.
 - **Info slides**: heading, text, a colour, and an optional background photo.
-- **Live slides** fill themselves in from Black Belt Prep: the next grading date, the next prep sessions, and congratulations to students who passed in the last 45 days (certificate names and new rank; nothing else about students). A live slide only shows when there's something to show.
+- **Live slides** fill themselves in: the next grading date (from Black Belt Prep), events this month, and the month theme. A live slide only shows when there's something to show.
 - **Party mode** (top of the editor): show only one thing, like a birthday message (typed, with confetti) or an uploaded birthday image or Canva PDF (pick the page, or **Save all** so each design is one tap next time; designs are named after the child automatically), for 1, 2 or 3 hours, the rest of the day, or until a set time. The TV switches straight to it and goes back to the slideshow by itself; **Back to normal now** ends it early. Party slides are saved (kept out of the slideshow) to reuse.
 - **Book for later** (Party mode): pick what to show, then the date, start and end time. The TV switches to it by itself at the start and back at the end. Upcoming bookings are listed with **Cancel**; two can't overlap.
 - **Countdowns** (Add > Countdown): "Comp · 3 weeks to go" for any event and date, or to the next black belt grading (date from Black Belt Prep). Days under 3 weeks, then weeks; it drops off by itself after the day.

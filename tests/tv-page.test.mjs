@@ -116,19 +116,20 @@ try {
   ok(ph.length === 2 && ph.every(p => files.has(p.media_path) && files.get(p.media_path).type === 'image/jpeg'), 'two photos added at once, resized to JPEG and uploaded');
 
   // Live slides
-  for (const k of ['next_grading', 'congrats', 'sessions']) { await page.click('#addBtn'); await page.click(`[data-add="live:${k}"]`); await toastSays(page, 'Added'); await page.waitForFunction(n => document.querySelectorAll('#list .slide').length === n, 3 + ['next_grading', 'congrats', 'sessions'].indexOf(k) + 1); }
-  ok((await slides()).filter(s => s.kind === 'live').map(s => s.live_kind).join() === 'next_grading,congrats,sessions', 'live slides added (next grading, congratulations, sessions)');
+  ok(!(await page.$('[data-add="live:congrats"]')) && !(await page.$('[data-add="live:sessions"]')), 'there is no Congratulations or Prep sessions slide');
+  for (const k of ['next_grading', 'month']) { await page.click('#addBtn'); await page.click(`[data-add="live:${k}"]`); await toastSays(page, 'Added'); await page.waitForFunction(n => document.querySelectorAll('#list .slide').length === n, 3 + ['next_grading', 'month'].indexOf(k) + 1); }
+  ok((await slides()).filter(s => s.kind === 'live').map(s => s.live_kind).join() === 'next_grading,month', 'live slides added (next grading, month theme)');
   await page.screenshot({ path: join(SHOTS, 'tv-editor.png'), fullPage: true });
 
-  // Reorder: move the congratulations up one
-  const congratsId = (await db.query(`select id from tv_slides where live_kind = 'congrats'`)).rows[0].id;
-  await page.click(`[data-up="${congratsId}"]`); await page.waitForTimeout(600);
-  ok((await slides()).map(s => s.live_kind || s.kind).join() === 'text,photo,photo,congrats,next_grading,sessions', 'slides can be moved up and down');
+  // Reorder: move the month theme up one
+  const monthId = (await db.query(`select id from tv_slides where live_kind = 'month'`)).rows[0].id;
+  await page.click(`[data-up="${monthId}"]`); await page.waitForTimeout(600);
+  ok((await slides()).map(s => s.live_kind || s.kind).join() === 'text,photo,photo,month,next_grading', 'slides can be moved up and down');
 
   // Turn one off, schedule one
-  const sessionsId = (await db.query(`select id from tv_slides where live_kind = 'sessions'`)).rows[0].id;
-  await page.uncheck(`[data-on="${sessionsId}"]`); await toastSays(page, 'Hidden');
-  ok((await slides()).find(s => s.live_kind === 'sessions').enabled === false, 'a slide can be hidden from the TV with one tap');
+  const hideId = (await db.query(`select id from tv_slides where kind = 'photo' order by position desc limit 1`)).rows[0].id;
+  await page.uncheck(`[data-on="${hideId}"]`); await toastSays(page, 'Hidden');
+  ok((await db.query(`select enabled from tv_slides where id = $1`, [hideId])).rows[0].enabled === false, 'a slide can be hidden from the TV with one tap');
   await page.click('#list [data-open]:has-text("No classes on Monday")'); await page.waitForSelector('#slForm');
   const nextWeek = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
   await page.fill('#slUntil', nextWeek); await page.click('#slSave'); await toastSays(page, 'Saved');
@@ -152,7 +153,7 @@ try {
   await page.fill('#codeInput', CODE.toLowerCase()); await page.press('#codeInput', 'Enter');
   await page.waitForSelector('.layer.on');
   const st = await page.evaluate(() => window.__tv.state());
-  ok(st.count === 5, 'plays the 5 slides that are on (the hidden one is left out)');
+  ok(st.count === 3, 'plays the 3 slides that are on (the hidden one, and the month theme with no theme set, are left out)');
   ok(await page.isVisible('#clock') && await page.isVisible('#logo'), 'clock and AMA logo in the corners');
   const seen = {};
   for (let i = 0; i < st.count; i++) {
@@ -164,23 +165,22 @@ try {
   }
   const all = Object.values(seen).join(' | ');
   ok(all.includes('No classes on Monday') && all.includes('Back on Tuesday'), 'info slide shows the heading and text');
-  ok(all.includes('Kara Jane Lee') && all.includes('Sam Park') && all.includes('Probationary Black Belt'), 'congratulations slide lists the new black belts and ranks');
   ok(/weeks to go|days to go/.test(all) && /Next black belt grading/i.test(all), 'next grading slide shows the date and how long to go');
-  ok(!all.includes('Sign-off'), 'the hidden sessions slide is not shown');
+  ok(!all.includes('This is the Month of'), 'the month theme slide waits until a theme is set');
   ok((await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1 && document.documentElement.scrollHeight <= innerHeight + 1)), 'fits the screen with no scrolling');
 
   // Changes reach the TV
-  await db.query(`update tv_slides set enabled = true where live_kind = 'sessions'`);
+  await db.query(`update tv_slides set enabled = true where id = $1`, [hideId]);
   await page.evaluate(() => window.__tv.reload());
   await page.waitForTimeout(500);
   await page.evaluate(() => window.__tv.next());
-  await page.waitForFunction(() => window.__tv.state().count === 6, null, { timeout: 5000 }).catch(() => {});
-  ok((await page.evaluate(() => window.__tv.state())).count === 6, 'a change in the editor reaches the TV (picked up at the next slide)');
+  await page.waitForFunction(() => window.__tv.state().count === 4, null, { timeout: 5000 }).catch(() => {});
+  ok((await page.evaluate(() => window.__tv.state())).count === 4, 'a change in the editor reaches the TV (picked up at the next slide)');
 
   // Remembered code and no connection
   await ctx.route(`${BASE}/rest/**`, r => r.abort());
   await page.reload(); await page.waitForSelector('.layer.on', { timeout: 8000 });
-  ok(await page.isHidden('#codeScreen') && (await page.evaluate(() => window.__tv.state())).count === 6, 'remembers the code, and keeps playing its saved slides with no connection');
+  ok(await page.isHidden('#codeScreen') && (await page.evaluate(() => window.__tv.state())).count === 4, 'remembers the code, and keeps playing its saved slides with no connection');
   ok(await page.evaluate(() => document.body.className.includes('offline')), 'shows a small dot when offline');
   await ctx.unroute(`${BASE}/rest/**`);
 

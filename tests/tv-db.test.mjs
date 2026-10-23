@@ -82,8 +82,6 @@ f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
 const today = new Date(f.today + 'T00:00:00Z');
 const plus = n => { const d = new Date(today); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 ok(f.live.next_grading && f.live.next_grading.date === plus(43) && f.live.next_grading.cycle === 'TV cycle', 'next grading date of the active cycle');
-ok(f.live.sessions.map(s => s.date).join() === [plus(1), plus(15), plus(29)].join() && f.live.sessions[2].signoff === true && f.live.sessions[0].signoff === false, 'upcoming sessions only, with the sign-off marked');
-ok(f.live.congrats.map(c => c.name + ':' + c.rank).join() === 'Kara Jane Lee:Probationary Black Belt,Sam Park:2nd Dan', 'congratulations: recent passes with certificate names; old passes and test records left out');
 ok(JSON.stringify(f).indexOf('student_id') === -1 && JSON.stringify(f).indexOf('"T1"') === -1, 'the TV never gets Student IDs or anything else about students');
 
 console.log('\nParty mode');
@@ -141,6 +139,7 @@ ok((await as('tate@ama.test', () => db.query(`select reload_at > now() - interva
 ok((await ck(code, 'screen-fast01', fast)).reload === true, 'a TV with its clock set wrong still refreshes');
 ok((await ck(code, 'bad screen!', started)).error === 'bad_screen', 'odd screen names are refused');
 
+ok(!(await tryAs('tate@ama.test', `insert into tv_slides (kind, live_kind) values ('live', 'congrats')`)).ok, 'the Congratulations and Prep sessions slides are gone');
 console.log('\nEvents calendar');
 const feedEvents = async () => { const f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f; return f.only ? null : f.live.events; };
 const D = (await db.query(`select (now() at time zone 'Australia/Sydney')::date::text t, date_trunc('month', (now() at time zone 'Australia/Sydney'))::date::text m0,
