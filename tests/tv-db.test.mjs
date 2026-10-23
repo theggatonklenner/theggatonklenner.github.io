@@ -214,10 +214,14 @@ ok(!(await tryAs('tate@ama.test', `update tv_settings set quiet_style = 'off' wh
 const dow = (await db.query(`select extract(dow from ${syd})::int d, to_char(${syd} - interval '1 hour', 'HH24:MI') a, to_char(${syd} + interval '1 hour', 'HH24:MI') b, to_char(${syd} + interval '2 hours', 'HH24:MI') c`)).rows[0];
 const setDays = async days => as('tate@ama.test', () => db.query(`update tv_settings set quiet_on = true, quiet_days = $1::jsonb where id = 1`, [JSON.stringify(days)]));
 const other = (dow.d + 3) % 7;
-await setDays({ [dow.d]: { on: dow.a, off: dow.b }, [other]: null });
+// near midnight 'an hour from now' wraps into tomorrow, so use whole-day hours there
+const late = dow.b < dow.a || dow.c < dow.b;
+await setDays({ [dow.d]: late ? { on: '00:00', off: '23:59' } : { on: dow.a, off: dow.b }, [other]: null });
 ok(!(await feedNow()).quiet, "each day has its own hours: during today's hours the slideshow plays");
-await setDays({ [dow.d]: { on: dow.b, off: dow.c }, [other]: { on: dow.a, off: dow.b } });
-ok((await feedNow()).quiet, "before today's hours start the TV is quiet (another day's hours don't count)");
+if (!late) {
+  await setDays({ [dow.d]: { on: dow.b, off: dow.c }, [other]: { on: dow.a, off: dow.b } });
+  ok((await feedNow()).quiet, "before today's hours start the TV is quiet (another day's hours don't count)");
+}
 await setDays({ [dow.d]: null });
 ok((await feedNow()).quiet, 'a day marked closed is quiet all day');
 await as('tate@ama.test', () => db.exec(`update tv_settings set quiet_on = false, quiet_days = null where id = 1`));
