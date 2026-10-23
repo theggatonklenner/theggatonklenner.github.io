@@ -217,12 +217,12 @@ async function press(cmd, slide = null) {
 }
 async function poll() {
   clearTimeout(pollT);
-  const { data } = await sb.from('tv_screens').select('*').eq('display', display).order('last_seen', { ascending: false }).limit(1);
-  screen = (data || [])[0] || null;
+  const { data } = await sb.from('tv_screens').select('*').eq('display', display).order('last_seen', { ascending: false });
+  screen = (data || [])[0] || null;   // the one heard from most recently (with several tablets they all follow the remote)
   const age = screen ? (Date.now() - new Date(screen.last_seen)) / 1000 : Infinity;
   const listening = age < 8, online = age < 75, d = (screen && screen.details) || {};
-  const N = noun();
-  $('#conn').innerHTML = listening ? `<span class="dot on"></span>The ${N} is listening` : online ? `<span class="dot wait"></span>Waking the ${N} up (up to 20 seconds)...` : '<span class="dot"></span>' + (screen ? `The ${N} is offline` : `No ${N} has checked in yet`);
+  const N = noun(), heard = (data || []).filter(x => Date.now() - new Date(x.last_seen) < 8000).length;
+  $('#conn').innerHTML = listening ? `<span class="dot on"></span>${heard > 1 ? `${heard} ${N}s are listening` : `The ${N} is listening`}` : online ? `<span class="dot wait"></span>Waking the ${N} up (up to 20 seconds)...` : '<span class="dot"></span>' + (screen ? `The ${N} is offline` : `No ${N} has checked in yet`);
   const what = screen ? (screen.showing || 'Starting up') : `Open the ${N}'s link on the ${N}`;
   $('#what').textContent = online ? what : '-';
   if (listening && Date.now() - darkAt > 6000) dark = what === 'Blacked out';   // someone else may have changed it

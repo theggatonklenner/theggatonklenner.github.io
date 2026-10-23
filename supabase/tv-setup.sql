@@ -190,12 +190,16 @@ create table if not exists public.tv_screens (
   details     jsonb not null default '{}'::jsonb
 );
 alter table public.tv_screens add column if not exists loaded_at timestamptz;
-alter table public.tv_screens add column if not exists display text not null default 'tv';   -- the TV or a tablet   -- server time of the first check-in after the page loaded
+alter table public.tv_screens add column if not exists display text not null default 'tv';   -- the TV or a tablet
+alter table public.tv_screens add column if not exists name text;                              -- e.g. "Front desk", given in the editor
+alter table public.tv_screens add column if not exists first_seen timestamptz not null default now();   -- server time of the first check-in after the page loaded
 alter table public.tv_screens enable row level security;
 drop policy if exists "staff see screens" on public.tv_screens;
 drop policy if exists "staff remove screens" on public.tv_screens;
 create policy "staff see screens" on public.tv_screens for select to authenticated using (public.tv_can('remote'));
 create policy "staff remove screens" on public.tv_screens for delete to authenticated using (public.tv_is_staff());
+drop policy if exists "staff name screens" on public.tv_screens;
+create policy "staff name screens" on public.tv_screens for update to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
 alter table public.tv_slides alter column position drop default;
 
 create or replace function public.tv_stamp() returns trigger language plpgsql as $$

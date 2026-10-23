@@ -287,6 +287,9 @@ ok((await feedOf(tab.screen_code)).blackout === true && !(await feedOf(code)).bl
 await as('tate@ama.test', () => db.query(`select tv_remote_send('wake', null, 'tablet')`));
 await as(null, () => db.query(`select tv_checkin($1, 'tablet-front1', 'Tablet notice', now(), '{}'::jsonb)`, [tab.screen_code]));
 ok((await db.query(`select display from tv_screens where screen_id = 'tablet-front1'`)).rows[0].display === 'tablet', 'tablets check in as tablets');
+ok((await tryAs('tate@ama.test', `update tv_screens set name = 'Front desk' where screen_id = 'tablet-front1'`)).n === 1 && !(await tryAs('remote@ama.test', `update tv_screens set name = 'x'`)).n, 'staff can name each tablet');
+await as(null, () => db.query(`select tv_checkin($1, 'tablet-front1', 'Next', now(), '{}'::jsonb)`, [tab.screen_code]));
+ok((await db.query(`select name from tv_screens where screen_id = 'tablet-front1'`)).rows[0].name === 'Front desk', 'the name stays when the tablet checks in again');
 ok(!(await tryAs('tate@ama.test', `update tv_settings set screen_code = '${code}' where id = 2`)).ok, 'two displays cannot share a code');
 await as('tate@ama.test', () => db.query(`delete from tv_slides where id in ($1, $2)`, [tsl, tparty]));
 await db.exec(`delete from tv_screens where screen_id = 'tablet-front1'; update tv_settings set remote_until = null`);

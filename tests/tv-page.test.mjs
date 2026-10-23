@@ -688,6 +688,23 @@ try {
   ok(fits && await tabp.evaluate(() => getComputedStyle(document.querySelector('.clock')).fontSize) !== '0px', 'everything fits the upright screen');
   ok((await tabp.textContent('#hint')).includes('Tap the screen'), 'on a tablet it says to tap for full screen');
   ok(await tabp.isVisible('#banner') && (await tabp.textContent('#banner')) === 'Tap to sign in', 'the tablet shows "Tap to sign in" along the bottom');
+  // A second tablet on the same link
+  const tabc2 = await browser.newContext({ viewport: { width: 800, height: 1280 }, isMobile: true, hasTouch: true });
+  await tabc2.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+  await tabc2.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+  const tabp2 = await tabc2.newPage(); await tabp2.goto(BASE + `/tv/index.html?code=${TCODE}`); await tabp2.waitForSelector('.layer.on');
+  ok((await tabp2.evaluate(() => window.__tv.state().count)) === (await tabp.evaluate(() => window.__tv.state().count)), 'a second tablet on the same link plays the same slides');
+  await tabp.evaluate(() => window.__tv.checkIn()); await tabp2.evaluate(() => window.__tv.checkIn()); await tabp2.waitForTimeout(800);
+  ({ ctx, page } = await context({ width: 390, height: 844 }));
+  await page.goto(BASE + '/tv/edit/index.html?display=tablet');
+  await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+  await page.waitForSelector('#status:not([hidden])');
+  ok((await page.textContent('#status')).includes('2 of 2 tablets online') && (await page.textContent('#status')).includes('Tablet 1') && (await page.textContent('#status')).includes('Tablet 2'), 'the editor lists each tablet');
+  await page.click('#status [data-name-tv]'); await page.waitForSelector('#nmIn'); await page.fill('#nmIn', 'Front desk'); await page.click('#nmSave');
+  await page.waitForFunction(() => document.querySelector('#status').textContent.includes('Front desk:'), null, { timeout: 5000 }).catch(() => {});
+  ok((await page.textContent('#status')).includes('Front desk: Showing'), 'a tablet can be given a name');
+  await page.locator('#status').screenshot({ path: join(SHOTS, 'tablets-status.png') });
+  await ctx.close(); await tabc2.close();
   await tabc.close();
   await db.query(`delete from tv_slides where display = 'tablet'`);
 

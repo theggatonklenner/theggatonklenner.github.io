@@ -324,7 +324,7 @@ async function load() {
   state.templates = tp.error ? null : (tp.data || []);   // null: database not updated for posters yet
   const [bk, sc, fd] = await Promise.all([
     sb.from('tv_party_bookings').select('*').gt('ends_at', new Date().toISOString()).order('starts_at'),
-    sb.from('tv_screens').select('*').eq('display', state.display).order('last_seen', { ascending: false }),
+    sb.from('tv_screens').select('*').eq('display', state.display).order('first_seen').order('screen_id'),
     settings ? sb.rpc('tv_feed', { p_code: settings.screen_code }) : Promise.resolve({})
   ]);
   state.bookings = bk.error ? null : mine(bk.data || []);    // null: database not updated for bookings yet
@@ -385,7 +385,7 @@ function draw() {
   $('#remoteBtn').href = state.display === 'tablet' ? '../remote/?display=tablet' : '../remote/';
   $('#screenLink').textContent = screenLink();
   $('#linkHint').innerHTML = state.display === 'tablet'
-    ? 'On each tablet, open this link (or scan the QR code with its camera). It starts playing straight away, upright. Tap the screen for full screen, and add it to the home screen so it opens with one tap.'
+    ? 'On each tablet, open this link (or scan the QR code with its camera); use the same link on as many tablets as you like. It starts playing straight away, upright. Tap the screen for full screen, and add it to the home screen so it opens with one tap.'
     : 'On the TV, open the web browser and go to this link, or go to <b>theggatonklenner.github.io/tv</b> and type the code once. Press OK for full screen.';
   drawStatus(); drawEvents();
   $('#list').innerHTML = list.length ? list.map((s, i) => {
@@ -889,13 +889,14 @@ function drawStatus() {
     ${list.length ? `<ul class="screens">${list.map((x, i) => {
       const live = Date.now() - new Date(x.last_seen) < ONLINE_MS;
       const what = x.showing ? esc(x.showing) : 'Starting up';
-      return `<li><div class="grow"><b>${list.length > 1 ? `${N === 'TV' ? 'TV' : 'Tablet'} ${i + 1}: ` : ''}${live ? 'Showing: ' + what : 'Offline'}</b>
+      const label = x.name ? esc(x.name) : list.length > 1 ? `${N === 'TV' ? 'TV' : 'Tablet'} ${i + 1}` : '';
+      return `<li><div class="grow"><b>${label ? label + ': ' : ''}${live ? 'Showing: ' + what : 'Offline'}</b>
         <div>${live ? `Checked in ${esc(ago(x.last_seen))}` : `Last seen ${esc(ago(x.last_seen))}${x.showing ? `, showing ${what}` : ''}`}${x.started_at ? ` · page loaded ${esc(ago(x.started_at))}` : ''}</div></div>
-        ${!live ? `<button class="btn sm" data-forget-tv="${esc(x.screen_id)}">Remove</button>` : ''}</li>`;
+        <div class="row" style="flex-wrap:nowrap"><button class="btn sm" data-name-tv="${esc(x.screen_id)}">${x.name ? 'Rename' : 'Name'}</button>${!live ? `<button class="btn sm" data-forget-tv="${esc(x.screen_id)}">Remove</button>` : ''}</div></li>`;
     }).join('')}</ul>` : ''}
     ${'blackout' in state.settings ? (state.settings.blackout
-      ? `<div class="row" style="background:#111;color:#fff;border-radius:10px;padding:10px 12px"><span class="grow"><b>The screen is blacked out</b> until you turn it back on.</span><button class="btn sm" id="tvDark" style="background:var(--gold);border-color:var(--gold);color:var(--on-gold)">Turn the screen back on</button></div>`
-      : `<div class="row"><button class="btn" id="tvDark" style="background:#111;border-color:#111;color:#fff">Black out the screen</button><span class="hint grow">Black until you turn it back on, even during a party.</span></div>`) : ''}`;
+      ? `<div class="row" style="background:#111;color:#fff;border-radius:10px;padding:10px 12px"><span class="grow"><b>${N === 'TV' ? 'The screen is' : 'The tablets are'} blacked out</b> until you turn ${N === 'TV' ? 'it' : 'them'} back on.</span><button class="btn sm" id="tvDark" style="background:var(--gold);border-color:var(--gold);color:var(--on-gold)">Turn ${N === 'TV' ? 'the screen' : 'them'} back on</button></div>`
+      : `<div class="row"><button class="btn" id="tvDark" style="background:#111;border-color:#111;color:#fff">Black out the ${N === 'TV' ? 'screen' : 'tablets'}</button><span class="hint grow">Black until you turn it back on, even during a party.</span></div>`) : ''}`;
   if ($('#tvDark')) $('#tvDark').onclick = async () => {
     const on = !state.settings.blackout; $('#tvDark').disabled = true;
     const { error } = await sb.rpc('tv_remote_send', { p_cmd: on ? 'blackout' : 'wake', p_slide: null, p_display: state.display });
@@ -910,6 +911,19 @@ function drawStatus() {
     setTimeout(pollStatus, 25e3);
     setTimeout(() => { const b = $('#tvReload'); if (b) b.disabled = false; }, 5000);
   };
+  $$('#status [data-name-tv]').forEach(b => b.onclick = () => {
+    const x = state.screens.find(y => y.screen_id === b.dataset.nameTv); if (!x) return;
+    openDlg(`<form class="dlg" id="nmForm"><div class="dlg-head"><div><h3>Name this ${noun()}</h3><p class="hint">So you can tell them apart, e.g. Front desk. Showing: ${esc(x.showing || '-')}</p></div><button class="x" data-close>Close</button></div>
+      <div class="field"><label for="nmIn">Name</label><input type="text" id="nmIn" maxlength="40" value="${esc(x.name || '')}" placeholder="e.g. Front desk"></div>
+      <div class="row" style="justify-content:flex-end"><button class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="nmSave">Save</button></div></form>`);
+    $('#nmIn').focus();
+    $('#nmForm').onsubmit = async e => {
+      e.preventDefault();
+      const { error } = await sb.from('tv_screens').update({ name: $('#nmIn').value.trim() || null }).eq('screen_id', x.screen_id);
+      if (error) return toast('Not saved: ' + error.message, 5000);
+      dlg.close(); toast('Saved'); pollStatus();
+    };
+  });
   $$('#status [data-forget-tv]').forEach(b => b.onclick = async () => {
     const { error } = await sb.from('tv_screens').delete().eq('screen_id', b.dataset.forgetTv);
     if (error) return toast('Not removed: ' + error.message, 5000);
@@ -919,7 +933,7 @@ function drawStatus() {
 async function pollStatus() {
   if ($('#app').hidden || state.screens === null) return;
   const [{ data, error }, bk] = await Promise.all([
-    sb.from('tv_screens').select('*').eq('display', state.display).order('last_seen', { ascending: false }),
+    sb.from('tv_screens').select('*').eq('display', state.display).order('first_seen').order('screen_id'),
     state.bookings ? sb.from('tv_party_bookings').select('*').gt('ends_at', new Date().toISOString()).order('starts_at') : Promise.resolve({})
   ]);
   if (!error) { state.screens = data || []; drawStatus(); }
