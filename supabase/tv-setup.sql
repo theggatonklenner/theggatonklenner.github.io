@@ -86,6 +86,8 @@ alter table public.tv_slides add column if not exists count_to text;            
 alter table public.tv_slides drop constraint if exists tv_slides_kind_check;
 alter table public.tv_slides add constraint tv_slides_kind_check check (kind in ('photo', 'video', 'text', 'live', 'countdown'));
 alter table public.tv_slides drop constraint if exists tv_slides_countdown_check;
+alter table public.tv_slides drop constraint if exists tv_slides_live_kind_check;
+alter table public.tv_slides add constraint tv_slides_live_kind_check check (live_kind in ('next_grading', 'sessions', 'congrats', 'events'));
 alter table public.tv_slides add constraint tv_slides_countdown_check check (kind <> 'countdown' or count_to = 'grading' or (count_to = 'date' and event_on is not null));
 
 -- ---------- Booked parties ----------
@@ -164,6 +166,29 @@ alter table public.tv_poster_templates enable row level security;
 drop policy if exists "staff edit poster templates" on public.tv_poster_templates;
 create policy "staff edit poster templates" on public.tv_poster_templates for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
 
+-- ---------- Events calendar (the "Events this month" live slide) ----------
+create table if not exists public.tv_events (
+  id          uuid primary key default gen_random_uuid(),
+  starts_on   date not null,
+  ends_on     date check (ends_on is null or ends_on >= starts_on),   -- empty: a one-day event
+  title       text not null check (length(trim(title)) > 0),
+  note        text,                                                    -- e.g. "1:30 pm, Marrickville"
+  created_by  text default lower(auth.jwt() ->> 'email'),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists tv_events_dates_idx on public.tv_events (starts_on);
+create table if not exists public.tv_months (       -- e.g. October: "Month of Health & Nutrition"
+  month       date primary key check (extract(day from month) = 1),
+  theme       text not null check (length(trim(theme)) > 0)
+);
+alter table public.tv_events enable row level security;
+alter table public.tv_months enable row level security;
+drop policy if exists "staff edit events" on public.tv_events;
+drop policy if exists "staff edit months" on public.tv_months;
+create policy "staff edit events" on public.tv_events for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
+create policy "staff edit months" on public.tv_months for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
+
 -- ---------- What the TV gets (no sign-in, screen code only) ----------
 create or replace function public.tv_feed(p_code text) returns jsonb
   language plpgsql stable security definer set search_path = public as $$
@@ -172,6 +197,9 @@ declare
   today date := (now() at time zone 'Australia/Sydney')::date;
   slides jsonb; live jsonb := '{}'::jsonb; v jsonb; changed timestamptz; one_slide jsonb;
   one_id uuid; one_until timestamptz; one_changed timestamptz;
+  m0 date := date_trunc('month', (now() at time zone 'Australia/Sydney'))::date;   -- this month
+  m1 date := (date_trunc('month', (now() at time zone 'Australia/Sydney')) + interval '1 month')::date;   -- next month
+  two boolean;
 begin
   select * into s from public.tv_settings where id = 1;
   if not found or upper(trim(coalesce(p_code, ''))) <> s.screen_code then
@@ -206,6 +234,16 @@ begin
     from public.tv_slides t
    where t.enabled and not t.party and (t.starts_on is null or t.starts_on <= today) and (t.ends_on is null or t.ends_on >= today)
      and not (t.kind = 'countdown' and t.count_to = 'date' and t.event_on < today);
+
+  -- Events: what's left of this month; in the last 10 days of the month (or once this month is over), next month too
+  two := today >= m1 - 10 or not exists (select 1 from public.tv_events e where coalesce(e.ends_on, e.starts_on) >= today and e.starts_on < m1);
+  select coalesce(jsonb_agg(jsonb_build_object('month', q.mm, 'theme', (select mt.theme from public.tv_months mt where mt.month = q.mm), 'events', (
+           select coalesce(jsonb_agg(jsonb_build_object('start', e.starts_on, 'end', e.ends_on, 'title', e.title, 'note', e.note) order by e.starts_on, e.ends_on nulls first, e.title), '[]'::jsonb)
+             from public.tv_events e
+            where coalesce(e.ends_on, e.starts_on) >= today
+              and greatest(date_trunc('month', e.starts_on)::date, m0) = q.mm)) order by q.mm), '[]'::jsonb)
+    into v from (select m0 mm union all select m1 where two) q;
+  live := live || jsonb_build_object('events', v);
 
   -- Live AMA info (only if Black Belt Prep is set up in this project)
   if to_regclass('public.prep_cycles') is not null then

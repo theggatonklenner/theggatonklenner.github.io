@@ -141,6 +141,31 @@ ok((await as('tate@ama.test', () => db.query(`select reload_at > now() - interva
 ok((await ck(code, 'screen-fast01', fast)).reload === true, 'a TV with its clock set wrong still refreshes');
 ok((await ck(code, 'bad screen!', started)).error === 'bad_screen', 'odd screen names are refused');
 
+console.log('\nEvents calendar');
+const feedEvents = async () => { const f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f; return f.only ? null : f.live.events; };
+const D = (await db.query(`select (now() at time zone 'Australia/Sydney')::date::text t, date_trunc('month', (now() at time zone 'Australia/Sydney'))::date::text m0,
+  (date_trunc('month', (now() at time zone 'Australia/Sydney')) + interval '1 month')::date::text m1,
+  (now() at time zone 'Australia/Sydney')::date >= (date_trunc('month', (now() at time zone 'Australia/Sydney')) + interval '1 month')::date - 10 two`)).rows[0];
+ok(!(await tryAs('nobody@ama.test', `insert into tv_events (starts_on, title) values (current_date, 'X')`)).ok, 'only staff can add events');
+ok(!(await tryAs('tate@ama.test', `insert into tv_events (starts_on, ends_on, title) values ('2026-05-05', '2026-05-01', 'X')`)).ok, 'an event cannot end before it starts');
+await as('tate@ama.test', () => db.query(`insert into tv_events (starts_on, ends_on, title, note) values
+  ($1::date, null, 'Today thing', '1:30 pm'), ($1::date - 1, null, 'Yesterday thing', null),
+  ($2::date - 3, $1::date, 'Started last month', null), ($3::date + 2, null, 'Next month thing', null),
+  ($3::date + interval '1 month' + interval '3 days', null, 'Far off', null)`, [D.t, D.m0, D.m1]));
+await as('tate@ama.test', () => db.query(`insert into tv_months (month, theme) values ($1, 'Month of Testing')`, [D.m0]));
+let ev = await feedEvents();
+const titles = m => (m ? m.events.map(e => e.title) : []);
+ok(ev[0].month === D.m0 && ev[0].theme === 'Month of Testing', 'the TV gets this month with its theme');
+ok(titles(ev[0]).includes('Today thing') && ev[0].events.find(e => e.title === 'Today thing').note === '1:30 pm', "this month's events are listed, with notes");
+ok(!JSON.stringify(ev).includes('Yesterday thing'), 'events that are over are left off');
+ok(titles(ev[0]).includes('Started last month'), 'an event that started last month and is still on shows under this month');
+ok(!JSON.stringify(ev).includes('Far off'), 'only this month and next month, never the whole year');
+ok(D.two ? (ev.length === 2 && titles(ev[1]).includes('Next month thing')) : ev.length === 1, `next month shows only in the last 10 days of the month (${D.two ? 'it is now' : 'not yet'})`);
+await as('tate@ama.test', () => db.query(`delete from tv_events where title in ('Today thing', 'Started last month')`));
+ev = await feedEvents();
+ok(ev.length === 2 && ev[0].events.length === 0 && titles(ev[1]).includes('Next month thing'), 'once this month has nothing left, next month shows');
+await as('tate@ama.test', () => db.exec(`delete from tv_events; delete from tv_months`));
+
 console.log('\nFiles');
 const pol = (await db.query(`select policyname, roles::text r from pg_policies where tablename = 'objects' and policyname like 'tv files%'`)).rows;
 ok(pol.length === 4 && pol.every(p => p.r.includes('authenticated') && !p.r.includes('anon')), 'only signed-in staff can add, change or remove TV files');

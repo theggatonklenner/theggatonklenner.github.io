@@ -52,6 +52,19 @@
   .rows .r { display: flex; align-items: baseline; justify-content: space-between; font-size: 3.6vw; padding: 1.6vh 0; border-bottom: .25vh solid rgba(255,255,255,.25); }
   .t-gold .rows .r, .t-light .rows .r { border-bottom-color: rgba(0,0,0,.15); }
   .rows .r b { font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-size: 4.2vw; }
+  .cal { display: flex; font-size: 2.2vw; margin-top: 1vh; }
+  .cal .mon { flex: 1; min-width: 0; }
+  .cal .mon + .mon { margin-left: 5vw; }
+  .cal h2 { font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-size: 2em; line-height: 1; margin: 0; }
+  .cal .theme { font-size: .85em; opacity: .8; margin-top: .3em; }
+  .cal .e { display: flex; align-items: baseline; padding: .45em 0; border-bottom: .2vh solid rgba(255,255,255,.22); }
+  .cal .theme + .e, .cal h2 + .e { margin-top: .5em; }
+  .t-gold .cal .e, .t-light .cal .e { border-bottom-color: rgba(0,0,0,.15); }
+  .cal .e b { flex: none; width: 4.8em; font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-size: 1.1em; }
+  .cal .e span { flex: 1; min-width: 0; }
+  .cal .e small { display: block; font-size: .72em; opacity: .75; }
+  .cal .e .tag { font-size: .7em; }
+  .cal .none { opacity: .7; margin-top: .6em; }
   .tag { display: inline-block; font-size: 2vw; font-weight: 700; padding: .4vh 1.2vw; border-radius: 99px; background: #f2d500; color: #16211b; margin-left: 1.2vw; vertical-align: middle; }
   .names { display: flex; flex-wrap: wrap; margin: 1vh -1vw 0; }
   .names .n { width: 50%; box-sizing: border-box; padding: 1.4vh 1vw; }
@@ -183,6 +196,13 @@
   function d(iso) { var p = String(iso).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
   function longDate(iso) { var x = d(iso); return DAYS[x.getDay()] + ' ' + x.getDate() + ' ' + MONTHS[x.getMonth()]; }
   function shortDate(iso) { var x = d(iso); return DAYS[x.getDay()].slice(0, 3) + ' ' + x.getDate() + ' ' + MONTHS[x.getMonth()].slice(0, 3); }
+  // "Sat 24", "6-9", "28 Sep - 2 Oct" (the month is in the heading, so only shown when it differs)
+  function eventDates(e, month) {
+    var a = d(e.start), b = e.end ? d(e.end) : null, m = d(month).getMonth(), sh = function (x) { return MONTHS[x.getMonth()].slice(0, 3); };
+    if (!b || e.end === e.start) return DAYS[a.getDay()].slice(0, 3) + ' ' + a.getDate();
+    if (a.getMonth() === m && b.getMonth() === m) return a.getDate() + '\u2013' + b.getDate();
+    return a.getDate() + (a.getMonth() !== m || b.getMonth() !== m ? ' ' + sh(a) : '') + ' \u2013 ' + b.getDate() + ' ' + sh(b);
+  }
   function daysTo(iso) { return Math.round((d(iso) - d(feed.today)) / 86400000); }
   function untilText(iso) {
     var days = Math.round((d(iso) - d(feed.today)) / 86400000);
@@ -200,6 +220,7 @@
       }
       if (s.kind !== 'live') { out.push(s); return; }
       if (s.live_kind === 'next_grading' && live.next_grading && live.next_grading.date) out.push(s);
+      if (s.live_kind === 'events' && live.events && live.events.some(function (m) { return m.events.length; })) out.push(s);
       if (s.live_kind === 'sessions' && live.sessions && live.sessions.length) out.push(s);
       if (s.live_kind === 'congrats' && live.congrats && live.congrats.length) {
         for (var i = 0; i < live.congrats.length; i += 10) out.push({ id: s.id + ':' + i, kind: 'live', live_kind: 'congrats', title: s.title, theme: s.theme, seconds: s.seconds, page: live.congrats.slice(i, i + 10) });
@@ -249,6 +270,18 @@
       var g = live.next_grading;
       return '<div class="card ' + themeOf(s) + '"><div class="belt"></div><div class="kicker">' + esc(s.title || 'Next black belt grading') + '</div><div class="big">' + esc(longDate(g.date)) + '</div><div class="sub">' + esc(untilText(g.date)) + '</div></div>';
     }
+    if (s.live_kind === 'events') {
+      var ms = live.events.filter(function (m) { return m.events.length; });
+      return '<div class="card ' + themeOf(s) + '"><div class="belt"></div><div class="kicker">' + esc(s.title || "What's on at AMA") + '</div><div class="cal">' +
+        ms.map(function (m) {
+          return '<div class="mon"><h2>' + esc(MONTHS[d(m.month).getMonth()]) + '</h2>' + (m.theme ? '<div class="theme">' + esc(m.theme) + '</div>' : '') +
+            m.events.map(function (e) {
+              var on = e.end && e.end !== e.start && daysTo(e.start) <= 0, isToday = daysTo(e.start) === 0 && !on;
+              return '<div class="e"><b>' + esc(eventDates(e, m.month)) + '</b><span>' + esc(e.title) + (isToday ? '<span class="tag">Today</span>' : on ? '<span class="tag">On now</span>' : '') +
+                (e.note ? '<small>' + esc(e.note) + '</small>' : '') + '</span></div>';
+            }).join('') + '</div>';
+        }).join('') + '</div></div>';
+    }
     if (s.live_kind === 'sessions') {
       return '<div class="card ' + themeOf(s) + '"><div class="belt"></div><div class="kicker">' + esc(s.title || 'Black belt prep sessions') + '</div><div class="rows">' +
         live.sessions.map(function (x) { return '<div class="r"><b>' + esc(longDate(x.date)) + '</b><span>' + (x.signoff ? 'Sign-off<span class="tag">Must attend</span>' : 'Session ' + esc(x.number)) + '</span></div>'; }).join('') + '</div></div>';
@@ -262,7 +295,7 @@
   // Shrink text that would overflow the screen
   function fit(el) {
     var card = el.querySelector('.card'); if (!card) return;
-    var parts = card.querySelectorAll('h1, .body, .big, .names, .rows'), scale = 1, n = 0;
+    var parts = card.querySelectorAll('h1, .body, .big, .names, .rows, .cal'), scale = 1, n = 0;
     while (card.scrollHeight > card.clientHeight + 2 && n < 12) {
       scale *= 0.9; n++;
       for (var i = 0; i < parts.length; i++) parts[i].style.fontSize = '';

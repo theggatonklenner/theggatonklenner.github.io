@@ -132,6 +132,13 @@
   .saved { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   .saved li { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
   .saved li.pick { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .evnav { display: flex; align-items: center; gap: 8px; }
+  .evnav b { flex: 1; text-align: center; font-size: 17px; }
+  .evlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .evlist li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .evlist li > b { flex: none; width: 92px; font-size: 14px; }
+  .evlist li small { display: block; color: var(--muted); font-size: 13px; }
+  .evlist li.past { opacity: .5; }
   .addgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .addgrid button { text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 12px; cursor: pointer; min-height: 72px; }
   .addgrid button b { display: block; font-size: 16px; }
@@ -181,6 +188,8 @@
     <p class="hint">The TV shows these in order, on a loop, and picks up changes within 20 seconds.</p>
     <ul class="slides" id="list"></ul>
 
+    <div class="card" id="eventsCard" hidden></div>
+
     <h2 style="margin-top:8px">Settings</h2>
     <form class="card" id="setForm">
       <div class="row" style="justify-content:space-between;align-items:flex-end">
@@ -203,6 +212,7 @@
 <input type="file" id="pickParty" accept="image/*,application/pdf,.pdf" hidden>
 <input type="file" id="pickTpl" accept="image/*,application/pdf,.pdf" hidden>
 <input type="file" id="pickImport" accept=".json,application/json" hidden>
+<input type="file" id="pickEvents" accept=".json,application/json" hidden>
 <input type="file" id="pickVideo" accept="video/mp4,video/webm,video/quicktime,video/*" hidden>
 <input type="file" id="pickBg" accept="image/*" hidden>
 
@@ -217,10 +227,11 @@ const THEMES = { green: ['Green', '#04794b'], dark: ['Dark', '#0e1612'], gold: [
 const LIVE = {
   next_grading: ['Next grading', 'The next black belt grading date and how long to go'],
   sessions: ['Prep sessions', 'The next prep session dates, with the sign-off marked'],
-  congrats: ['Congratulations', 'Students who passed a grading in the last 45 days']
+  congrats: ['Congratulations', 'Students who passed a grading in the last 45 days'],
+  events: ['Events this month', "What's left of this month's events, and next month's near the end of the month"]
 };
 const KIND = { photo: 'Photo', video: 'Video', text: 'Info slide', live: 'Live', countdown: 'Countdown' };
-const state = { me: '', slides: [], partySlides: [], settings: null, templates: null, bookings: null, screens: null, nextGrading: null };
+const state = { me: '', slides: [], partySlides: [], settings: null, templates: null, bookings: null, screens: null, nextGrading: null, events: null, months: null };
 
 /* ---------- Small helpers ---------- */
 let toastTimer;
@@ -273,6 +284,9 @@ async function load() {
   ]);
   state.bookings = bk.error ? null : (bk.data || []);    // null: database not updated for bookings yet
   state.screens = sc.error ? null : (sc.data || []);
+  const [ev, mo] = await Promise.all([sb.from('tv_events').select('*').order('starts_on'), sb.from('tv_months').select('*')]);
+  state.events = ev.error ? null : (ev.data || []);   // null: database not updated for events yet
+  state.months = mo.error ? [] : (mo.data || []);
   state.nextGrading = (fd && fd.data && fd.data.live && fd.data.live.next_grading && fd.data.live.next_grading.date) || null;
   show('#app'); draw();
 }
@@ -302,7 +316,7 @@ function draw() {
   $('#code').textContent = S.screen_code;
   $('#setSecs').value = S.seconds; $('#setClock').checked = S.show_clock; $('#setLogo').checked = S.show_logo;
   $('#previewBtn').href = `../?code=${encodeURIComponent(S.screen_code)}&preview=1`;
-  drawStatus();
+  drawStatus(); drawEvents();
   $('#list').innerHTML = list.length ? list.map((s, i) => {
     let out = (s.starts_on && s.starts_on > t) ? `Starts ${fmtDate(s.starts_on)}` : (s.ends_on && s.ends_on < t) ? `Ended ${fmtDate(s.ends_on)}` : '';
     if (!out && s.kind === 'countdown') { const to = countTo(s); if (s.count_to === 'date' && to < t) out = `Passed ${fmtDate(to)}`; else if (!to) out = 'No grading date set'; }
@@ -505,8 +519,9 @@ function openSlide(s, fresh) {
         <label class="check"><input type="radio" name="cdTo" value="grading" ${x.count_to === 'grading' ? 'checked' : ''}> The next black belt grading (from Black Belt Prep)</label></div></div>
       <p class="hint" id="cdPrev"></p>
       ${themePick}`,
-    live: () => `<p class="hint">${esc(LIVE[x.live_kind][1])}. It fills in by itself from Black Belt Prep.</p>
-      <div class="field"><label for="slTitle">Heading (optional)</label><input type="text" id="slTitle" maxlength="120" value="${esc(x.title || '')}" placeholder="${esc({ next_grading: 'Next black belt grading', sessions: 'Black belt prep sessions', congrats: 'Congratulations' }[x.live_kind])}"></div>${themePick}`
+    live: () => `<p class="hint">${esc(LIVE[x.live_kind][1])}. ${x.live_kind === 'events' ? 'It uses the events list (Edit events below).' : 'It fills in by itself from Black Belt Prep.'}</p>
+      <div class="field"><label for="slTitle">Heading (optional)</label><input type="text" id="slTitle" maxlength="120" value="${esc(x.title || '')}" placeholder="${esc({ next_grading: 'Next black belt grading', sessions: 'Black belt prep sessions', congrats: 'Congratulations', events: "What's on at AMA" }[x.live_kind])}"></div>${themePick}
+      ${x.live_kind === 'events' ? '<div class="row"><button type="button" class="btn" id="slEvents">Edit events</button></div>' : ''}`
   }[x.kind]();
   openDlg(`<form class="dlg" id="slForm">
     <div class="dlg-head"><div><h3>${isNew ? (x.kind === 'countdown' ? 'New countdown' : 'New info slide') : esc(x.kind === 'live' ? 'Live: ' + LIVE[x.live_kind][0] : KIND[x.kind])}</h3>${!isNew && x.updated_by ? `<p class="hint">Last changed by ${esc(x.updated_by)}</p>` : ''}</div><button class="x" data-close>Close</button></div>
@@ -520,6 +535,7 @@ function openSlide(s, fresh) {
     <div class="row">${!isNew ? '<button type="button" class="btn danger" id="slDel">Delete</button>' : ''}<span class="grow"></span><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="slSave">${isNew ? 'Add' : 'Save'}</button></div>
   </form>`);
   const t = $('#slTitle'); if (t && isNew) t.focus();
+  if ($('#slEvents')) $('#slEvents').onclick = () => openEvents();
   if (x.kind === 'countdown') {
     const cdTo = () => $('#slForm input[name=cdTo]:checked').value;
     const prev = () => {
@@ -567,6 +583,104 @@ function openSlide(s, fresh) {
     if (s.media_path) sb.storage.from('tv').remove([s.media_path]).catch(() => {});
     toast('Deleted'); load();
   };
+}
+
+/* ---------- Events calendar ---------- */
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const day = iso => new Date(iso + 'T00:00:00');
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function eventDates(e, month) {
+  const a = day(e.starts_on), b = e.ends_on && e.ends_on !== e.starts_on ? day(e.ends_on) : null, m = day(month).getMonth();
+  if (!b) return a.toLocaleDateString('en-AU', { weekday: 'short' }) + ' ' + a.getDate();
+  if (a.getMonth() === m && b.getMonth() === m) return `${a.getDate()}–${b.getDate()}`;
+  return `${a.getDate()} ${MON[a.getMonth()]} – ${b.getDate()} ${MON[b.getMonth()]}`;
+}
+function drawEvents() {
+  const box = $('#eventsCard');
+  if (state.events === null) { box.hidden = true; return; }
+  box.hidden = false;
+  const t = today(), left = state.events.filter(e => (e.ends_on || e.starts_on) >= t).length;
+  const onTv = state.slides.some(x => x.kind === 'live' && x.live_kind === 'events' && x.enabled);
+  box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start"><div class="grow"><h3>Events calendar</h3>
+    <p class="hint">${left ? `${left} upcoming event${left === 1 ? '' : 's'}.` : 'No upcoming events yet.'} ${onTv ? 'The "Events this month" slide shows this month, and next month near the end of the month.' : 'Add the "Live: Events this month" slide to show them on the TV.'}</p></div>
+    <button class="btn" id="evOpen">Edit events</button></div>`;
+  $('#evOpen').onclick = () => openEvents();
+}
+function openEvents(month) {
+  let m = month || today().slice(0, 8) + '01', editing = null;
+  const render = () => {
+    const d0 = day(m), end = ymd(new Date(d0.getFullYear(), d0.getMonth() + 1, 0)), t = today();
+    const list = state.events.filter(e => e.starts_on <= end && (e.ends_on || e.starts_on) >= m);
+    const theme = (state.months.find(x => x.month === m) || {}).theme || '';
+    const ed = editing ? state.events.find(e => e.id === editing) : null;
+    openDlg(`<div class="dlg">
+      <div class="dlg-head"><div><h3>Events</h3><p class="hint">The TV shows what's left of this month, and adds next month in the last 10 days of the month.</p></div><button class="x" data-close>Close</button></div>
+      <div class="evnav"><button type="button" class="btn sm" id="evPrev" aria-label="Previous month">‹</button><b>${d0.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })}</b><button type="button" class="btn sm" id="evNext" aria-label="Next month">›</button></div>
+      <div class="field"><label for="evTheme">Month theme (optional)</label><div class="row"><input type="text" id="evTheme" class="grow" maxlength="80" value="${esc(theme)}" placeholder="e.g. Month of Positivity"><button type="button" class="btn sm" id="evThemeSave">Save</button></div></div>
+      ${list.length ? `<ul class="evlist">${list.map(e => `<li class="${(e.ends_on || e.starts_on) < t ? 'past' : ''}"><b>${esc(eventDates(e, m))}</b><div class="grow">${esc(e.title)}${e.note ? `<small>${esc(e.note)}</small>` : ''}</div>
+        <button type="button" class="btn sm" data-ev-edit="${e.id}">Edit</button><button type="button" class="btn sm danger" data-ev-del="${e.id}" aria-label="Delete ${esc(e.title)}">Delete</button></li>`).join('')}</ul>`
+        : `<p class="hint">No events in ${d0.toLocaleDateString('en-AU', { month: 'long' })}.</p>`}
+      <form id="evForm" style="display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:12px">
+        <h3 style="font-size:16px">${ed ? 'Change event' : 'Add an event'}</h3>
+        <div class="grid2"><div class="field"><label for="evStart">Date</label><input type="date" id="evStart" required value="${esc(ed ? ed.starts_on : '')}"></div>
+          <div class="field"><label for="evEnd">Until (optional)</label><input type="date" id="evEnd" value="${esc(ed ? ed.ends_on || '' : '')}"></div></div>
+        <div class="field"><label for="evTitle">What</label><input type="text" id="evTitle" required maxlength="100" value="${esc(ed ? ed.title : '')}" placeholder="e.g. Concord Grading"></div>
+        <div class="field"><label for="evNote">Note (optional)</label><input type="text" id="evNote" maxlength="100" value="${esc(ed ? ed.note || '' : '')}" placeholder="e.g. 1:30 pm, Marrickville"></div>
+        <div class="row">${ed ? '<button type="button" class="btn" id="evCancel">Cancel</button>' : ''}<span class="grow"></span><button class="btn primary" type="submit" id="evSave">${ed ? 'Save' : 'Add'}</button></div>
+      </form>
+      <div class="row"><button type="button" class="btn sm" id="evImport">Import a calendar file</button></div>
+    </div>`);
+    const go = k => { const x = day(m); x.setMonth(x.getMonth() + k); m = ymd(x); editing = null; render(); };
+    $('#evPrev').onclick = () => go(-1); $('#evNext').onclick = () => go(1);
+    $('#evThemeSave').onclick = async () => {
+      const v = $('#evTheme').value.trim();
+      let { error } = await sb.from('tv_months').delete().eq('month', m);
+      if (!error && v) ({ error } = await sb.from('tv_months').insert({ month: m, theme: v }));
+      if (error) return toast('Not saved: ' + error.message, 5000);
+      state.months = state.months.filter(x => x.month !== m).concat(v ? [{ month: m, theme: v }] : []);
+      toast(v ? 'Theme saved' : 'Theme removed');
+    };
+    $$('[data-ev-edit]').forEach(b => b.onclick = () => { editing = b.dataset.evEdit; render(); $('#evTitle').focus(); });
+    $$('[data-ev-del]').forEach(b => b.onclick = async () => {
+      const { error } = await sb.from('tv_events').delete().eq('id', b.dataset.evDel);
+      if (error) return toast('Not deleted: ' + error.message, 5000);
+      state.events = state.events.filter(e => e.id !== b.dataset.evDel); if (editing === b.dataset.evDel) editing = null;
+      toast('Deleted'); render(); drawEvents();
+    });
+    if ($('#evCancel')) $('#evCancel').onclick = () => { editing = null; render(); };
+    $('#evForm').onsubmit = async e => {
+      e.preventDefault();
+      const rec = { starts_on: $('#evStart').value, ends_on: $('#evEnd').value || null, title: $('#evTitle').value.trim(), note: $('#evNote').value.trim() || null };
+      if (!rec.starts_on || !rec.title) return toast('Add the date and what it is.');
+      if (rec.ends_on && rec.ends_on < rec.starts_on) return toast('"Until" is before the date.');
+      if (rec.ends_on === rec.starts_on) rec.ends_on = null;
+      $('#evSave').disabled = true;
+      const { error } = editing ? await sb.from('tv_events').update(rec).eq('id', editing) : await sb.from('tv_events').insert(rec);
+      if (error) { $('#evSave').disabled = false; return toast('Not saved: ' + error.message, 5000); }
+      toast(editing ? 'Saved' : 'Added');
+      const { data } = await sb.from('tv_events').select('*').order('starts_on'); state.events = data || state.events;
+      editing = null; m = rec.starts_on.slice(0, 8) + '01'; render(); drawEvents();
+    };
+    $('#evImport').onclick = () => { $('#pickEvents').onchange = async ev => {
+      const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
+      try {
+        const j = JSON.parse(await f.text()), isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+        const rows = (j.events || []).filter(x => isDate(x.start) && x.title).map(x => ({ starts_on: x.start, ends_on: isDate(x.end) && x.end > x.start ? x.end : null, title: String(x.title).trim().slice(0, 100), note: x.note ? String(x.note).trim().slice(0, 100) : null }));
+        const months = Object.entries(j.months || {}).filter(([k, v]) => /^\d{4}-\d{2}$/.test(k) && v).map(([k, v]) => ({ month: k + '-01', theme: String(v).trim().slice(0, 80) }));
+        if (!rows.length && !months.length) return toast("That file doesn't have any events in it.", 5000);
+        const key = x => `${x.starts_on}|${x.ends_on || ''}|${x.title.toLowerCase()}`, have = new Set(state.events.map(key));
+        const add = rows.filter(x => !have.has(key(x)));
+        if (add.length) { const { error } = await sb.from('tv_events').insert(add); if (error) throw error; }
+        for (const mo of months) {
+          const { error } = await sb.from('tv_months').delete().eq('month', mo.month); if (error) throw error;
+          const r = await sb.from('tv_months').insert(mo); if (r.error) throw r.error;
+        }
+        await load(); toast(`Added ${add.length} event${add.length === 1 ? '' : 's'}${rows.length - add.length ? ` (${rows.length - add.length} were already there)` : ''}${months.length ? ` and ${months.length} month themes` : ''}.`, 5000);
+        render();
+      } catch (er) { toast('Not imported: ' + (er.message || er), 6000); }
+    }; $('#pickEvents').click(); };
+  };
+  render();
 }
 
 /* ---------- Party mode: show only one thing (e.g. a birthday message) for a while ---------- */

@@ -414,6 +414,64 @@ try {
   ok((await tvp.evaluate(() => window.__tv.state().count)) > 1, '"Back to normal now" ends the booked party early');
   await tvc.close(); await ctx.close();
 
+  // Events calendar
+  console.log('\nEvents calendar');
+  const EVENTS = process.env.EVENTS_JSON || join(SHOTS, 'events-test.json');
+  if (!process.env.EVENTS_JSON) {
+    const t0 = new Date(), mk = (k, d) => { const x = new Date(t0.getFullYear(), t0.getMonth() + k, d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+    const tday = `${t0.getFullYear()}-${String(t0.getMonth() + 1).padStart(2, '0')}-${String(t0.getDate()).padStart(2, '0')}`;
+    (await import('node:fs')).writeFileSync(EVENTS, JSON.stringify({ months: { [tday.slice(0, 7)]: 'Month of Testing', [mk(1, 1).slice(0, 7)]: 'Month of Next' },
+      events: [{ start: tday, title: 'Today Session', note: '1:30 pm, Marrickville' }, { start: mk(0, 1), end: mk(0, 1), title: 'Old thing' }, { start: mk(1, 3), end: mk(1, 6), title: 'Next Month Grading' }, { start: mk(3, 1), title: 'Far Away' }] }));
+  }
+  ({ ctx, page } = await context({ width: 390, height: 844 }));
+  await page.goto(BASE + '/tv/edit/index.html');
+  await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+  await page.waitForSelector('#eventsCard:not([hidden])');
+  ok((await page.textContent('#eventsCard')).includes('No upcoming events'), 'the editor has an events calendar');
+  await page.click('#evOpen'); await page.waitForSelector('#evImport');
+  await page.click('#evImport'); await page.setInputFiles('#pickEvents', EVENTS);
+  await toastSays(page, 'Added');
+  const nEv = (await db.query(`select count(*)::int n from tv_events`)).rows[0].n, nIn = JSON.parse(read(EVENTS)).events.length;
+  ok(nEv === nIn && (await db.query(`select count(*)::int n from tv_months`)).rows[0].n >= 2, `a calendar file imports the events (${nEv}) and month themes`);
+  await page.waitForSelector('#evImport'); await page.click('#evImport'); await page.setInputFiles('#pickEvents', EVENTS);
+  ok((await toastSays(page, 'already there')).includes('Added 0 events'), 'importing the same file again adds nothing twice');
+  await page.waitForSelector('#evForm');
+  await page.fill('#evStart', ymd(new Date())); await page.fill('#evTitle', 'Pizza Night'); await page.fill('#evNote', '6 pm');
+  await page.click('#evSave'); await toastSays(page, 'Added'); await page.waitForSelector('.evlist li:has-text("Pizza Night")');
+  ok(true, 'an event can be added by hand and shows in the month');
+  await page.click('.evlist li:has-text("Pizza Night") [data-ev-edit]'); await page.fill('#evTitle', 'Pizza Party'); await page.click('#evSave');
+  await page.waitForSelector('.evlist li:has-text("Pizza Party")');
+  ok((await db.query(`select count(*)::int n from tv_events where title = 'Pizza Party'`)).rows[0].n === 1, 'and changed');
+  await page.screenshot({ path: join(SHOTS, 'tv-events-editor.png') });
+  await page.click('.evlist li:has-text("Pizza Party") [data-ev-del]'); await page.waitForFunction(() => !document.querySelector('.evlist') || !document.querySelector('.evlist').textContent.includes('Pizza'));
+  ok((await db.query(`select count(*)::int n from tv_events where title like 'Pizza%'`)).rows[0].n === 0, 'and deleted');
+  await page.click('#dlg [data-close]');
+  await page.click('#addBtn'); await page.click('[data-add="live:events"]'); await toastSays(page, 'Added');
+  await ctx.close();
+
+  const tvc2 = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  await tvc2.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+  await tvc2.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+  const tv2 = await tvc2.newPage(); tv2.on('pageerror', e => errors.push('tv: ' + e.message));
+  await tv2.goto(BASE + `/tv/index.html?code=${CODE}&preview=1`); await tv2.waitForSelector('.layer.on');
+  let evText = '';
+  for (let i = 0; i < (await tv2.evaluate(() => window.__tv.state().count)); i++) {
+    await tv2.waitForTimeout(400);
+    const txt = await tv2.evaluate(() => { const l = document.querySelectorAll('.layer.on'); return l[l.length - 1].textContent; });
+    if (txt.includes("What's on")) { evText = txt; await tv2.waitForTimeout(900); await tv2.screenshot({ path: join(SHOTS, 'tv-events.png') }); break; }
+    await tv2.evaluate(() => window.__tv.next());
+  }
+  const monthName = new Date().toLocaleDateString('en-AU', { month: 'long' }), last10 = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate() < 10;
+  ok(evText.includes(monthName) && /Today Session|Black Belt Prep Session/.test(evText), "the TV shows this month's events with the month name");
+  if (!process.env.EVENTS_JSON) {
+    ok(evText.includes('Month of Testing') && evText.includes('1:30 pm, Marrickville') && evText.includes('Today'), 'with the month theme, notes, and a Today tag');
+    ok(!evText.includes('Old thing') && !evText.includes('Far Away'), 'past events and far-off months are left off');
+    ok(last10 ? evText.includes('Next Month Grading') && evText.includes('Month of Next') : !evText.includes('Next Month Grading'), `next month shows only near the end of the month (${last10 ? 'it is now' : 'not yet'})`);
+  }
+  ok(await tv2.evaluate(() => { const c = document.querySelector('.layer.on .card'); return c && c.scrollHeight <= c.clientHeight + 2; }), 'the events slide fits the screen');
+  await tvc2.close();
+  await db.query(`delete from tv_slides where live_kind = 'events'`);
+
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));
   await page.goto(BASE + '/tv/edit/index.html');
