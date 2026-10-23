@@ -203,6 +203,11 @@
     var name = s.title || (s.kind === 'live' ? { next_grading: 'Next grading', events: 'Events this month', month: 'Month theme' }[s.live_kind] : { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown', qr: 'QR code' }[s.kind]);
     return (feed.only ? 'Party mode: ' : '') + name + (playlist.length > 1 ? ' (' + (index + 1) + ' of ' + playlist.length + ')' : '');
   }
+  // Reload with a new address so the tablet's browser can't hand back its saved (old) copy of this page
+  function freshReload() {
+    var q = location.search.replace(/[?&]r=\d+/g, '').replace(/^&/, '?');
+    try { location.replace(location.pathname + (q ? q + '&' : '?') + 'r=' + Date.now()); } catch (e) { location.reload(); }
+  }
   function checkIn() {
     if (!code || PREVIEW) return;
     fetch(BASE + '/rest/v1/rpc/tv_checkin', {
@@ -210,7 +215,7 @@
       body: JSON.stringify({ p_code: code, p_screen: screenId, p_loc: LOC, p_showing: showingNow(), p_started: STARTED,
         p_details: { battery: battery.level != null ? { level: battery.level, charging: battery.charging } : null, w: window.innerWidth, h: window.innerHeight, slides: playlist.length, offline: /offline/.test(document.body.className), browser: navigator.userAgent.slice(0, 160) } })
     }).then(function (r) { return r.ok ? r.json() : null; }).then(function (r) {
-      if (r && r.reload) location.reload();
+      if (r && r.reload) freshReload();
     }).catch(function () { /* not set up yet, or no connection */ });
   }
 
@@ -247,8 +252,9 @@
   }
   // The fingerprint of the slideshow this screen already has: Supabase only sends it again when it has changed
   var lastHash = null;
+  // (Kept per page: FreeKiosk's two pages share the saved copy, so that copy may be newer than what this page shows.)
   function haveHash() {
-    if (lastHash) return lastHash;
+    if (feed) return lastHash;
     try { var c = JSON.parse(store.get('tvFeed') || 'null'); return c && c.hash || null; } catch (e) { return null; }
   }
   function load(first) {
@@ -261,7 +267,7 @@
         return askCode(first ? 'That code is not right. Check it in the TV editor.' : 'The screen code was changed. Enter the new one, or open the new link from the TV editor.');
       }
       if (f && f.same) {   // nothing has changed
-        if (!feed) { try { var c = JSON.parse(store.get('tvFeed')); if (c) apply(c, true); } catch (e) { /* ignore */ } }
+        if (!feed) { try { var c = JSON.parse(store.get('tvFeed')); if (c && c.hash === f.hash) { lastHash = c.hash; apply(c, true); } } catch (e) { /* ignore */ } }
         if (!feed) { store.del('tvFeed'); lastHash = null; return load(first); }   // the saved copy is gone: ask for the whole thing
         setTimeout(checkIn, 1500); remoteFromFeed(feed); kioskSync(feed); return;
       }
@@ -271,7 +277,7 @@
       remoteFromFeed(f); kioskSync(f);
     }).catch(function () {
       document.body.className += ' offline';
-      if (first || !feed) { var c = store.get('tvFeed'); if (c) { try { apply(JSON.parse(c), true); } catch (e) { /* ignore */ } } else showMessage('Connecting...', 'Check the TV is on the internet.'); }
+      if (first || !feed) { var c = store.get('tvFeed'); if (c) { try { c = JSON.parse(c); lastHash = c.hash || null; apply(c, true); } catch (e) { /* ignore */ } } else showMessage('Connecting...', 'Check the TV is on the internet.'); }
     });
   }
   function apply(f, first) {
@@ -593,15 +599,21 @@
     if (st.signin_open !== 'kiosk') { kioskNote = lock ? 'off (Settings: A tap is not "Handled by FreeKiosk")' : ''; return; }
     if (!st.signin) { kioskNote = 'no sign-in link in Settings'; return; }
     if (KIOSK_MAIN) kioskNote = lock ? 'main screen, party locked' : '';
-    if (KIOSK_MAIN) { if (!lock) { try { location.href = st.signin; } catch (e) { /* ignore */ } } return; }   // over: back to sign-in
-    if (!lock) { kioskDone = null; kioskNote = 'ready (screensaver)'; return; }
+    if (KIOSK_MAIN) { if (!lock) { store.del('kioskLocked'); try { location.href = st.signin; } catch (e) { /* ignore */ } } return; }   // over: back to sign-in
+    if (!lock) {
+      kioskDone = null; kioskNote = 'ready (screensaver)';
+      // Over: also tell FreeKiosk to put the sign-in page back, in case the party page underneath is paused
+      // (the note is shared by both of FreeKiosk's pages, so whichever is running does it)
+      if (store.get('kioskLocked')) kioskApi(st, '/api/url', { url: st.signin }).then(function () { store.del('kioskLocked'); kioskNote = 'sign-in page put back'; })['catch'](function () {});
+      return;
+    }
     var key = f.only ? 'party:' + ((f.slides[0] || {}).id || '') : 'blackout';
     if (kioskDone === key || Date.now() - kioskTry < 30000) return;
     kioskTry = Date.now(); kioskNote = 'sending...';
     var main = location.protocol + '//' + location.host + location.pathname + '?code=' + encodeURIComponent(code) + (LOC ? '&loc=' + encodeURIComponent(LOC) : '') + '&kiosk=main';
     var t0 = new Date(), hm = t0.getHours() + ':' + (t0.getMinutes() < 10 ? '0' : '') + t0.getMinutes();
     kioskApi(st, '/api/url', { url: main }).then(function (r) {
-      kioskDone = key; kioskNote = 'sent at ' + hm + (r && r.type !== 'opaque' ? ' (reply ' + r.status + ')' : '');
+      kioskDone = key; store.set('kioskLocked', '1'); kioskNote = 'sent at ' + hm + (r && r.type !== 'opaque' ? ' (reply ' + r.status + ')' : '');
       setTimeout(checkIn, 500);
       return kioskApi(st, '/api/wake');   // close the screensaver so the main screen (the party) shows
     })['catch'](function (e) { kioskNote = 'could not reach it at ' + hm + ' (' + (e && e.message || e) + ')'; setTimeout(checkIn, 500); });   // the screensaver still comes back after its delay
@@ -645,13 +657,17 @@
   if (!(document.fullscreenElement || document.webkitFullscreenElement)) { $('hint').style.display = ''; setTimeout(function () { $('hint').style.display = 'none'; }, 12000); }
 
   // Reload once a night (picks up updates and keeps the TV browser fresh)
-  setInterval(function () { var n = new Date(); if (n.getHours() === 3 && n.getMinutes() < 2) location.reload(); }, 60000);
+  setInterval(function () { var n = new Date(); if (n.getHours() === 3 && n.getMinutes() < 2) freshReload(); }, 60000);
   // How often to check for changes (a check with nothing new is a few bytes):
   //   during a party or blackout every 5 seconds, so it goes back to normal quickly when it ends;
   //   on FreeKiosk tablets every 10 seconds, so a party moves onto the main screen quickly;
   //   otherwise every 15 seconds.
   function pollDelay() {
     var st = (feed && feed.settings) || {};
+    if (feed && feed.only && feed.only_until) {   // check again the moment the party is due to end
+      var left = new Date(feed.only_until).getTime() - Date.now() + 1000;
+      if (left > 1000 && left < 5000) return left;
+    }
     if (feed && (feed.only || feed.blackout || feed.off)) return 5000;
     if (st.signin_open === 'kiosk' && !PREVIEW) return 10000;
     return 15000;

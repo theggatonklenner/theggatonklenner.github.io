@@ -387,7 +387,7 @@ try {
   await page.click('#tvReload'); await toastSays(page, 'Sent');
   await Promise.all([tvp.waitForEvent('load', { timeout: 8000 }), tvp.evaluate(() => window.__tv.checkIn())]).catch(() => {});
   await tvp.waitForSelector('.layer.on');
-  ok((await tvp.evaluate(() => window.__tv.started)) !== started1, 'Refresh the TV makes the TV reload');
+  ok((await tvp.evaluate(() => window.__tv.started)) !== started1 && /[?&]r=\d+/.test(tvp.url()) && /code=/.test(tvp.url()), 'Refresh the TV makes the TV reload (with a new address, so no saved old copy is used)');
   await tvp.evaluate(() => window.__tv.checkIn()); await tvp.waitForTimeout(800);
   ok((await tvp.evaluate(() => window.__tv.started)) !== started1 && (await db.query(`select count(*)::int n from tv_screens`)).rows[0].n === 1, 'and it only reloads once');
 
@@ -952,7 +952,9 @@ try {
   await mp.click('.layer.on', { force: true }); await mp.waitForTimeout(600);
   ok(mp.url().includes('kiosk=main') && (await mp.textContent('#stage')).includes('Happy Birthday Zoe!'), 'the main screen shows the party and taps do nothing');
   await db.query(`delete from tv_party_bookings`);
-  await Promise.all([mp.waitForURL(/signin\.test/, { timeout: 8000 }).catch(() => {}), mp.evaluate(() => window.__tv.reload())]);
+  await ss.evaluate(() => window.__tv.reload()); await ss.waitForTimeout(800);
+  ok(api.some(x => x.path === '/api/url' && /signin\.test/.test(x.body)), 'when the party ends, the screensaver also tells FreeKiosk to put the sign-in page back (in case the party page is paused)');
+  if (!mp.url().startsWith('https://signin.test/ama')) await Promise.all([mp.waitForURL(/signin\.test/, { timeout: 8000 }).catch(() => {}), mp.evaluate(() => window.__tv.reload()).catch(() => {})]);
   ok(mp.url().startsWith('https://signin.test/ama'), 'when the party ends, the main screen goes back to the sign-in page');
   await sic.close();
   await db.query(`update tv_settings set signin_url = null, signin_idle = 60, signin_open = 'page' where id = 2`); await db.query(`delete from tv_slides where display = 'tablet'`);
