@@ -625,6 +625,22 @@ try {
   ok((await page.textContent('#problem')).includes('can use the TV remote, but not the editor'), 'someone with the remote only is sent to the remote');
   await page.goto(BASE + '/tv/remote/index.html'); await page.waitForSelector('#app:not([hidden]), #problem:not([hidden])');
   ok(await page.isVisible('#app') && (await page.$$('#list [data-show]')).length > 0, '...and the remote works for them');
+  await db.query(`insert into tv_permissions values ('jo@ama.test', 'party')`);
+  await page.goto(BASE + '/tv/edit/index.html'); await page.waitForSelector('#app:not([hidden]), #problem:not([hidden])');
+  ok(await page.isVisible('#partyStart') && await page.isHidden('#list') && await page.isHidden('#setForm') && await page.isHidden('#addBtn') && (await page.textContent('#partyOnly')).includes('party mode'),
+    'party mode only: the editor shows just Party mode');
+  ok(await page.isVisible('#partyOnly a[href="../remote/"]'), '...with a link to the remote if they have that too');
+  await page.click('#partyStart'); await page.waitForSelector('#pForm');
+  ok(!(await page.$('#pManage')) && !(await page.$('#pImport')), "...and can't manage poster templates");
+  if (await page.$('#pForm [data-m="message"]')) await page.click('#pForm [data-m="message"]');
+  await page.waitForSelector('#pName'); await page.fill('#pName', 'Mia'); await page.click('#pGo');
+  await page.waitForSelector('#partyStop', { timeout: 8000 }).catch(() => {});
+  const jp = (await db.query(`select s.title from tv_settings t join tv_slides s on s.id = t.only_slide`)).rows[0];
+  ok(jp && jp.title === 'Happy Birthday Mia!', '...and can put a birthday message on the TV');
+  await page.screenshot({ path: join(SHOTS, 'tv-party-only.png') });
+  await page.click('#partyStop'); await toastSays(page, 'Back to normal');
+  ok(!(await db.query(`select only_slide from tv_settings`)).rows[0].only_slide, '...and stop it');
+  await page.goto(BASE + '/tv/remote/index.html');
   await db.query(`delete from tv_permissions where email = 'jo@ama.test'`);
   await page.reload(); await page.waitForSelector('#problem:not([hidden])');
   ok((await page.textContent('#problem')).includes("doesn't have the TV remote"), 'without TV access, the remote says so');

@@ -95,14 +95,19 @@ try {
   // Dojang TV
   ok((await page.textContent('#list [data-email="tate@ama.test"]')).includes('TV: Admin'), 'the list shows TV access (admins always have it)');
   await page.click('#addBtn'); await page.fill('#addEmail', 'tvonly@ama.test'); await page.click('#addGen');
-  ok((await page.$$('#tvChecks input[type=radio]')).length === 3 && await page.isChecked('#tvChecks input[value=""]'), 'adding a login has a Dojang TV choice, No access to start with');
+  ok((await page.$$('#tvChecks input[type=checkbox]')).length === 3 && (await page.$$('#tvChecks input:checked')).length === 0, 'adding a login has Dojang TV tick boxes (Editor, Party mode, Remote), none ticked to start with');
   await page.check('#tvChecks input[value="remote"]'); await page.click('#addGo');
   await page.waitForSelector('#list [data-email="tvonly@ama.test"]');
   const tvRow = await page.textContent('#list [data-email="tvonly@ama.test"]');
-  ok(tvRow.includes('TV: Remote only') && tvRow.includes('ID Cards: No access') && tvRow.includes('Prep: No access'), 'a login can have just the TV remote and nothing else');
+  ok(tvRow.includes('TV: Remote') && tvRow.includes('ID Cards: No access') && tvRow.includes('Prep: No access'), 'a login can have just the TV remote and nothing else');
   await page.click('#list [data-email="tvonly@ama.test"]'); await page.waitForSelector('#tvChecks');
-  ok(await page.isChecked('#tvChecks input[value="remote"]'), 'their TV choice shows when opened');
+  ok(await page.isChecked('#tvChecks input[value="remote"]') && !(await page.isChecked('#tvChecks input[value="party"]')), 'their TV ticks show when opened');
+  await page.check('#tvChecks input[value="party"]'); await page.click('#saveRoles');
+  await page.waitForFunction(() => document.querySelector('#list [data-email="tvonly@ama.test"]').textContent.includes('TV: Party mode, Remote'));
+  ok(db._t.tv_permissions.filter(x => x.email === 'tvonly@ama.test').map(x => x.permission).sort().join() === 'party,remote', 'party mode can be ticked on its own');
+  await page.click('#list [data-email="tvonly@ama.test"]'); await page.waitForSelector('#tvChecks');
   await page.check('#tvChecks input[value="edit"]');
+  ok(await page.isChecked('#tvChecks input[value="party"]') && await page.isDisabled('#tvChecks input[value="remote"]'), 'ticking Editor ticks party mode and the remote too');
   await page.screenshot({ path: process.env.SHOT_DIR ? join(process.env.SHOT_DIR, 'staff-tv.png') : join(tmpdir(), 'staff-tv.png') });
   await page.click('#saveRoles');
   await page.waitForFunction(() => document.querySelector('#list [data-email="tvonly@ama.test"]').textContent.includes('TV: Editor'));

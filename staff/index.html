@@ -138,7 +138,7 @@ const SUPABASE_URL = 'https://ptdrcxngaptcgswfbjhg.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_YsRY6SlgR7U_ohn_xxQD1A_lrowkIGS'; // public by design; the function checks who is signed in
 const FN = SUPABASE_URL + '/functions/v1/staff';
 const CARD = { admin: 'Admin', edit: 'Edit people', delete: 'Delete people', send: 'Send to print', approve: 'Approve prints', viewer: 'View only', printer: 'Print station' };
-const TV = { remote: 'Remote only', edit: 'Editor' };
+const TV = { edit: 'Editor', party: 'Party mode', remote: 'Remote' };
 const PREP = { admin: 'Admin', instructor: 'Instructor', attendance: 'Attendance', payments: 'Payments', grading: 'Grading', certificates: 'Certificates', idcards: 'ID cards', viewer: 'Viewer' };
 
 const $ = s => document.querySelector(s);
@@ -213,12 +213,19 @@ function draw() {
 const checks = (id, names, cur) => `<div class="checks" id="${id}">${Object.entries(names).map(([k, t]) => `<label class="check"><input type="checkbox" value="${k}"${cur.includes(k) ? ' checked' : ''}> ${t}</label>`).join('')}</div>`;
 // Dojang TV: one choice (the editor includes the remote). Admins in either app can always use the TV.
 const isAdmin = u => u.card_perms.includes('admin') || u.prep_roles.includes('admin');
-const tvText = u => isAdmin(u) ? 'Admin' : u.tv_perms.includes('edit') ? 'Editor' : u.tv_perms.includes('remote') ? 'Remote only' : 'No access';
+const tvText = u => isAdmin(u) ? 'Admin' : u.tv_perms.includes('edit') ? 'Editor' : u.tv_perms.length ? ['party', 'remote'].filter(k => u.tv_perms.includes(k)).map(k => TV[k]).join(', ') : 'No access';
 const tvField = cur => state.tv === 'ready'
-  ? `<div class="field"><span class="label">Dojang TV</span><div class="checks" id="tvChecks">${[['', 'No access'], ['remote', 'Remote only'], ['edit', 'Editor']].map(([k, t]) =>
-      `<label class="check"><input type="radio" name="tvPerm" value="${k}"${(cur.includes('edit') ? 'edit' : cur.includes('remote') ? 'remote' : '') === k ? ' checked' : ''}> ${t}</label>`).join('')}</div><p class="hint">Remote only: the phone remote. Editor: slides, party mode, events and settings, plus the remote. Admins in AMA ID Cards or Black Belt Prep can always use the TV.</p></div>`
+  ? `<div class="field"><span class="label">Dojang TV</span>${checks('tvChecks', TV, cur.includes('edit') ? ['edit', 'party', 'remote'] : cur)}
+      <p class="hint">Editor: everything (slides, party mode, events, settings and the remote). Party mode: start, stop and book parties and birthday posters. Remote: the phone remote. Admins in AMA ID Cards or Black Belt Prep can always use the TV.</p></div>`
   : `<div class="field"><span class="label">Dojang TV</span><p class="hint">${state.tv === 'setup' ? 'To set who can use the TV, first run supabase/tv-setup.sql in Supabase.' : 'To set who can use the TV, update the "staff" function in Supabase with the latest supabase/functions/staff/index.ts.'}</p></div>`;
-const tvPicked = () => { const r = document.querySelector('#tvChecks input:checked'); return state.tv !== 'ready' ? undefined : r && r.value ? [r.value] : []; };
+const tvPicked = () => state.tv !== 'ready' ? undefined : (l => l.includes('edit') ? ['edit'] : l)(picked('tvChecks'));
+// Editor includes the others: ticking it ticks them
+function tvLink() {
+  const box = document.querySelector('#tvChecks'); if (!box) return;
+  const ed = box.querySelector('input[value="edit"]');
+  const sync = () => box.querySelectorAll('input:not([value="edit"])').forEach(c => { if (ed.checked) c.checked = true; c.disabled = ed.checked; });
+  ed.onchange = sync; sync();
+}
 const picked = id => [...document.querySelectorAll(`#${id} input:checked`)].map(i => i.value);
 const makePassword = () => { const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const r = crypto.getRandomValues(new Uint32Array(12)); return Array.from(r, n => a[n % a.length]).join(''); };
 const ROLE_HELP = '<p class="hint">Admin can do everything in that app. Tick only what each person needs; with no ticks they can\'t use that app. Print station is only for the printer laptop\'s login.</p>';
@@ -242,6 +249,7 @@ function openPerson(email) {
       <div class="row"><button class="btn" id="savePw" type="submit">Set password</button></div></form>` : `<div class="section"><p class="hint">To give them a login, use Add login with this email.</p></div>`}
     ${!self ? `<div class="section"><div class="row"><button class="btn danger" id="removeBtn">${u.has_login ? 'Remove login' : 'Remove roles'}</button></div><p class="hint">Removes their access to all the apps. Their name stays on anything they did.</p></div>` : ''}
   </div>`);
+  tvLink();
   $('#rolesForm').onsubmit = async e => {
     e.preventDefault(); $('#saveRoles').disabled = true;
     try { await api({ action: 'roles', email, card_perms: picked('cardChecks'), prep_roles: picked('prepChecks'), tv_perms: tvPicked() }); dlg.close(); toast('Permissions saved'); await load(); }
@@ -279,6 +287,7 @@ function openAdd() {
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" id="addGo" type="submit">Add login</button></div>
   </form>`);
   $('#addGen').onclick = () => { $('#addPw').value = makePassword(); };
+  tvLink();
   $('#addForm').onsubmit = async e => {
     e.preventDefault();
     const email = $('#addEmail').value.trim().toLowerCase(), password = $('#addPw').value;

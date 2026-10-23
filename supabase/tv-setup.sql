@@ -25,7 +25,8 @@
 -- ---------- Who can use the TV ----------
 -- TV permissions, ticked on the Staff logins page (staff/):
 --   edit     the TV editor: slides, party mode, events, settings (and the remote)
---   remote   only the phone remote
+--   party    party mode only: start, stop and book parties, birthday posters and saved designs
+--   remote   the phone remote
 -- Admins in AMA ID Cards or Black Belt Prep can always do everything. Someone with only TV ticks can't open
 -- AMA ID Cards or Black Belt Prep.
 do $$
@@ -33,7 +34,7 @@ begin
   if to_regclass('public.tv_permissions') is null then
     create table public.tv_permissions (
       email      text not null,
-      permission text not null check (permission in ('edit', 'remote')),
+      permission text not null,
       created_at timestamptz not null default now(),
       primary key (email, permission)
     );
@@ -48,6 +49,9 @@ begin
     end if;
   end if;
 end $$;
+
+alter table public.tv_permissions drop constraint if exists tv_permissions_permission_check;
+alter table public.tv_permissions add constraint tv_permissions_permission_check check (permission in ('edit', 'party', 'remote'));
 
 -- Can the signed-in person do this on the TV? ('edit' or 'remote'; edit includes the remote; 'admin' = an admin in either app)
 create or replace function public.tv_can(p_perm text) returns boolean
@@ -161,7 +165,7 @@ create table if not exists public.tv_party_bookings (
 create index if not exists tv_party_bookings_time_idx on public.tv_party_bookings (starts_at);
 alter table public.tv_party_bookings enable row level security;
 drop policy if exists "staff edit party bookings" on public.tv_party_bookings;
-create policy "staff edit party bookings" on public.tv_party_bookings for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
+create policy "staff edit party bookings" on public.tv_party_bookings for all to authenticated using (public.tv_can('party')) with check (public.tv_can('party'));
 
 -- ---------- TV status ----------
 create table if not exists public.tv_screens (
@@ -194,6 +198,11 @@ create trigger tv_stamp before insert or update on public.tv_slides for each row
 create or replace function public.tv_settings_stamp() returns trigger language plpgsql as $$
 begin
   if new.remote_seq is distinct from old.remote_seq then return new; end if;   -- a remote button press isn't a change to the slideshow
+  -- Party mode only: can start and stop a party, nothing else in the settings
+  if auth.jwt() ->> 'email' is not null and not public.tv_is_staff()
+     and (to_jsonb(new) - 'only_slide' - 'only_until' - 'updated_at') <> (to_jsonb(old) - 'only_slide' - 'only_until' - 'updated_at') then
+    raise exception 'Your login can only start and stop party mode' using errcode = '42501';
+  end if;
   new.updated_at := now(); new.screen_code := upper(new.screen_code);
   if new.reload_at is distinct from old.reload_at and new.reload_at is not null then new.reload_at := now(); end if;   -- server time, so TV clocks don't matter
   return new;
@@ -206,9 +215,13 @@ alter table public.tv_slides   enable row level security;
 drop policy if exists "staff edit tv settings" on public.tv_settings;
 drop policy if exists "staff edit tv slides" on public.tv_slides;
 create policy "staff edit tv settings" on public.tv_settings for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
+drop policy if exists "party mode settings" on public.tv_settings;
+create policy "party mode settings" on public.tv_settings for all to authenticated using (public.tv_can('party')) with check (public.tv_can('party'));
 create policy "staff edit tv slides"   on public.tv_slides   for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
 drop policy if exists "remote sees tv slides" on public.tv_slides;
-create policy "remote sees tv slides" on public.tv_slides for select to authenticated using (public.tv_can('remote'));
+create policy "remote sees tv slides" on public.tv_slides for select to authenticated using (public.tv_can('remote') or public.tv_can('party'));
+drop policy if exists "party slides" on public.tv_slides;
+create policy "party slides" on public.tv_slides for all to authenticated using (party and public.tv_can('party')) with check (party and public.tv_can('party'));
 
 -- ---------- Birthday poster templates ----------
 -- A design with the name area left empty, plus where the name goes and how it looks (see tv/poster.js).
@@ -226,6 +239,8 @@ create table if not exists public.tv_poster_templates (
 alter table public.tv_poster_templates enable row level security;
 drop policy if exists "staff edit poster templates" on public.tv_poster_templates;
 create policy "staff edit poster templates" on public.tv_poster_templates for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
+drop policy if exists "party sees poster templates" on public.tv_poster_templates;
+create policy "party sees poster templates" on public.tv_poster_templates for select to authenticated using (public.tv_can('party'));
 
 -- ---------- Events calendar (the "Events this month" live slide) ----------
 create table if not exists public.tv_events (
@@ -416,7 +431,7 @@ drop policy if exists "tv files add"    on storage.objects;
 drop policy if exists "tv files change" on storage.objects;
 drop policy if exists "tv files remove" on storage.objects;
 drop policy if exists "tv files list"   on storage.objects;
-create policy "tv files add"    on storage.objects for insert to authenticated with check (bucket_id = 'tv' and public.tv_is_staff());
+create policy "tv files add"    on storage.objects for insert to authenticated with check (bucket_id = 'tv' and (public.tv_is_staff() or (public.tv_can('party') and name like 'photos/%')));
 create policy "tv files change" on storage.objects for update to authenticated using (bucket_id = 'tv' and public.tv_is_staff());
 create policy "tv files remove" on storage.objects for delete to authenticated using (bucket_id = 'tv' and public.tv_is_staff());
 create policy "tv files list"   on storage.objects for select to authenticated using (bucket_id = 'tv' and public.tv_is_staff());

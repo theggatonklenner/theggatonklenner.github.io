@@ -16,7 +16,7 @@
 
 export const CARD_PERMS = ['admin', 'edit', 'delete', 'send', 'approve', 'viewer', 'printer'];
 export const PREP_ROLES = ['admin', 'instructor', 'attendance', 'payments', 'grading', 'certificates', 'idcards', 'viewer'];
-export const TV_PERMS = ['edit', 'remote'];
+export const TV_PERMS = ['edit', 'party', 'remote'];
 const APPS = {
   card: { table: 'staff_permissions', col: 'permission', allowed: CARD_PERMS, name: 'AMA ID Cards' },
   prep: { table: 'prep_roles', col: 'role', allowed: PREP_ROLES, name: 'Black Belt Prep' },
@@ -117,7 +117,7 @@ export async function handle(req, db) {
     const password = String(body.password || '');
     const cardWant = body.card_perms === undefined ? undefined : clean(body.card_perms, CARD_PERMS);
     const prepWant = body.prep_roles === undefined ? undefined : clean(body.prep_roles, PREP_ROLES);
-    // "TV editor" includes the remote, so only one of the two is kept
+    // "TV editor" includes party mode and the remote, so it's kept on its own
     const tvWant = body.tv_perms === undefined || !tvReady ? undefined : (l => l.includes('edit') ? ['edit'] : l)(clean(body.tv_perms, TV_PERMS));
 
     if (action === 'create') {

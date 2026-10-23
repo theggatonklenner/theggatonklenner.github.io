@@ -59,6 +59,16 @@ ok((await as('tvonly@ama.test', () => db.query(`select can_view_cards() a`))).ro
 ok((await tryAs('remote@ama.test', `select * from tv_slides`)).n > 0 && (await tryAs('remote@ama.test', `select tv_remote_send('next')`)).ok, 'TV remote only: can see the slides and press the remote buttons');
 ok(!(await tryAs('remote@ama.test', `insert into tv_slides (kind, title) values ('text', 'x')`)).ok && (await tryAs('remote@ama.test', `select * from tv_settings`)).n === 0
   && (await as('remote@ama.test', () => db.query(`select tv_is_staff() a`))).rows[0].a === false, "...but can't change slides, see the screen code or open the editor");
+await as('tate@ama.test', () => db.exec(`insert into tv_permissions values ('party@ama.test', 'party')`));
+const pslide = await tryAs('party@ama.test', `insert into tv_slides (kind, title, theme, party) values ('text', 'Happy Birthday Mia!', 'party', true) returning id`);
+ok(pslide.ok, 'party mode only: can make a birthday slide');
+ok((await tryAs('party@ama.test', `update tv_settings set only_slide = '${pslide.rows[0].id}', only_until = now() + interval '1 hour'`)).n === 1, '...and put it on the TV');
+ok((await tryAs('party@ama.test', `insert into tv_party_bookings (slide_id, starts_at, ends_at) values ('${pslide.rows[0].id}', now() + interval '1 day', now() + interval '1 day 2 hours')`)).ok, '...and book a party');
+ok(!(await tryAs('party@ama.test', `insert into tv_slides (kind, title) values ('text', 'Not a party')`)).ok && !(await tryAs('party@ama.test', `delete from tv_slides where not party`)).n, "...but can't add or delete normal slides");
+ok(!(await tryAs('party@ama.test', `update tv_settings set seconds = 5`)).ok && !(await tryAs('party@ama.test', `update tv_settings set screen_code = 'HACKED'`)).ok, "...or change the settings or screen code");
+ok(!(await tryAs('party@ama.test', `insert into tv_events (starts_on, title) values (current_date, 'x')`)).ok && (await as('party@ama.test', () => db.query(`select tv_is_staff() a, tv_can('remote') b`))).rows[0].a === false, "...or use the rest of the editor");
+ok((await tryAs('tvonly@ama.test', `update tv_settings set seconds = seconds`)).ok, 'the TV editor can still change settings');
+await as('tate@ama.test', () => db.exec(`update tv_settings set only_slide = null, only_until = null; delete from tv_party_bookings; delete from tv_slides where title = 'Happy Birthday Mia!'`));
 ok(!(await tryAs('jo@ama.test', `insert into tv_permissions values ('x@ama.test', 'edit')`)).ok && !(await tryAs('tvonly@ama.test', `delete from tv_permissions`)).n, 'only admins can change TV permissions');
 await as('tate@ama.test', () => db.exec(`delete from tv_permissions where email = 'jo@ama.test'`));
 await db.exec(SQL);

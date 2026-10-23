@@ -38,6 +38,7 @@
   html, body { margin: 0; }
   body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.45; -webkit-tap-highlight-color: transparent; }
   [hidden] { display: none !important; }
+  body.partyonly .full { display: none !important; }   /* a login with party mode only sees just that */
   button, input, select, textarea { font: inherit; color: inherit; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   input[type=checkbox] { accent-color: var(--accent); width: 20px; height: 20px; flex: none; }
@@ -189,16 +190,17 @@
   <section id="problem" class="card" hidden></section>
 
   <section id="app" hidden style="display:flex;flex-direction:column;gap:14px">
-    <div class="card" id="status" hidden></div>
+    <div class="card" id="partyOnly" hidden></div>
+    <div class="card full" id="status" hidden></div>
     <div class="card" id="party"></div>
-    <div class="view-head"><h2>Slides</h2><div class="row"><a class="btn sm" id="previewBtn" target="_blank" rel="noopener">Preview</a><a class="btn sm" id="remoteBtn" href="../remote/">Remote</a><button class="btn primary sm" id="addBtn">Add</button></div></div>
-    <p class="hint">The TV shows these in order, on a loop, and picks up changes within 20 seconds.</p>
-    <ul class="slides" id="list"></ul>
+    <div class="view-head full"><h2>Slides</h2><div class="row"><a class="btn sm" id="previewBtn" target="_blank" rel="noopener">Preview</a><a class="btn sm" id="remoteBtn" href="../remote/">Remote</a><button class="btn primary sm" id="addBtn">Add</button></div></div>
+    <p class="hint full">The TV shows these in order, on a loop, and picks up changes within 20 seconds.</p>
+    <ul class="slides full" id="list"></ul>
 
-    <div class="card" id="eventsCard" hidden></div>
+    <div class="card full" id="eventsCard" hidden></div>
 
-    <h2 style="margin-top:8px">Settings</h2>
-    <form class="card" id="setForm">
+    <h2 class="full" style="margin-top:8px">Settings</h2>
+    <form class="card full" id="setForm">
       <div class="row" style="justify-content:space-between;align-items:flex-end">
         <div><div class="label">Screen code</div><div class="code" id="code"></div></div>
         <button type="button" class="btn sm" id="newCode">New code</button>
@@ -284,10 +286,14 @@ const ago = iso => { const s = Math.max(0, Math.round((Date.now() - new Date(iso
 async function load() {
   const staff = await sb.rpc('tv_is_staff');
   if (staff.error) return problem(/tv_is_staff|schema cache|does not exist|function/i.test(staff.error.message || '') ? 'setup' : staff.error.message);
+  state.partyOnly = false;
   if (!staff.data) {
-    const rem = await sb.rpc('tv_can', { p_perm: 'remote' });
-    return problem(rem.data ? 'remoteonly' : 'noaccess');
+    const [rem, par] = await Promise.all([sb.rpc('tv_can', { p_perm: 'remote' }), sb.rpc('tv_can', { p_perm: 'party' })]);
+    if (!par.data) return problem(rem.data ? 'remoteonly' : 'noaccess');
+    state.partyOnly = true;
+    $('#partyOnly').innerHTML = `<div class="row"><p class="hint grow" style="margin:0">Your login can use party mode: birthday posters and messages, now or booked ahead.</p>${rem.data ? '<a class="btn sm" href="../remote/">Remote</a>' : ''}</div>`;
   }
+  document.body.classList.toggle('partyonly', state.partyOnly); $('#partyOnly').hidden = !state.partyOnly;
   const [{ data: slides, error: e1 }, { data: settings, error: e2 }] = await Promise.all([
     sb.from('tv_slides').select('*').order('position').order('created_at'),
     sb.from('tv_settings').select('*').eq('id', 1).maybeSingle()
@@ -909,7 +915,8 @@ function openParty(opts) {
         <div class="tpls">${state.templates.map(t => `<button type="button" data-tpl="${t.id}" aria-pressed="${t.id === tplId}"><img src="${MEDIA + esc(t.image_path)}" alt=""><span>${esc(t.title)}</span></button>`).join('')}</div>
         <div class="field"><label for="pPoster">Birthday child's name</label><input type="text" id="pPoster" maxlength="40" placeholder="e.g. Kian" autocomplete="off" value="${esc(posterName)}"></div>
         <canvas class="posterprev" id="pCanvas" width="1920" height="1080" aria-label="Poster preview"></canvas>
-        <div class="row"><button type="button" class="btn sm" id="pDownload">Download</button><span class="grow"></span><button type="button" class="btn sm" id="pManage">Manage templates</button></div>`
+        <div class="row"><button type="button" class="btn sm" id="pDownload">Download</button><span class="grow"></span>${state.partyOnly ? '' : '<button type="button" class="btn sm" id="pManage">Manage templates</button>'}</div>`
+        : state.partyOnly ? `<p class="hint">No poster templates yet. Someone with the TV editor can add them.</p>`
         : `<p class="hint">No poster templates yet. Import the AMA templates file, or add a design with the name area left empty.</p>
         <div class="row"><button type="button" class="btn primary" id="pImport">Import templates</button><button type="button" class="btn" id="pAddTpl">Add template</button></div>`)
       : mode === 'message' ? `
