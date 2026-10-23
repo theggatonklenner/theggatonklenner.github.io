@@ -543,10 +543,10 @@
   var battery = { level: null, charging: null }, batTry = 0;
   function batteryDraw() {
     var st = (feed && feed.settings) || {}, warn = st.battery_warn == null ? 20 : st.battery_warn, el = $('lowbat');
-    var low = warn > 0 && battery.level != null && battery.level < warn && !battery.charging;
+    var low = feed && feed.display === 'tablet' && warn > 0 && battery.level != null && battery.level < warn && !battery.charging;   // tablets only
     el.style.display = low ? '' : 'none';
     document.body.className = document.body.className.replace(/\bhaslowbat\b/g, '') + (low ? ' haslowbat' : '');
-    if (low) el.innerHTML = 'Battery low (' + battery.level + '%). Please plug this ' + (feed && feed.display === 'tablet' ? 'tablet' : 'screen') + ' in.';
+    if (low) el.innerHTML = 'Battery low (' + battery.level + '%). Please plug this tablet in.';
   }
   function batterySet(level, charging) {
     var l = Math.round(level), c = !!charging;
@@ -649,7 +649,7 @@
   setInterval(function () { if (code) load(false); }, POLL_MS);
   // As FreeKiosk's screensaver, check twice as often, so a party moves onto the main screen within 10 seconds
   setInterval(function () { var st = feed && feed.settings; if (code && st && st.signin_open === 'kiosk' && !KIOSK_MAIN && !PREVIEW) load(false); }, POLL_MS / 2);
-  window.__tv = { battery: function (l, c) { batterySet(l, c); }, next: next, remotePoll: remotePoll, paused: function () { return paused; }, reload: function () { load(false); }, checkIn: checkIn, started: STARTED, state: function () { return { index: index, count: playlist.length, ids: playlist.map(function (s) { return s.id; }) }; } };   // for testing
+  window.__tv = { feed: function () { return feed; }, battery: function (l, c) { batterySet(l, c); }, next: next, remotePoll: remotePoll, paused: function () { return paused; }, reload: function () { load(false); }, checkIn: checkIn, started: STARTED, state: function () { return { index: index, count: playlist.length, ids: playlist.map(function (s) { return s.id; }) }; } };   // for testing
   load(true);
 })();
 </script>

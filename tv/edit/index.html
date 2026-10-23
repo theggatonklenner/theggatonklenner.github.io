@@ -412,7 +412,8 @@ function draw() {
   $('#setSecs').value = S.seconds; $('#setClock').checked = S.show_clock; $('#setLogo').checked = S.show_logo;
   $('#offBox').hidden = !('offs' in S); if ('offs' in S) { offState = JSON.parse(JSON.stringify(S.offs || [])); drawOffs(); }
   $('#bannerBox').hidden = !('banner' in S); $('#setBanner').value = S.banner || '';
-  $('#batBox').hidden = !('battery_warn' in S); if ('battery_warn' in S) $('#setBatWarn').value = S.battery_warn;
+  $('#batBox').hidden = !('battery_warn' in S) || state.display !== 'tablet';   // tablets only
+  if ('battery_warn' in S) $('#setBatWarn').value = S.battery_warn;
   $('#signinBox').hidden = !('signin_url' in S);
   if ('signin_url' in S) { $('#setSignin').value = S.signin_url || ''; $('#setSigninOpen').value = S.signin_open || 'page';
     if (!('kiosk_port' in S)) { const k = $('#setSigninOpen option[value="kiosk"]'); if (k) k.remove(); if (S.signin_open === 'kiosk') $('#setSigninOpen').value = 'page'; }
@@ -957,7 +958,7 @@ function drawStatus() {
       const what = x.showing ? esc(x.showing) : 'Starting up';
       const label = x.name ? esc(x.name) : list.length > 1 ? `${N === 'TV' ? 'TV' : 'Tablet'} ${i + 1}` : '';
       const bt = x.details && x.details.battery, btWarn = (state.settings && state.settings.battery_warn) || 0;
-      const batt = bt && bt.level != null ? ` <span class="tag${!bt.charging && btWarn && bt.level < btWarn ? ' warn' : ' muted'}" title="Battery">${bt.charging ? 'Charging ' : 'Battery '}${esc(bt.level)}%</span>` : '';
+      const batt = state.display === 'tablet' && bt && bt.level != null ? ` <span class="tag${!bt.charging && btWarn && bt.level < btWarn ? ' warn' : ' muted'}" title="Battery">${bt.charging ? 'Charging ' : 'Battery '}${esc(bt.level)}%</span>` : '';
       const where = state.locations ? ` <span class="tag${x.location ? '' : ' warn'}">${x.location ? esc(locName([x.location])) : 'No location'}</span>` : '';
       return `<li><div class="grow"><b>${label ? label + ': ' : ''}${live ? 'Showing: ' + what : 'Offline'}</b>${where}${batt}
         <div>${live ? `Checked in ${esc(ago(x.last_seen))}` : `Last seen ${esc(ago(x.last_seen))}${x.showing ? `, showing ${what}` : ''}`}${x.started_at ? ` · page loaded ${esc(ago(x.started_at))}` : ''}</div></div>
