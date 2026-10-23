@@ -890,7 +890,7 @@ function drawParty() {
     box.innerHTML = `<div class="row" style="justify-content:space-between"><h3>Party mode is on</h3><span class="chip" style="background:var(--on-gold);color:var(--gold)">${both ? 'TV + tablets' : state.display === 'tv' ? 'TV' : 'Tablets'}</span></div>
       <div class="row" style="align-items:center">${thumb(sl)}<p class="grow" style="margin:0">${both ? 'The TV and the tablets are' : Here()} showing only <b>${esc(slideName(sl))}</b> until <b>${timeText(S.only_until)}</b>${sameDay ? '' : ' ' + new Date(S.only_until).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}. Then ${both ? 'they go' : 'it goes'} back to the slideshow by itself.</p></div>
       <div class="row"><button class="btn primary" id="partyStop">Back to normal now</button><button class="btn" id="partyMore">1 more hour</button></div>`;
-    $('#partyStop').onclick = async () => { await setParty(null, null, both ? null : undefined); toast('Back to normal. It switches within 20 seconds.', 4000); };
+    $('#partyStop').onclick = async () => { await setParty(null, null, both ? null : undefined); toast('Back to normal. It switches within a few seconds.', 4000); };
     $('#partyMore').onclick = async () => { await setParty(S.only_slide, new Date(new Date(S.only_until).getTime() + 3600e3).toISOString(), both ? sl.linked : undefined); toast(`Party mode until ${timeText(state.settings.only_until)}`); };
   } else if (activeBookings().length) {
     // One or more parties on now (different locations can each have one)
@@ -900,7 +900,7 @@ function drawParty() {
       ${act.map((b, i) => { const sl = findSlide(b.slide_id); return `<div class="row" style="align-items:center">${thumb(sl)}<p class="grow" style="margin:0">${sl.linked ? 'The TV and the tablets' : here()[0].toUpperCase() + here().slice(1)}${sl.locations && sl.locations.length ? ` at <b>${esc(locName(sl.locations))}</b>` : ''} ${sl.linked || state.display === 'tablet' ? 'are' : 'is'} showing only <b>${esc(slideName(sl))}</b> until <b>${timeText(b.ends_at)}</b>. Then ${sl.linked ? 'they go' : 'it goes'} back to the slideshow by itself.</p></div>
         <div class="row"><button class="btn primary" data-stop="${b.id}"${i ? '' : ' id="partyStop"'}>Back to normal now</button><button class="btn" data-more="${b.id}"${i ? '' : ' id="partyMore"'}>1 more hour</button></div>`; }).join('')}
       <div class="row"><button class="btn sm" id="partyStart">${state.locations ? 'Start one somewhere else' : 'Start a different one'}</button>${state.bookings ? '<button class="btn sm" id="partyBook">Book for later</button>' : ''}</div>${bookedList()}`;
-    $$('#party [data-stop]').forEach(x => x.onclick = async () => { const b = act.find(y => y.id === x.dataset.stop); if (await moveBooking(b, new Date().toISOString())) toast('Back to normal. It switches within 20 seconds.', 4000); });
+    $$('#party [data-stop]').forEach(x => x.onclick = async () => { const b = act.find(y => y.id === x.dataset.stop); if (await moveBooking(b, new Date().toISOString())) toast('Back to normal. It switches within a few seconds.', 4000); });
     $$('#party [data-more]').forEach(x => x.onclick = async () => { const b = act.find(y => y.id === x.dataset.more), t = new Date(new Date(b.ends_at).getTime() + 3600e3).toISOString(); if (await moveBooking(b, t)) toast(`Party until ${timeText(t)}`); });
     $('#partyStart').onclick = () => openParty();
     if ($('#partyBook')) $('#partyBook').onclick = () => openParty({ book: true });
@@ -974,7 +974,7 @@ function drawStatus() {
     const on = !state.settings.blackout; $('#tvDark').disabled = true;
     const { error } = await sb.rpc('tv_remote_send', { p_cmd: on ? 'blackout' : 'wake', p_slide: null, p_display: state.display });
     if (error) { $('#tvDark').disabled = false; return toast('Not sent: ' + error.message, 5000); }
-    toast(on ? 'The screen goes black within 20 seconds.' : 'The screen comes back on within 20 seconds.', 4000); load();
+    toast(on ? 'The screen goes black within 20 seconds.' : 'The screen comes back on within a few seconds.', 4000); load();
   };
   $('#tvReload').onclick = async () => {
     $('#tvReload').disabled = true;
@@ -988,7 +988,7 @@ function drawStatus() {
     const on = !!b.dataset.on; b.disabled = true;
     const { error } = await sb.rpc('tv_screen_blackout', { p_screen: b.dataset.darkTv, p_on: on });
     if (error) { b.disabled = false; return toast((/function|schema cache/i.test(error.message) ? 'Run supabase/tv-setup.sql again first. ' : 'Not sent: ') + error.message, 6000); }
-    toast(on ? `That ${noun()} goes black within 20 seconds.` : `That ${noun()} comes back on within 20 seconds.`, 4000); pollStatus();
+    toast(on ? `That ${noun()} goes black within 20 seconds.` : `That ${noun()} comes back on within a few seconds.`, 4000); pollStatus();
   });
   $$('#status [data-name-tv]').forEach(b => b.onclick = () => {
     const x = state.screens.find(y => y.screen_id === b.dataset.nameTv); if (!x) return;

@@ -646,9 +646,17 @@
 
   // Reload once a night (picks up updates and keeps the TV browser fresh)
   setInterval(function () { var n = new Date(); if (n.getHours() === 3 && n.getMinutes() < 2) location.reload(); }, 60000);
-  setInterval(function () { if (code) load(false); }, POLL_MS);
-  // As FreeKiosk's screensaver, check twice as often, so a party moves onto the main screen within 10 seconds
-  setInterval(function () { var st = feed && feed.settings; if (code && st && st.signin_open === 'kiosk' && !KIOSK_MAIN && !PREVIEW) load(false); }, POLL_MS / 2);
+  // How often to check for changes (a check with nothing new is a few bytes):
+  //   during a party or blackout every 5 seconds, so it goes back to normal quickly when it ends;
+  //   on FreeKiosk tablets every 10 seconds, so a party moves onto the main screen quickly;
+  //   otherwise every 15 seconds.
+  function pollDelay() {
+    var st = (feed && feed.settings) || {};
+    if (feed && (feed.only || feed.blackout || feed.off)) return 5000;
+    if (st.signin_open === 'kiosk' && !PREVIEW) return 10000;
+    return 15000;
+  }
+  (function poll() { setTimeout(function () { if (code) load(false); poll(); }, pollDelay()); })();
   window.__tv = { feed: function () { return feed; }, battery: function (l, c) { batterySet(l, c); }, next: next, remotePoll: remotePoll, paused: function () { return paused; }, reload: function () { load(false); }, checkIn: checkIn, started: STARTED, state: function () { return { index: index, count: playlist.length, ids: playlist.map(function (s) { return s.id; }) }; } };   // for testing
   load(true);
 })();
