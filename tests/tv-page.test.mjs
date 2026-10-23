@@ -31,6 +31,12 @@ await db.exec(read(join(PREP, 'supabase/prep-setup.sql')));
 for (let i = 1; i <= 8; i++) await db.exec(read(join(PREP, `supabase/prep-update-0${i}.sql`)));
 await db.exec(`delete from staff_permissions where email <> 'tate@ama.test'; delete from prep_roles where email <> 'tate@ama.test';`);
 await db.exec(read(join(ROOT, 'supabase/tv-setup.sql')));
+// What party each screen is showing now: started now (a booking from now) or booked, or the older way (only_slide)
+await db.exec(`create view party_now as
+  select st.id, coalesce(case when st.only_until > now() then st.only_slide end, b.slide_id) only_slide,
+         coalesce(case when st.only_until > now() then st.only_until end, b.ends_at) only_until
+    from tv_settings st left join lateral (select bb.slide_id, bb.ends_at from tv_party_bookings bb join tv_slides bs on bs.id = bb.slide_id
+      where bs.display = st.display and bb.starts_at <= now() and bb.ends_at > now() order by bb.starts_at desc limit 1) b on true`);
 // Black Belt Prep data for the live slides
 await db.exec(`set role authenticated; select set_config('request.jwt.claims', '{"email":"tate@ama.test"}', false);
   insert into prep_students (student_id, full_name, certificate_name, belt_rank) values ('T1', 'Kara Lee', 'Kara Jane Lee', 'Cho Dan Bo'), ('T2', 'Sam Park', null, '1st Dan Level 1');`);
@@ -204,13 +210,13 @@ try {
   await page.selectOption('#pFor', '60');
   await page.screenshot({ path: join(SHOTS, 'tv-party-editor.png') });
   await page.click('#pGo'); await page.waitForSelector('#partyStop');
-  const tvset = (await db.query(`select only_slide, only_until > now() + interval '55 minutes' and only_until < now() + interval '65 minutes' ok from tv_settings where id = 1`)).rows[0];
+  const tvset = (await db.query(`select only_slide, only_until > now() + interval '55 minutes' and only_until < now() + interval '65 minutes' ok from party_now where id = 1`)).rows[0];
   ok(tvset.only_slide && tvset.ok, 'party mode is on for 1 hour');
   ok((await page.textContent('#party')).includes('Party mode is on') && !(await page.textContent('#list')).includes('Happy Birthday'), 'editor shows party mode is on; the party slide is kept out of the slide list');
   for (const scheme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme: scheme });
     const cols = await page.$$eval('#party .btn', bs => bs.map(b => { const c = getComputedStyle(b); return [c.color, c.backgroundColor]; }));
-    ok(cols.length === 2 && cols.every(([fg, bg]) => fg !== bg) && cols[1][0] === 'rgb(22, 33, 27)' && cols[1][1] === 'rgb(255, 255, 255)', `party mode buttons are readable in ${scheme} mode`);
+    ok(cols.length >= 2 && cols.every(([fg, bg]) => fg !== bg) && cols[1][0] === 'rgb(22, 33, 27)' && cols[1][1] === 'rgb(255, 255, 255)', `party mode buttons are readable in ${scheme} mode`);
   }
   await page.emulateMedia({ colorScheme: 'dark' }); await page.screenshot({ path: join(SHOTS, 'tv-party-on-dark.png') }); await page.emulateMedia({ colorScheme: 'light' });
   await page.screenshot({ path: join(SHOTS, 'tv-party-on.png') });
@@ -229,7 +235,7 @@ try {
   await page.click('#pPick'); await page.setInputFiles('#pickParty', join(ROOT, 'icons/ama-id-cards.png'));
   await page.waitForSelector('#pForm .preview-img');
   await page.fill('#pCap', 'Happy Birthday Sam!'); await page.click('#pGo'); await page.waitForSelector('#partyStop');
-  const img = (await db.query(`select s.kind, s.media_path from tv_settings t join tv_slides s on s.id = t.only_slide where t.id = 1`)).rows[0];
+  const img = (await db.query(`select s.kind, s.media_path from party_now t join tv_slides s on s.id = t.only_slide where t.id = 1`)).rows[0];
   ok(img.kind === 'photo' && files.has(img.media_path), 'an uploaded image can be shown on its own');
   await tv.page.evaluate(() => window.__tv.reload()); await tv.page.waitForTimeout(800);
   ok((await tv.page.evaluate(() => window.__tv.state())).count === 1, 'and the TV switches to it');
@@ -241,7 +247,7 @@ try {
   ok((await page.$$('#pForm [data-pick]')).length === 2, 'both earlier party slides are listed');
   await page.selectOption('#pFor', 'day'); await page.click('#pGo'); await page.waitForSelector('#partyStop');
   const endOfDay = await page.evaluate(() => { const d = new Date(); d.setHours(23, 59, 0, 0); return d.toISOString(); });
-  ok(Math.abs(new Date((await db.query(`select only_until from tv_settings where id = 1`)).rows[0].only_until) - new Date(endOfDay)) < 60e3, '"the rest of today" runs until 11:59 pm');
+  ok(Math.abs(new Date((await db.query(`select only_until from party_now where id = 1`)).rows[0].only_until) - new Date(endOfDay)) < 60e3, '"the rest of today" runs until 11:59 pm');
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
 
   // A PDF of birthday designs (as exported from Canva): pick a page, or save them all
@@ -265,7 +271,7 @@ try {
   await page.click('#pForm [data-page="1"]'); await page.waitForSelector('#pForm .preview-img');
   ok((await page.inputValue('#pCap')) === pageNames[1], 'picking a page gets it ready, named');
   await page.click('#pGo'); await page.waitForSelector('#partyStop');
-  const pdfSlide = (await db.query(`select s.kind, s.media_path, s.title from tv_settings t join tv_slides s on s.id = t.only_slide where t.id = 1`)).rows[0];
+  const pdfSlide = (await db.query(`select s.kind, s.media_path, s.title from party_now t join tv_slides s on s.id = t.only_slide where t.id = 1`)).rows[0];
   ok(pdfSlide.kind === 'photo' && pdfSlide.title === pageNames[1] && files.get(pdfSlide.media_path).type === 'image/jpeg', 'the chosen page goes on the TV as a full-screen image');
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
   const before = (await db.query(`select count(*)::int n from tv_slides where party`)).rows[0].n;
@@ -314,7 +320,7 @@ try {
   const dl = page.waitForEvent('download'); await page.click('#pDownload'); const dlf = await dl;
   ok(dlf.suggestedFilename() === 'birthday-maximilian.png', 'Download saves the poster as a picture');
   await page.selectOption('#pFor', '120'); await page.click('#pGo'); await page.waitForSelector('#partyStop', { timeout: 30000 });
-  const ps = (await db.query(`select s.kind, s.title, s.media_path from tv_settings t join tv_slides s on s.id = t.only_slide where t.id = 1`)).rows[0];
+  const ps = (await db.query(`select s.kind, s.title, s.media_path from party_now t join tv_slides s on s.id = t.only_slide where t.id = 1`)).rows[0];
   ok(ps.kind === 'photo' && /^Maximilian \(/.test(ps.title) && files.get(ps.media_path).type === 'image/jpeg' && files.get(ps.media_path).body.length > 10000, 'Show on the TV makes the poster and puts it on in party mode');
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
 
@@ -392,7 +398,7 @@ try {
   ok(await page.inputValue('#bDate') !== '' && await page.isVisible('#bFrom'), 'Book for later asks for the date and times');
   await page.fill('#bDate', tmr); await page.fill('#bFrom', '14:00'); await page.fill('#bTo', '17:00'); await page.fill('#pName', 'Kian');
   await page.click('#pGo'); await toastSays(page, 'Booked');
-  const bk = (await db.query(`select b.*, s.title from tv_party_bookings b join tv_slides s on s.id = b.slide_id where s.display = 'tv'`)).rows;
+  const bk = (await db.query(`select b.*, s.title from tv_party_bookings b join tv_slides s on s.id = b.slide_id where s.display = 'tv' and b.starts_at > now()`)).rows;
   ok(bk.length === 1 && bk[0].title === 'Happy Birthday Kian!' && new Date(bk[0].starts_at).getHours() === 14 && new Date(bk[0].ends_at).getHours() === 17, 'the party is booked with its name and times');
   await page.waitForSelector('#party .booked', { timeout: 5000 }).catch(() => {});
   ok((await page.textContent('#party')).includes('Happy Birthday Kian!') && (await page.textContent('#party')).includes('2:00'), 'the booking shows under Party mode');
@@ -403,12 +409,12 @@ try {
   await page.click('#pForm [data-close]');
 
   // The time comes: the TV switches by itself, then back at the end
-  await db.query(`update tv_party_bookings set starts_at = now() - interval '1 minute', ends_at = now() + interval '2 hours'`);
+  await db.query(`update tv_party_bookings set starts_at = now() - interval '1 minute', ends_at = now() + interval '2 hours' where starts_at > now()`);
   await tvp.evaluate(() => window.__tv.reload());
   await tvp.waitForFunction(() => window.__tv.state().count === 1, null, { timeout: 6000 }).catch(() => {});
   ok((await tvp.evaluate(() => window.__tv.state().count)) === 1 && (await tvp.textContent('body')).includes('Kian'), 'at the start time the TV shows only the party');
   await page.evaluate(() => pollStatus()); await page.waitForSelector('#partyStop');
-  ok((await page.textContent('#party')).includes('Booked party is on'), 'the editor shows the booked party is on');
+  ok((await page.textContent('#party')).includes('Party mode is on'), 'the editor shows the booked party is on');
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
   await tvp.evaluate(() => window.__tv.reload());
   await tvp.waitForFunction(() => window.__tv.state().count > 1, null, { timeout: 6000 }).catch(() => {});
@@ -664,7 +670,7 @@ try {
   ok(await page.isChecked('#pBoth') && (await page.textContent('label:has(#pBoth)')).includes('Also on the TV'), 'party mode on the tablets offers "Also on the TV", ticked');
   await page.uncheck('#pBoth'); await page.waitForSelector('#pName'); await page.fill('#pName', 'Leo');
   await page.click('#pGo'); await page.waitForSelector('#partyStop');
-  const pr = (await db.query(`select id, only_slide is not null on_ from tv_settings order by id`)).rows;
+  const pr = (await db.query(`select id, only_slide is not null on_ from party_now order by id`)).rows;
   ok(!pr[0].on_ && pr[1].on_, 'party mode on the tablets leaves the TV alone');
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
   await page.click('#dispSeg [data-disp="tv"]'); await page.waitForFunction(() => document.querySelector('#list').textContent.includes('No classes on Monday'), null, { timeout: 5000 }).catch(() => {});
@@ -691,16 +697,16 @@ try {
     ok(await page.isChecked('#pBoth') && await page.isVisible('#pCanvas2'), 'a poster shows on the TV and the tablets together, with both previews');
     await page.screenshot({ path: join(SHOTS, 'party-linked-editor.png') });
     await page.click('#pGo'); await page.waitForSelector('#partyStop', { timeout: 30000 });
-    const ls = (await db.query(`select t.id, s.id sid, s.display, s.linked, s.media_path, s.title from tv_settings t join tv_slides s on s.id = t.only_slide order by t.id`)).rows;
+    const ls = (await db.query(`select t.id, s.id sid, s.display, s.linked, s.media_path, s.title from party_now t join tv_slides s on s.id = t.only_slide order by t.id`)).rows;
     ok(ls.length === 2 && ls[0].display === 'tv' && ls[1].display === 'tablet' && ls[0].linked === ls[1].sid && ls[1].linked === ls[0].sid && /^Ava/.test(ls[1].title), 'one tap puts it on both screens, linked');
     const dims = jpgSize(files.get(ls[1].media_path).body), dimsTv = jpgSize(files.get(ls[0].media_path).body);
     ok(dims && dims.h > dims.w && dimsTv.w > dimsTv.h, `the tablets get the upright version (${dims && dims.w}x${dims && dims.h}), the TV the wide one`);
     ok((await page.textContent('#party')).includes('The TV and the tablets are showing'), 'the party card says it is on both');
     await page.click('#partyMore'); await page.waitForTimeout(800);
-    const mo = (await db.query(`select only_until from tv_settings order by id`)).rows;
+    const mo = (await db.query(`select only_until from party_now order by id`)).rows;
     ok(Math.abs(new Date(mo[0].only_until) - new Date(mo[1].only_until)) < 2000, '1 more hour changes both');
     await page.click('#partyStop'); await toastSays(page, 'Back to normal');
-    ok((await db.query(`select count(*)::int n from tv_settings where only_slide is not null`)).rows[0].n === 0, 'Back to normal ends it on both');
+    ok((await db.query(`select count(*)::int n from party_now where only_slide is not null`)).rows[0].n === 0, 'Back to normal ends it on both');
     // Booked, linked
     await page.click('#partyBook'); await page.waitForSelector('#bDate'); await page.click('#pForm [data-m="message"]'); await page.waitForSelector('#pName');
     const tmr2 = new Date(Date.now() + 2 * 864e5), d2 = `${tmr2.getFullYear()}-${String(tmr2.getMonth() + 1).padStart(2, '0')}-${String(tmr2.getDate()).padStart(2, '0')}`;
@@ -777,6 +783,78 @@ try {
   await tabc.close();
   await db.query(`delete from tv_slides where display = 'tablet'`);
 
+  // Locations: devices at Sydenham and Marrickville, each with its own party at the same time
+  console.log('\nLocations');
+  await db.query(`delete from tv_party_bookings`); await db.query(`update tv_settings set only_slide = null, only_until = null`);
+  const mkTv = async loc => {
+    const c = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    await c.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+    await c.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+    const pg = await c.newPage(); pg.on('pageerror', e => errors.push('tv: ' + e.message));
+    await pg.goto(BASE + `/tv/index.html?code=${CODE}${loc ? '&loc=' + loc : ''}`); await pg.waitForSelector('.layer.on');
+    await pg.evaluate(() => window.__tv.checkIn()); await pg.waitForTimeout(600);
+    return { c, pg };
+  };
+  const syd = await mkTv('sydenham'), mkv = await mkTv(null);
+  ({ ctx, page } = await context({ width: 390, height: 844 }));
+  await page.goto(BASE + '/tv/edit/index.html');
+  await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+  await page.waitForSelector('#locCard:not([hidden])');
+  ok((await page.textContent('#locCard')).includes('Marrickville, Sydenham, Concord, Auburn, Sylvania'), 'Settings lists the locations');
+  await page.evaluate(() => pollStatus()); await page.waitForTimeout(600);
+  const stx = await page.textContent('#status');
+  ok(stx.includes('Sydenham') && stx.includes('No location'), 'TV status shows each device\'s location (the one opened with a Sydenham link is at Sydenham)');
+  // Give the other TV a location in the editor
+  const mkvId = (await db.query(`select screen_id from tv_screens where location is null and display = 'tv' order by last_seen desc limit 1`)).rows[0].screen_id;
+  await page.click(`#status [data-name-tv="${mkvId}"]`); await page.waitForSelector('#nmLoc');
+  await page.fill('#nmIn', 'Reception'); await page.selectOption('#nmLoc', 'marrickville'); await page.click('#nmSave');
+  await page.waitForFunction(() => document.querySelector('#status').textContent.includes('Reception'), null, { timeout: 5000 }).catch(() => {});
+  ok((await db.query(`select location from tv_screens where screen_id = $1`, [mkvId])).rows[0].location === 'marrickville', 'a device can be given a location in the editor');
+  // Settings link for a location
+  await page.selectOption('#linkLoc', 'concord');
+  ok((await page.textContent('#screenLink')).endsWith('&loc=concord'), 'Settings makes a link for a device at a location');
+  // A Sydenham party and a Marrickville party at once
+  const party = async (name, loc) => {
+    await page.click('#partyStart'); await page.waitForSelector('#pForm');
+    if (await page.$('#pForm [data-m="message"]')) await page.click('#pForm [data-m="message"]');
+    await page.waitForSelector('#pWhere'); await page.selectOption('#pWhere', loc); await page.waitForSelector('#pName');
+    if (await page.isChecked('#pBoth')) await page.uncheck('#pBoth');
+    await page.waitForSelector('#pName'); await page.fill('#pName', name); await page.click('#pGo'); await toastSays(page, 'Party mode on');
+    await page.waitForTimeout(600);
+  };
+  await party('Syd', 'sydenham'); await party('Mark', 'marrickville');
+  const act = (await db.query(`select s.title, s.locations from tv_party_bookings b join tv_slides s on s.id = b.slide_id where b.starts_at <= now() and b.ends_at > now() order by s.title`)).rows;
+  ok(act.length === 2 && act[0].locations[0] === 'marrickville' && act[1].locations[0] === 'sydenham', 'two locations can each start a party at once');
+  ok((await page.$$('#party [data-stop]')).length === 2 && (await page.textContent('#party')).includes('at Sydenham'), 'the party card shows both, with where');
+  await page.screenshot({ path: join(SHOTS, 'locations-parties.png') });
+  for (const t of [syd, mkv]) { await t.pg.evaluate(() => window.__tv.reload()); }
+  await syd.pg.waitForFunction(() => window.__tv.state().count === 1, null, { timeout: 6000 }).catch(() => {});
+  await mkv.pg.waitForFunction(() => window.__tv.state().count === 1, null, { timeout: 6000 }).catch(() => {});
+  ok((await syd.pg.textContent('#stage')).includes('Happy Birthday Syd!') && (await mkv.pg.textContent('#stage')).includes('Happy Birthday Mark!'), 'each TV shows only the party for its location');
+  // Starting another Sydenham party replaces the Sydenham one only
+  await party('Sydney', 'sydenham');
+  const act2 = (await db.query(`select s.title from tv_party_bookings b join tv_slides s on s.id = b.slide_id where b.starts_at <= now() and b.ends_at > now() order by s.title`)).rows.map(r => r.title).join();
+  ok(act2 === 'Happy Birthday Mark!,Happy Birthday Sydney!', 'a new party at Sydenham replaces only the Sydenham one');
+  await page.click('#party [data-stop]'); await page.waitForTimeout(500); await page.click('#party [data-stop]'); await page.waitForTimeout(500);
+  ok((await db.query(`select count(*)::int n from tv_party_bookings where starts_at <= now() and ends_at > now()`)).rows[0].n === 0, 'each can be ended');
+  // A slide just for Sydenham
+  await page.click('#addBtn'); await page.click('[data-add="text"]'); await page.waitForSelector('#slLocs');
+  await page.fill('#slTitle', 'Sydenham car park closed'); await page.check('#slLocs input[value="sydenham"]'); await page.click('#slSave'); await toastSays(page, 'Added');
+  await page.waitForTimeout(500);
+  ok((await page.textContent('#list')).includes('Sydenham car park closed') && (await page.$$('#list .tag')).length > 0, 'a slide can be for one location, and the list says where');
+  for (const t of [syd, mkv]) { await t.pg.evaluate(() => window.__tv.reload()); await t.pg.waitForTimeout(500); await t.pg.evaluate(() => window.__tv.next()); }
+  await syd.pg.waitForTimeout(800);
+  const ids = async t => t.pg.evaluate(() => window.__tv.state().ids);
+  const sydSlide = (await db.query(`select id from tv_slides where title = 'Sydenham car park closed'`)).rows[0].id;
+  ok((await ids(syd)).includes(sydSlide) && !(await ids(mkv)).includes(sydSlide), 'it plays at Sydenham only');
+  await page.click('#locEdit'); await page.waitForSelector('#locNew');
+  await page.fill('#locNew', 'Parramatta'); await page.click('#locAdd button[type=submit]');
+  await page.waitForFunction(() => !!document.querySelector('[data-loc="parramatta"]'), null, { timeout: 5000 }).catch(() => {});
+  ok((await db.query(`select name from tv_locations where slug = 'parramatta'`)).rows.length === 1, 'locations can be added (and renamed or removed)');
+  await page.evaluate(() => document.querySelector('#dlg').close());
+  await db.query(`delete from tv_slides where title = 'Sydenham car park closed'`); await db.query(`delete from tv_locations where slug = 'parramatta'`);
+  await ctx.close(); await syd.c.close(); await mkv.c.close();
+
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));
   await page.goto(BASE + '/tv/edit/index.html');
@@ -806,11 +884,11 @@ try {
   if (await page.$('#pForm [data-m="message"]')) await page.click('#pForm [data-m="message"]');
   await page.waitForSelector('#pName'); await page.fill('#pName', 'Mia'); await page.click('#pGo');
   await page.waitForSelector('#partyStop', { timeout: 8000 }).catch(() => {});
-  const jp = (await db.query(`select s.title from tv_settings t join tv_slides s on s.id = t.only_slide where t.id = 1`)).rows[0];
+  const jp = (await db.query(`select s.title from party_now t join tv_slides s on s.id = t.only_slide where t.id = 1`)).rows[0];
   ok(jp && jp.title === 'Happy Birthday Mia!', '...and can put a birthday message on the TV');
   await page.screenshot({ path: join(SHOTS, 'tv-party-only.png') });
   await page.click('#partyStop'); await toastSays(page, 'Back to normal');
-  ok(!(await db.query(`select only_slide from tv_settings where id = 1`)).rows[0].only_slide, '...and stop it');
+  ok(!(await db.query(`select only_slide from party_now where id = 1`)).rows[0].only_slide, '...and stop it');
   await page.goto(BASE + '/tv/remote/index.html');
   await db.query(`delete from tv_permissions where email = 'jo@ama.test'`);
   await page.reload(); await page.waitForSelector('#problem:not([hidden])');

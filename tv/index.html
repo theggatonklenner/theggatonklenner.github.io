@@ -197,7 +197,7 @@
     if (!code || PREVIEW) return;
     fetch(BASE + '/rest/v1/rpc/tv_checkin', {
       method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'apikey': CFG.SUPABASE_KEY },
-      body: JSON.stringify({ p_code: code, p_screen: screenId, p_showing: showingNow(), p_started: STARTED,
+      body: JSON.stringify({ p_code: code, p_screen: screenId, p_loc: LOC, p_showing: showingNow(), p_started: STARTED,
         p_details: { w: window.innerWidth, h: window.innerHeight, slides: playlist.length, offline: /offline/.test(document.body.className), browser: navigator.userAgent.slice(0, 160) } })
     }).then(function (r) { return r.ok ? r.json() : null; }).then(function (r) {
       if (r && r.reload) location.reload();
@@ -209,6 +209,8 @@
   // A link with ?code=... works straight away (the tablets' link). It stays in the address, so a bookmark or
   // home screen shortcut keeps working.
   if (params.code) store.set('tvCode', params.code.toUpperCase());
+  if (params.loc) store.set('tvLoc', params.loc.toLowerCase());   // a location link, e.g. &loc=sydenham
+  var LOC = store.get('tvLoc') || null;
   code = store.get('tvCode');
   function askCode(msg) {
     clearTimeout(timer); stage.innerHTML = '';
@@ -220,7 +222,7 @@
     var c = $('codeInput').value.replace(/\s+/g, '').toUpperCase();
     if (!c) return;
     code = c; store.set('tvCode', c); $('codeScreen').style.display = 'none';
-    try { history.replaceState(null, '', location.pathname + '?code=' + encodeURIComponent(c) + (PREVIEW ? '&preview=1' : '')); } catch (er) { /* ignore */ }
+    try { history.replaceState(null, '', location.pathname + '?code=' + encodeURIComponent(c) + (LOC ? '&loc=' + encodeURIComponent(LOC) : '') + (PREVIEW ? '&preview=1' : '')); } catch (er) { /* ignore */ }
     load(true);
   };
 
@@ -229,7 +231,7 @@
     return fetch(BASE + '/rest/v1/rpc/tv_feed', {
       method: 'POST', cache: 'no-store',
       headers: { 'Content-Type': 'application/json', 'apikey': CFG.SUPABASE_KEY },
-      body: JSON.stringify({ p_code: code })
+      body: JSON.stringify({ p_code: code, p_screen: screenId, p_loc: LOC })
     }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
   }
   function load(first) {

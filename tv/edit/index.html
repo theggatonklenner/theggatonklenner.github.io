@@ -206,6 +206,7 @@
     <ul class="slides full" id="list"></ul>
 
     <div class="card full" id="eventsCard" hidden></div>
+    <div class="card full" id="locCard" hidden></div>
 
     <h2 class="full" style="margin-top:8px">Settings</h2>
     <form class="card full" id="setForm">
@@ -213,7 +214,9 @@
         <div><div class="label">Screen code</div><div class="code" id="code"></div></div>
         <button type="button" class="btn sm" id="newCode">New code</button>
       </div>
-      <div class="field"><span class="label">Link for this screen</span><div class="row"><code id="screenLink" class="grow" style="word-break:break-all;font-size:14px"></code><button type="button" class="btn sm" id="copyLink">Copy</button><button type="button" class="btn sm" id="qrLink">QR code</button></div></div>
+      <div class="field"><span class="label">Link for this screen</span>
+        <div class="row" id="linkLocRow" hidden><label for="linkLoc" class="label" style="margin:0">For a device at</label><select id="linkLoc" style="width:auto;flex:1"></select></div>
+        <div class="row"><code id="screenLink" class="grow" style="word-break:break-all;font-size:14px"></code><button type="button" class="btn sm" id="copyLink">Copy</button><button type="button" class="btn sm" id="qrLink">QR code</button></div></div>
       <p class="hint" id="linkHint"></p>
       <p class="hint">A new code stops any screen using the old code or link until it gets the new one.</p>
       <div class="grid2">
@@ -307,6 +310,10 @@ const Here = () => state.display === 'tv' ? 'The TV is' : 'The tablets are';
 const tabletOf = t => ({ id: t.id, title: t.title, image_path: t.tablet_image_path, settings: t.tablet_settings, _local: t._localTab });
 const hasTablet = t => !!(t && t.tablet_image_path && t.tablet_settings);
 const variant = (t, d) => d === 'tablet' && hasTablet(t) ? tabletOf(t) : t;
+// Locations: slugs -> "Sydenham" / "All locations"
+const locName = slugs => !slugs || !slugs.length ? 'All locations' : slugs.map(x => ((state.locations || []).find(l => l.slug === x) || {}).name || x).join(', ');
+const locChecks = (id, cur) => `<div class="checks" id="${id}">${(state.locations || []).map(l => `<label class="check"><input type="checkbox" value="${esc(l.slug)}"${(cur || []).includes(l.slug) ? ' checked' : ''}> ${esc(l.name)}</label>`).join('')}</div>`;
+const locPicked = id => [...document.querySelectorAll(`#${id} input:checked`)].map(i => i.value);
 const sid = () => state.display === 'tablet' ? 2 : 1;
 const noun = () => state.display === 'tablet' ? 'tablet' : 'TV';
 function setDisplay(d) {
@@ -348,6 +355,8 @@ async function load() {
   state.other = ot.error ? null : (Array.isArray(ot.data) ? ot.data[0] : ot.data) || null;   // the other screen, for linked parties
   state.events = ev.error ? null : (ev.data || []);   // null: database not updated for events yet
   state.months = mo.error ? [] : (mo.data || []);
+  const lc = await sb.from('tv_locations').select('*').order('position').order('name');
+  state.locations = lc.error ? null : (lc.data || []);   // null: database not updated for locations yet
   state.nextGrading = (fd && fd.data && fd.data.live && fd.data.live.next_grading && fd.data.live.next_grading.date) || null;
   show('#app'); draw();
 }
@@ -399,7 +408,10 @@ function draw() {
   $$('#dispSeg [data-disp]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.disp === state.display)));
   $('.brand h1').textContent = state.display === 'tablet' ? 'Tablet Display' : 'TV Display';
   $('#remoteBtn').href = state.display === 'tablet' ? '../remote/?display=tablet' : '../remote/';
+  $('#linkLocRow').hidden = !(state.locations && state.locations.length);
+  if (state.locations) { const cur = $('#linkLoc').value; $('#linkLoc').innerHTML = '<option value="">Any (set it in the status card)</option>' + state.locations.map(l => `<option value="${esc(l.slug)}"${cur === l.slug ? ' selected' : ''}>${esc(l.name)}</option>`).join(''); }
   $('#screenLink').textContent = screenLink();
+  drawLocations();
   $('#linkHint').innerHTML = state.display === 'tablet'
     ? 'On each tablet, open this link (or scan the QR code with its camera); use the same link on as many tablets as you like. It starts playing straight away, upright. Tap the screen for full screen, and add it to the home screen so it opens with one tap.'
     : 'On the TV, open the web browser and go to this link, or go to <b>theggatonklenner.github.io/tv</b> and type the code once. Press OK for full screen.';
@@ -412,7 +424,7 @@ function draw() {
       ${thumb(s)}
       <div class="main" data-open="${s.id}"><div class="name">${esc(slideName(s))}</div>
         <div class="meta"><span>${esc(what)}</span><span>· ${s.kind === 'video' && !s.seconds ? 'plays to the end' : (s.seconds || S.seconds) + ' s'}</span>
-          ${!s.enabled ? '<span class="tag muted">Off</span>' : ''}${out ? `<span class="tag warn">${out}</span>` : (s.ends_on ? `<span class="tag muted">Until ${fmtDate(s.ends_on)}</span>` : '')}</div></div>
+          ${s.locations && s.locations.length ? `<span class="tag">${esc(locName(s.locations))}</span>` : ''}${!s.enabled ? '<span class="tag muted">Off</span>' : ''}${out ? `<span class="tag warn">${out}</span>` : (s.ends_on ? `<span class="tag muted">Until ${fmtDate(s.ends_on)}</span>` : '')}</div></div>
       <label class="check" style="min-height:0" title="Show on the TV"><input type="checkbox" data-on="${s.id}" ${s.enabled ? 'checked' : ''} aria-label="Show ${esc(slideName(s))} on the TV"></label>
       <div class="moves"><button data-up="${s.id}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">▲</button><button data-down="${s.id}" ${i === list.length - 1 ? 'disabled' : ''} aria-label="Move down">▼</button></div></li>`;
   }).join('') : '<li style="padding:28px 16px;text-align:center;color:var(--muted)">No slides yet. Tap Add to put photos, videos or info on the TV.</li>';
@@ -626,6 +638,7 @@ function openSlide(s, fresh) {
       <div class="field"><label for="slFrom">Show from (optional)</label><input type="date" id="slFrom" value="${esc(x.starts_on || '')}"></div>
       <div class="field"><label for="slUntil">Show until (optional)</label><input type="date" id="slUntil" value="${esc(x.ends_on || '')}"></div>
     </div>
+    ${state.locations && state.locations.length ? `<div class="field"><span class="label">Show at</span>${locChecks('slLocs', x.locations)}<p class="hint">None ticked: every location.</p></div>` : ''}
     <div class="row">${!isNew ? '<button type="button" class="btn danger" id="slDel">Delete</button>' : ''}<span class="grow"></span><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="slSave">${isNew ? 'Add' : 'Save'}</button></div>
   </form>`);
   const t = $('#slTitle'); if (t && isNew) t.focus();
@@ -664,7 +677,7 @@ function openSlide(s, fresh) {
     e.preventDefault();
     const from = $('#slFrom').value || null, until = $('#slUntil').value || null;
     if (from && until && until < from) return toast('"Show until" is before "Show from".');
-    const rec = { title: t ? (t.value.trim() || null) : x.title, seconds: $('#slSecs').value ? Math.max(3, Math.min(600, +$('#slSecs').value)) : null, enabled: $('#slOn').checked, starts_on: from, ends_on: until };
+    const rec = { ...($('#slLocs') ? { locations: locPicked('slLocs').length ? locPicked('slLocs') : null } : {}), title: t ? (t.value.trim() || null) : x.title, seconds: $('#slSecs').value ? Math.max(3, Math.min(600, +$('#slSecs').value)) : null, enabled: $('#slOn').checked, starts_on: from, ends_on: until };
     if (x.kind === 'text') { rec.body = $('#slBody').value.trim() || null; rec.media_path = bgPath; if (!rec.title && !rec.body) return toast('Add a heading or some text.'); }
     if (x.kind === 'qr') {
       rec.body = $('#slBody').value.trim() || null;
@@ -848,14 +861,18 @@ function drawParty() {
       <div class="row"><button class="btn primary" id="partyStop">Back to normal now</button><button class="btn" id="partyMore">1 more hour</button></div>`;
     $('#partyStop').onclick = async () => { await setParty(null, null, both ? null : undefined); toast('Back to normal. It switches within 20 seconds.', 4000); };
     $('#partyMore').onclick = async () => { await setParty(S.only_slide, new Date(new Date(S.only_until).getTime() + 3600e3).toISOString(), both ? sl.linked : undefined); toast(`Party mode until ${timeText(state.settings.only_until)}`); };
-  } else if (activeBooking()) {
-    const b = activeBooking(), sl = findSlide(b.slide_id);
+  } else if (activeBookings().length) {
+    // One or more parties on now (different locations can each have one)
+    const act = activeBookings();
     box.className = 'card on';
-    box.innerHTML = `<div class="row" style="justify-content:space-between"><h3>Booked party is on</h3><span class="chip" style="background:var(--on-gold);color:var(--gold)">${sl.linked ? 'TV + tablets' : state.display === 'tv' ? 'TV' : 'Tablets'}</span></div>
-      <div class="row" style="align-items:center">${thumb(sl)}<p class="grow" style="margin:0">${sl.linked ? 'The TV and the tablets are' : Here()} showing only <b>${esc(slideName(sl))}</b> until <b>${timeText(b.ends_at)}</b>. Then ${sl.linked ? 'they go' : 'it goes'} back to the slideshow by itself.</p></div>
-      <div class="row"><button class="btn primary" id="partyStop">Back to normal now</button><button class="btn" id="partyMore">1 more hour</button></div>${bookedList(b.id)}`;
-    $('#partyStop').onclick = async () => { if (await moveBooking(b, new Date().toISOString())) toast('Back to normal. The TV switches within 20 seconds.', 4000); };
-    $('#partyMore').onclick = async () => { const t = new Date(new Date(b.ends_at).getTime() + 3600e3).toISOString(); if (await moveBooking(b, t)) toast(`Party until ${timeText(t)}`); };
+    box.innerHTML = `<div class="row" style="justify-content:space-between"><h3>Party mode is on</h3><span class="chip" style="background:var(--on-gold);color:var(--gold)">${act.some(b => findSlide(b.slide_id).linked) ? 'TV + tablets' : state.display === 'tv' ? 'TV' : 'Tablets'}</span></div>
+      ${act.map((b, i) => { const sl = findSlide(b.slide_id); return `<div class="row" style="align-items:center">${thumb(sl)}<p class="grow" style="margin:0">${sl.linked ? 'The TV and the tablets' : here()[0].toUpperCase() + here().slice(1)}${sl.locations && sl.locations.length ? ` at <b>${esc(locName(sl.locations))}</b>` : ''} ${sl.linked || state.display === 'tablet' ? 'are' : 'is'} showing only <b>${esc(slideName(sl))}</b> until <b>${timeText(b.ends_at)}</b>. Then ${sl.linked ? 'they go' : 'it goes'} back to the slideshow by itself.</p></div>
+        <div class="row"><button class="btn primary" data-stop="${b.id}"${i ? '' : ' id="partyStop"'}>Back to normal now</button><button class="btn" data-more="${b.id}"${i ? '' : ' id="partyMore"'}>1 more hour</button></div>`; }).join('')}
+      <div class="row"><button class="btn sm" id="partyStart">${state.locations ? 'Start one somewhere else' : 'Start a different one'}</button>${state.bookings ? '<button class="btn sm" id="partyBook">Book for later</button>' : ''}</div>${bookedList()}`;
+    $$('#party [data-stop]').forEach(x => x.onclick = async () => { const b = act.find(y => y.id === x.dataset.stop); if (await moveBooking(b, new Date().toISOString())) toast('Back to normal. It switches within 20 seconds.', 4000); });
+    $$('#party [data-more]').forEach(x => x.onclick = async () => { const b = act.find(y => y.id === x.dataset.more), t = new Date(new Date(b.ends_at).getTime() + 3600e3).toISOString(); if (await moveBooking(b, t)) toast(`Party until ${timeText(t)}`); });
+    $('#partyStart').onclick = () => openParty();
+    if ($('#partyBook')) $('#partyBook').onclick = () => openParty({ book: true });
   } else {
     box.className = 'card';
     box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start"><div class="grow"><h3>Party mode</h3><p class="hint">Show just one thing on ${here()}, like a birthday poster, for a set time. Then it goes back to the slideshow by itself.</p></div>
@@ -874,24 +891,25 @@ function drawParty() {
   });
 }
 // Bookings: a party that switches itself on at the start time and off at the end
-const activeBooking = () => (state.bookings || []).find(b => new Date(b.starts_at) <= new Date() && new Date(b.ends_at) > new Date());
+const activeBookings = () => (state.bookings || []).filter(b => new Date(b.starts_at) <= new Date() && new Date(b.ends_at) > new Date());
 function bookedList(skip) {
   const list = (state.bookings || []).filter(b => b.id !== skip && new Date(b.starts_at) > new Date());
   if (!list.length) return '';
   return `<div class="label" style="margin-top:12px">Booked</div><ul class="booked">${list.map(b => {
     const sl = state.partySlides.concat(state.slides).find(x => x.id === b.slide_id) || {};
     const sameDay = new Date(b.starts_at).toDateString() === new Date(b.ends_at).toDateString();
-    return `<li>${thumb(sl)}<div class="grow"><b>${esc(slideName(sl))}</b>${sl.linked ? ' <span class="tag muted">+ ' + otherNoun() + '</span>' : ''}<div class="when">${esc(whenText(b.starts_at))} to ${esc(sameDay ? timeText(b.ends_at) : whenText(b.ends_at))}</div></div><button class="btn sm" data-unbook="${b.id}">Cancel</button></li>`;
+    return `<li>${thumb(sl)}<div class="grow"><b>${esc(slideName(sl))}</b>${sl.linked ? ' <span class="tag muted">+ ' + otherNoun() + '</span>' : ''}${state.locations ? ` <span class="tag">${esc(locName(sl.locations))}</span>` : ''}<div class="when">${esc(whenText(b.starts_at))} to ${esc(sameDay ? timeText(b.ends_at) : whenText(b.ends_at))}</div></div><button class="btn sm" data-unbook="${b.id}">Cancel</button></li>`;
   }).join('')}</ul>`;
 }
-async function moveBooking(b, ends) {
-  // Ending it now: the end must stay after the start, so a party ended in its first second ends a moment later
-  const min = new Date(new Date(b.starts_at).getTime() + 1000).toISOString();
-  const { error } = await sb.from('tv_party_bookings').update({ ends_at: ends > min ? ends : min }).eq('id', b.id);
+async function moveBooking(b, ends, noReload) {
+  // Ending it now: the end must stay after the start
+  // (one ended within a second of starting is simply removed)
+  const min = new Date(new Date(b.starts_at).getTime() + 1000).toISOString(), pl = findSlide(b.slide_id).linked;
+  const q = () => sb.from('tv_party_bookings');
+  const { error } = ends > min ? await q().update({ ends_at: ends }).eq('id', b.id) : await q().delete().eq('id', b.id);
   if (error) { toast('Not saved: ' + error.message, 5000); return false; }
-  const pl = findSlide(b.slide_id).linked;   // the same booking on the other screen
-  if (pl) await sb.from('tv_party_bookings').update({ ends_at: ends > min ? ends : min }).eq('slide_id', pl).eq('starts_at', b.starts_at);
-  await load(); return true;
+  if (pl) await (ends > min ? q().update({ ends_at: ends }) : q().delete()).eq('slide_id', pl).eq('starts_at', b.starts_at);   // the same booking on the other screen
+  if (!noReload) await load(); return true;
 }
 
 /* ---------- TV status: is it on, what's it showing, and a remote refresh ---------- */
@@ -910,9 +928,10 @@ function drawStatus() {
       const live = Date.now() - new Date(x.last_seen) < ONLINE_MS;
       const what = x.showing ? esc(x.showing) : 'Starting up';
       const label = x.name ? esc(x.name) : list.length > 1 ? `${N === 'TV' ? 'TV' : 'Tablet'} ${i + 1}` : '';
-      return `<li><div class="grow"><b>${label ? label + ': ' : ''}${live ? 'Showing: ' + what : 'Offline'}</b>
+      const where = state.locations ? ` <span class="tag${x.location ? '' : ' warn'}">${x.location ? esc(locName([x.location])) : 'No location'}</span>` : '';
+      return `<li><div class="grow"><b>${label ? label + ': ' : ''}${live ? 'Showing: ' + what : 'Offline'}</b>${where}
         <div>${live ? `Checked in ${esc(ago(x.last_seen))}` : `Last seen ${esc(ago(x.last_seen))}${x.showing ? `, showing ${what}` : ''}`}${x.started_at ? ` · page loaded ${esc(ago(x.started_at))}` : ''}</div></div>
-        <div class="row" style="flex-wrap:nowrap"><button class="btn sm" data-name-tv="${esc(x.screen_id)}">${x.name ? 'Rename' : 'Name'}</button>${!live ? `<button class="btn sm" data-forget-tv="${esc(x.screen_id)}">Remove</button>` : ''}</div></li>`;
+        <div class="row" style="flex-wrap:nowrap"><button class="btn sm" data-name-tv="${esc(x.screen_id)}">${state.locations ? 'Edit' : x.name ? 'Rename' : 'Name'}</button>${!live ? `<button class="btn sm" data-forget-tv="${esc(x.screen_id)}">Remove</button>` : ''}</div></li>`;
     }).join('')}</ul>` : ''}
     ${'blackout' in state.settings ? (state.settings.blackout
       ? `<div class="row" style="background:#111;color:#fff;border-radius:10px;padding:10px 12px"><span class="grow"><b>${N === 'TV' ? 'The screen is' : 'The tablets are'} blacked out</b> until you turn ${N === 'TV' ? 'it' : 'them'} back on.</span><button class="btn sm" id="tvDark" style="background:var(--gold);border-color:var(--gold);color:var(--on-gold)">Turn ${N === 'TV' ? 'the screen' : 'them'} back on</button></div>`
@@ -933,13 +952,15 @@ function drawStatus() {
   };
   $$('#status [data-name-tv]').forEach(b => b.onclick = () => {
     const x = state.screens.find(y => y.screen_id === b.dataset.nameTv); if (!x) return;
-    openDlg(`<form class="dlg" id="nmForm"><div class="dlg-head"><div><h3>Name this ${noun()}</h3><p class="hint">So you can tell them apart, e.g. Front desk. Showing: ${esc(x.showing || '-')}</p></div><button class="x" data-close>Close</button></div>
+    openDlg(`<form class="dlg" id="nmForm"><div class="dlg-head"><div><h3>This ${noun()}</h3><p class="hint">Showing: ${esc(x.showing || '-')}</p></div><button class="x" data-close>Close</button></div>
       <div class="field"><label for="nmIn">Name</label><input type="text" id="nmIn" maxlength="40" value="${esc(x.name || '')}" placeholder="e.g. Front desk"></div>
+      ${state.locations ? `<div class="field"><label for="nmLoc">Location</label><select id="nmLoc"><option value="">No location</option>${state.locations.map(l => `<option value="${esc(l.slug)}"${x.location === l.slug ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}</select>
+        <p class="hint">It shows the slides and parties for its location, plus anything for every location. With no location, only those for every location.</p></div>` : ''}
       <div class="row" style="justify-content:flex-end"><button class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="nmSave">Save</button></div></form>`);
     $('#nmIn').focus();
     $('#nmForm').onsubmit = async e => {
       e.preventDefault();
-      const { error } = await sb.from('tv_screens').update({ name: $('#nmIn').value.trim() || null }).eq('screen_id', x.screen_id);
+      const { error } = await sb.from('tv_screens').update({ name: $('#nmIn').value.trim() || null, ...($('#nmLoc') ? { location: $('#nmLoc').value || null } : {}) }).eq('screen_id', x.screen_id);
       if (error) return toast('Not saved: ' + error.message, 5000);
       dlg.close(); toast('Saved'); pollStatus();
     };
@@ -979,6 +1000,8 @@ function openParty(opts) {
   let mode = state.templates && state.templates.length ? 'poster' : 'message', photo = null, caption = '', pages = null, pick = (state.partySlides[0] || {}).id || null;
   let tplId = (state.templates && state.templates[0] || {}).id || null, posterName = '';
   let both = !!state.other;   // also on the other screen (TV and tablets together)
+  let where = ''; try { where = localStorage.getItem('tvPartyLoc') || ''; } catch (e) { /* ignore */ }
+  if (state.locations && where && !state.locations.some(l => l.slug === where)) where = '';
   const render = () => {
     openDlg(`<form class="dlg" id="pForm">
       <div class="dlg-head"><div><h3>Party mode</h3><p class="hint">Only this shows on ${here()}${both ? ' and the ' + otherNoun() : ''} until the time is up.</p></div><button class="x" data-close>Close</button></div>
@@ -1007,6 +1030,7 @@ function openParty(opts) {
         ${photo ? `<div class="preview-img" style="background-image:url('${MEDIA + esc(photo)}')"></div>` : '<p class="hint">Use the birthday design made for the party: an image, or the PDF from Canva (you then pick the page). It fills the screen.</p>'}
         <div class="field"><label for="pCap">Name it (only shown in the editor)</label><input type="text" id="pCap" maxlength="120" value="${esc(caption)}" placeholder="e.g. Kian"></div>`
       : `<ul class="saved">${state.partySlides.map(x => `<li class="${x.id === pick ? 'pick' : ''}" data-pick="${x.id}">${thumb(x)}<span class="grow">${esc(slideName(x))}</span><button type="button" class="btn sm danger" data-forget="${x.id}">Delete</button></li>`).join('')}</ul>`}
+      ${state.locations && state.locations.length ? `<div class="field"><label for="pWhere">Where</label><select id="pWhere"><option value="">All locations</option>${state.locations.map(l => `<option value="${esc(l.slug)}"${where === l.slug ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}</select><p class="hint">Only devices at this location show it.</p></div>` : ''}
       ${state.other ? `<label class="check"><input type="checkbox" id="pBoth" ${both ? 'checked' : ''}> Also on the ${otherNoun()}</label>` : ''}
       ${state.bookings ? `<div class="field"><span class="label">When</span><div class="seg" role="group" aria-label="When"><button type="button" data-when="now" aria-pressed="${when === 'now'}">Now</button><button type="button" data-when="later" aria-pressed="${when === 'later'}">Book for later</button></div></div>` : ''}
       ${when === 'later' ? `<div class="grid2">
@@ -1018,7 +1042,7 @@ function openParty(opts) {
       <div class="field" id="pUntilRow" hidden><label for="pUntil">Until</label><input type="time" id="pUntil"></div>`}
       <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="pGo">${when === 'later' ? 'Book it' : 'Show it now'}</button></div>
     </form>`);
-    const keep = () => { if ($('#bDate')) { bDate = $('#bDate').value; bFrom = $('#bFrom').value; bTo = $('#bTo').value; } if ($('#pPoster')) posterName = $('#pPoster').value; };
+    const keep = () => { if ($('#pWhere')) { where = $('#pWhere').value; try { localStorage.setItem('tvPartyLoc', where); } catch (e) { /* ignore */ } } if ($('#bDate')) { bDate = $('#bDate').value; bFrom = $('#bFrom').value; bTo = $('#bTo').value; } if ($('#pPoster')) posterName = $('#pPoster').value; };
     $$('#pForm [data-m]').forEach(b => b.onclick = () => { keep(); mode = b.dataset.m; render(); });
     $$('#pForm [data-when]').forEach(b => b.onclick = () => { keep(); when = b.dataset.when; render(); });
     if ($('#pBoth')) $('#pBoth').onchange = () => { keep(); both = $('#pBoth').checked; render(); };
@@ -1102,14 +1126,16 @@ function openParty(opts) {
     $('#pForm').onsubmit = async e => {
       e.preventDefault();
       let until, starts = null;
+      // Same place: either is for all locations, or they share one
+      const sameWhere = b => { const bl = findSlide(b.slide_id).locations; return !where || !bl || !bl.length || bl.includes(where); };
       if (when === 'later') {
         keep();
         if (!bDate || !bFrom || !bTo) return toast('Fill in the date, start and end times.');
         starts = new Date(`${bDate}T${bFrom}`); until = new Date(`${bDate}T${bTo}`);
         if (until <= starts) until.setDate(until.getDate() + 1);   // ends after midnight
         if (until <= new Date()) return toast('That time has already passed.');
-        const clash = (state.bookings || []).find(b => new Date(b.starts_at) < until && new Date(b.ends_at) > starts);
-        if (clash) return toast(`Another party is booked then (${whenText(clash.starts_at)} to ${timeText(clash.ends_at)}).`, 6000);
+        const clash = (state.bookings || []).find(b => new Date(b.starts_at) < until && new Date(b.ends_at) > starts && sameWhere(b));
+        if (clash) return toast(`Another party is booked then${where ? ' at ' + locName([where]) : ''} (${whenText(clash.starts_at)} to ${timeText(clash.ends_at)}).`, 6000);
       } else { const v = $('#pFor').value;
       if (v === 'day') { const d = new Date(); d.setHours(23, 59, 0, 0); until = d; }
       else if (v === 'until') {
@@ -1118,13 +1144,16 @@ function openParty(opts) {
         if (d <= new Date()) d.setDate(d.getDate() + 1);   // a time earlier than now means tomorrow
         until = d;
       } else until = new Date(Date.now() + Number(v) * 60e3); }
+      keep();
+      const locs = where ? [where] : null;
       let id = null, id2 = null, rec = null, rec2 = null;
       const fail = msg => { $('#pGo').disabled = false; toast(msg, 6000); };
       $('#pGo').disabled = true;
       try {
         if (mode === 'saved') {
           id = pick; const sl = state.partySlides.find(x => x.id === pick) || {};
-          if (both) { if (sl.linked) id2 = sl.linked; else rec2 = { kind: sl.kind, title: sl.title, body: sl.body, media_path: sl.media_path, theme: sl.theme }; }
+          if (both) { if (sl.linked) id2 = sl.linked; else rec2 = { kind: sl.kind, title: sl.title, body: sl.body, media_path: sl.media_path, theme: sl.theme, locations: locs }; }
+          if (state.locations) { const { error } = await sb.from('tv_slides').update({ locations: locs }).in('id', [id].concat(id2 ? [id2] : [])); if (error) throw error; }
         } else if (mode === 'poster') {
           const t = (state.templates || []).find(x => x.id === tplId), nm = $('#pPoster') ? $('#pPoster').value.trim() : '';
           if (!t) return fail('Pick a poster first.');
@@ -1142,7 +1171,7 @@ function openParty(opts) {
           if (both) rec2 = { ...rec };
         }
         const add = async (r, d, linked) => {
-          const { data, error } = await sb.from('tv_slides').insert({ ...r, display: d, party: true, linked: linked || null }).select('id').single();
+          const { data, error } = await sb.from('tv_slides').insert({ ...r, ...(state.locations ? { locations: locs } : {}), display: d, party: true, linked: linked || null }).select('id').single();
           if (error) throw error;
           return (Array.isArray(data) ? data[0] : data || {}).id;
         };
@@ -1155,15 +1184,23 @@ function openParty(opts) {
       } catch (er) { return fail('Not saved: ' + (er.message || er)); }
       if (!id) { $('#pGo').disabled = false; return toast('Choose what to show.'); }
       dlg.close();
-      const where = id2 ? 'The TV and the tablets switch' : (state.display === 'tv' ? 'The TV switches' : 'The tablets switch');
+      const whereTxt = (id2 ? 'The TV and the tablets switch' : (state.display === 'tv' ? 'The TV switches' : 'The tablets switch')) + (locs ? ` at ${locName(locs)}` : '');
+      if (!starts && state.bookings) {
+        // "Start now" is a booking from now, so different locations can each have a party at once.
+        // One already on for the same place ends now (it's being replaced).
+        const now = new Date();
+        for (const b of state.bookings.filter(b => new Date(b.starts_at) <= now && new Date(b.ends_at) > now && sameWhere(b))) await moveBooking(b, now.toISOString(), true);
+        if (partyOn()) await setParty(null, null);
+        starts = now; var nowStart = true;
+      }
       if (starts) {
         const rows = [id].concat(id2 ? [id2] : []).map(x => ({ slide_id: x, starts_at: starts.toISOString(), ends_at: until.toISOString() }));
         const { error } = await sb.from('tv_party_bookings').insert(rows);
         if (error) { toast('Not booked: ' + error.message, 6000); return load(); }
-        toast(`Booked for ${whenText(starts.toISOString())} to ${timeText(until.toISOString())}. ${where} on and off by itself.`, 6000);
+        toast(nowStart ? `Party mode on until ${timeText(until.toISOString())}. ${whereTxt} within 20 seconds.` : `Booked for ${whenText(starts.toISOString())} to ${timeText(until.toISOString())}. ${whereTxt} on and off by itself.`, 6000);
         return load();
       }
-      if (await setParty(id, until.toISOString(), id2 ? id2 : undefined)) toast(`Party mode on until ${timeText(until.toISOString())}. ${where} within 20 seconds.`, 5000);
+      if (await setParty(id, until.toISOString(), id2 ? id2 : undefined)) toast(`Party mode on until ${timeText(until.toISOString())}. ${whereTxt} within 20 seconds.`, 5000);
     };
   };
   render();
@@ -1375,8 +1412,47 @@ function importTemplates(after) {
   $('#pickImport').click();
 }
 
+/* ---------- Locations ---------- */
+function drawLocations() {
+  const box = $('#locCard');
+  if (!state.locations) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start"><div class="grow"><h3>Locations</h3>
+    <p class="hint">${state.locations.length ? esc(state.locations.map(l => l.name).join(', ')) : 'None yet.'} Give each ${noun()} a location in the status card above; slides and parties can be for one location or all.</p></div>
+    <button class="btn" id="locEdit">Edit</button></div>`;
+  $('#locEdit').onclick = openLocations;
+}
+function openLocations() {
+  const slugOf = n => n.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+  openDlg(`<div class="dlg"><div class="dlg-head"><div><h3>Locations</h3><p class="hint">Renaming keeps everything at that location. Removing one leaves its devices with no location.</p></div><button class="x" data-close>Close</button></div>
+    <ul class="saved">${state.locations.map(l => `<li><input type="text" data-loc="${esc(l.slug)}" value="${esc(l.name)}" maxlength="40" aria-label="Name of ${esc(l.name)}" class="grow"><button type="button" class="btn sm danger" data-locdel="${esc(l.slug)}" aria-label="Remove ${esc(l.name)}">Remove</button></li>`).join('')}</ul>
+    <form id="locAdd" class="row"><input type="text" id="locNew" maxlength="40" placeholder="New location, e.g. Parramatta" class="grow" style="flex:1 1 160px;width:auto"><button class="btn" type="submit">Add</button></form></div>`);
+  $$('#dlg [data-loc]').forEach(i => i.onchange = async () => {
+    const v = i.value.trim(); if (!v) { i.value = (state.locations.find(l => l.slug === i.dataset.loc) || {}).name; return; }
+    const { error } = await sb.from('tv_locations').update({ name: v }).eq('slug', i.dataset.loc);
+    if (error) return toast('Not saved: ' + error.message, 5000);
+    toast('Saved'); await load(); openLocations();
+  });
+  $$('#dlg [data-locdel]').forEach(b => b.onclick = async () => {
+    const l = state.locations.find(x => x.slug === b.dataset.locdel);
+    if (!await confirmBox(`Remove ${l.name}? Its devices will have no location until you give them one.`, 'Remove')) return openLocations();
+    const { error } = await sb.from('tv_locations').delete().eq('slug', l.slug);
+    if (error) return toast('Not removed: ' + error.message, 5000);
+    await load(); openLocations();
+  });
+  $('#locAdd').onsubmit = async e => {
+    e.preventDefault(); const name = $('#locNew').value.trim(), slug = slugOf(name);
+    if (slug.length < 2) return toast('Type the location name.');
+    if (state.locations.some(l => l.slug === slug)) return toast('That location is already there.');
+    const { error } = await sb.from('tv_locations').insert({ slug, name, position: state.locations.length + 1 });
+    if (error) return toast('Not added: ' + error.message, 5000);
+    await load(); openLocations();
+  };
+}
+
 /* ---------- Settings ---------- */
-const screenLink = () => `https://theggatonklenner.github.io/tv/?code=${encodeURIComponent(state.settings.screen_code)}`;
+const screenLink = () => `https://theggatonklenner.github.io/tv/?code=${encodeURIComponent(state.settings.screen_code)}${$('#linkLoc') && $('#linkLoc').value ? '&loc=' + encodeURIComponent($('#linkLoc').value) : ''}`;
+$('#linkLoc').onchange = () => { $('#screenLink').textContent = screenLink(); };
 $('#copyLink').onclick = async () => {
   try { await navigator.clipboard.writeText(screenLink()); toast('Link copied'); }
   catch (e) { toast('Could not copy. Press and hold the link to copy it.', 4000); }

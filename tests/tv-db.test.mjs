@@ -294,6 +294,32 @@ ok(!(await tryAs('tate@ama.test', `update tv_settings set screen_code = '${code}
 await as('tate@ama.test', () => db.query(`delete from tv_slides where id in ($1, $2)`, [tsl, tparty]));
 await db.exec(`delete from tv_screens where screen_id = 'tablet-front1'; update tv_settings set remote_until = null`);
 
+console.log('\nLocations');
+ok((await db.query(`select string_agg(name, ',' order by position) n from tv_locations`)).rows[0].n === 'Marrickville,Sydenham,Concord,Auburn,Sylvania', 'starts with the five AMA locations');
+const feedAt = async (scr, loc) => (await as(null, () => db.query(`select tv_feed($1, $2, $3) f`, [code, scr, loc]))).rows[0].f;
+const ls1 = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, locations) values ('text', 'Sydenham only', '{sydenham}') returning id`))).rows[0].id;
+await as(null, () => db.query(`select tv_checkin($1, 'syd-tv-0001', 'x', now(), '{}'::jsonb, 'sydenham')`, [code]));
+await as(null, () => db.query(`select tv_checkin($1, 'mkv-tv-0001', 'x', now(), '{}'::jsonb, null)`, [code]));
+ok((await db.query(`select location from tv_screens where screen_id = 'syd-tv-0001'`)).rows[0].location === 'sydenham', 'a device opened with a location link is put at that location');
+let fs1 = await feedAt('syd-tv-0001', null), fm1 = await feedAt('mkv-tv-0001', null);
+ok(fs1.location === 'sydenham' && fs1.slides.some(x => x.title === 'Sydenham only'), 'a Sydenham slide shows on Sydenham devices');
+ok(!fm1.slides.some(x => x.title === 'Sydenham only') && fm1.slides.length > 0, '...not on others (they still get the slides for every location)');
+await as('tate@ama.test', () => db.exec(`update tv_screens set location = 'marrickville' where screen_id = 'mkv-tv-0001'`));
+await as(null, () => db.query(`select tv_checkin($1, 'mkv-tv-0001', 'x', now(), '{}'::jsonb, 'sydenham')`, [code]));
+ok((await db.query(`select location from tv_screens where screen_id = 'mkv-tv-0001'`)).rows[0].location === 'marrickville', "a location set in the editor isn't changed by the link");
+const sp = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, party, theme, locations) values ('text', 'Happy Birthday Syd!', true, 'party', '{sydenham}') returning id`))).rows[0].id;
+const mp = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, party, theme, locations) values ('text', 'Happy Birthday Mark!', true, 'party', '{marrickville}') returning id`))).rows[0].id;
+await as('tate@ama.test', () => db.query(`insert into tv_party_bookings (slide_id, starts_at, ends_at) values ($1, now() - interval '1 minute', now() + interval '1 hour'), ($2, now() - interval '1 minute', now() + interval '1 hour')`, [sp, mp]));
+fs1 = await feedAt('syd-tv-0001', null); fm1 = await feedAt('mkv-tv-0001', null);
+const fn1 = await feedAt('nowhere-0001', null);
+ok(fs1.only && fs1.slides[0].title === 'Happy Birthday Syd!' && fm1.only && fm1.slides[0].title === 'Happy Birthday Mark!', 'two parties at once: each location shows only its own');
+ok(!fn1.only, 'a device with no location shows neither');
+ok((await feedAt(null, 'sydenham')).slides.some(x => x.title === 'Happy Birthday Syd!'), "a new device uses its link's location before it has checked in");
+await as('tate@ama.test', () => db.exec(`delete from tv_party_bookings`));
+await as('tate@ama.test', () => db.query(`delete from tv_slides where id in ($1, $2, $3)`, [ls1, sp, mp]));
+await db.exec(`delete from tv_screens where screen_id in ('syd-tv-0001', 'mkv-tv-0001')`);
+ok(!(await tryAs('remote@ama.test', `insert into tv_locations (slug, name) values ('x1', 'X')`)).ok && (await tryAs('remote@ama.test', `select * from tv_locations`)).n === 5, 'everyone with TV access sees the locations; only the editor changes them');
+
 console.log('\nFiles');
 const pol = (await db.query(`select policyname, roles::text r from pg_policies where tablename = 'objects' and policyname like 'tv files%'`)).rows;
 ok(pol.length === 4 && pol.every(p => p.r.includes('authenticated') && !p.r.includes('anon')), 'only signed-in staff can add, change or remove TV files');

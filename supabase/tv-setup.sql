@@ -183,6 +183,29 @@ alter table public.tv_party_bookings enable row level security;
 drop policy if exists "staff edit party bookings" on public.tv_party_bookings;
 create policy "staff edit party bookings" on public.tv_party_bookings for all to authenticated using (public.tv_can('party')) with check (public.tv_can('party'));
 
+-- ---------- Locations ----------
+-- Each device (a TV or tablet) can be at a location; slides and parties can be for one or more locations
+-- (empty = every location). A device with no location shows only what's for every location.
+do $$
+begin
+  if to_regclass('public.tv_locations') is null then
+    create table public.tv_locations (
+      slug       text primary key check (slug ~ '^[a-z0-9-]{2,30}$'),   -- used in device links (&loc=sydenham)
+      name       text not null check (length(trim(name)) > 0),
+      position   int not null default 0,
+      created_at timestamptz not null default now()
+    );
+    insert into public.tv_locations (slug, name, position) values
+      ('marrickville', 'Marrickville', 1), ('sydenham', 'Sydenham', 2), ('concord', 'Concord', 3), ('auburn', 'Auburn', 4), ('sylvania', 'Sylvania', 5);
+  end if;
+end $$;
+alter table public.tv_locations enable row level security;
+drop policy if exists "staff see locations" on public.tv_locations;
+drop policy if exists "staff edit locations" on public.tv_locations;
+create policy "staff see locations" on public.tv_locations for select to authenticated using (public.tv_can('remote') or public.tv_can('party'));
+create policy "staff edit locations" on public.tv_locations for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
+alter table public.tv_slides add column if not exists locations text[];   -- which locations it shows at (empty = all)
+
 -- ---------- TV status ----------
 create table if not exists public.tv_screens (
   screen_id   text primary key,          -- made up by each TV the first time it starts
@@ -193,7 +216,8 @@ create table if not exists public.tv_screens (
 );
 alter table public.tv_screens add column if not exists loaded_at timestamptz;
 alter table public.tv_screens add column if not exists display text not null default 'tv';   -- the TV or a tablet
-alter table public.tv_screens add column if not exists name text;                              -- e.g. "Front desk", given in the editor
+alter table public.tv_screens add column if not exists name text;
+alter table public.tv_screens add column if not exists location text references public.tv_locations (slug) on update cascade on delete set null;                              -- e.g. "Front desk", given in the editor
 alter table public.tv_screens add column if not exists first_seen timestamptz not null default now();   -- server time of the first check-in after the page loaded
 alter table public.tv_screens enable row level security;
 drop policy if exists "staff see screens" on public.tv_screens;
@@ -289,10 +313,12 @@ create policy "staff edit events" on public.tv_events for all to authenticated u
 create policy "staff edit months" on public.tv_months for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
 
 -- ---------- What the TV gets (no sign-in, screen code only) ----------
-create or replace function public.tv_feed(p_code text) returns jsonb
+drop function if exists public.tv_feed(text);
+create or replace function public.tv_feed(p_code text, p_screen text default null, p_loc text default null) returns jsonb
   language plpgsql stable security definer set search_path = public as $$
 declare
   s public.tv_settings%rowtype;
+  loc text;   -- this device's location (set in the editor, or from its link)
   today date := (now() at time zone 'Australia/Sydney')::date;
   slides jsonb; live jsonb := '{}'::jsonb; v jsonb; changed timestamptz; one_slide jsonb;
   one_id uuid; one_until timestamptz; one_changed timestamptz;
@@ -306,6 +332,8 @@ begin
   if not found then
     return jsonb_build_object('error', 'wrong_code');
   end if;
+  select sc.location into loc from public.tv_screens sc where sc.screen_id = p_screen;
+  if loc is null then select l.slug into loc from public.tv_locations l where l.slug = lower(trim(coalesce(p_loc, ''))); end if;
 
   -- Blacked out from the remote or the editor: a black screen, whatever else is on
   if s.blackout then
@@ -316,13 +344,16 @@ begin
   end if;
 
   -- Party mode: just the one slide, until the set time. Started now in the editor, or booked ahead.
-  if s.only_slide is not null and s.only_until > now() then
+  -- Only parties for this device's location (or for every location) count.
+  if s.only_slide is not null and s.only_until > now()
+     and exists (select 1 from public.tv_slides os where os.id = s.only_slide and (coalesce(cardinality(os.locations), 0) = 0 or loc = any(os.locations))) then
     one_id := s.only_slide; one_until := s.only_until; one_changed := s.updated_at;
   else
     select b.slide_id, b.ends_at, b.updated_at into one_id, one_until, one_changed
       from public.tv_party_bookings b join public.tv_slides bs on bs.id = b.slide_id
      where b.starts_at <= now() and b.ends_at > now() and bs.display = s.display
-     order by b.starts_at desc limit 1;
+       and (coalesce(cardinality(bs.locations), 0) = 0 or loc = any(bs.locations))
+     order by (coalesce(cardinality(bs.locations), 0) = 0), b.starts_at desc limit 1;   -- a party for this location wins over one for everywhere
   end if;
   if one_id is not null then
     select jsonb_build_object('id', t.id, 'kind', t.kind, 'title', t.title, 'body', t.body, 'media_path', t.media_path,
@@ -357,7 +388,8 @@ begin
          max(t.updated_at)
     into slides, changed
     from public.tv_slides t
-   where t.enabled and not t.party and t.display = s.display and (t.starts_on is null or t.starts_on <= today) and (t.ends_on is null or t.ends_on >= today)
+   where t.enabled and not t.party and t.display = s.display
+     and (coalesce(cardinality(t.locations), 0) = 0 or loc = any(t.locations)) and (t.starts_on is null or t.starts_on <= today) and (t.ends_on is null or t.ends_on >= today)
      and not (t.kind = 'countdown' and t.count_to = 'date' and t.event_on < today);
 
   -- Events: what's left of this month; in the last 10 days of the month (or once this month is over), next month too
@@ -385,31 +417,33 @@ begin
 
   return jsonb_build_object(
     'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', s.show_clock, 'show_logo', s.show_logo, 'banner', nullif(trim(coalesce(s.banner, '')), '')),
-    'remote', coalesce(s.remote_until > now(), false), 'display', s.display,
+    'remote', coalesce(s.remote_until > now(), false), 'display', s.display, 'location', loc,
     'version', greatest(coalesce(changed, s.updated_at), s.updated_at),
     'slides', slides, 'live', live, 'today', today);
 end $$;
-grant execute on function public.tv_feed(text) to anon, authenticated;
+grant execute on function public.tv_feed(text, text, text) to anon, authenticated;
 
 -- The TV checks in: records what it's showing, and hears whether it should reload
-create or replace function public.tv_checkin(p_code text, p_screen text, p_showing text, p_started timestamptz, p_details jsonb default '{}'::jsonb)
+drop function if exists public.tv_checkin(text, text, text, timestamptz, jsonb);
+create or replace function public.tv_checkin(p_code text, p_screen text, p_showing text, p_started timestamptz, p_details jsonb default '{}'::jsonb, p_loc text default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
-declare s public.tv_settings%rowtype; loaded timestamptz;
+declare s public.tv_settings%rowtype; loaded timestamptz; link_loc text;
 begin
   select * into s from public.tv_settings where screen_code = upper(trim(coalesce(p_code, '')));
   if not found then return jsonb_build_object('error', 'wrong_code'); end if;
   if coalesce(p_screen, '') !~ '^[A-Za-z0-9_-]{6,40}$' then return jsonb_build_object('error', 'bad_screen'); end if;
   -- loaded_at is the server's time when this page load first checked in (TV clocks can be wrong)
-  insert into public.tv_screens as t (screen_id, display, last_seen, started_at, loaded_at, showing, details)
-    values (p_screen, s.display, now(), p_started, now(), left(p_showing, 200), coalesce(p_details, '{}'::jsonb))
-  on conflict (screen_id) do update set display = excluded.display, last_seen = now(), started_at = excluded.started_at,
+  select l.slug into link_loc from public.tv_locations l where l.slug = lower(trim(coalesce(p_loc, '')));   -- a link with &loc=
+  insert into public.tv_screens as t (screen_id, display, location, last_seen, started_at, loaded_at, showing, details)
+    values (p_screen, s.display, link_loc, now(), p_started, now(), left(p_showing, 200), coalesce(p_details, '{}'::jsonb))
+  on conflict (screen_id) do update set display = excluded.display, location = coalesce(t.location, excluded.location), last_seen = now(), started_at = excluded.started_at,
     loaded_at = case when t.started_at is distinct from excluded.started_at or t.loaded_at is null then now() else t.loaded_at end,
     showing = excluded.showing, details = excluded.details
   returning t.loaded_at into loaded;
   delete from public.tv_screens where last_seen < now() - interval '30 days';   -- forget old TVs
   return jsonb_build_object('reload', s.reload_at is not null and s.reload_at > loaded);
 end $$;
-grant execute on function public.tv_checkin(text, text, text, timestamptz, jsonb) to anon, authenticated;
+grant execute on function public.tv_checkin(text, text, text, timestamptz, jsonb, text) to anon, authenticated;
 
 -- ---------- Phone remote ----------
 -- The phone sends a button press; while the remote is open (10 minutes since its last use) the TV checks every
