@@ -235,8 +235,9 @@
       <div class="field" id="bannerBox" hidden><label for="setBanner">Message at the bottom (optional)</label><input type="text" id="setBanner" maxlength="80" placeholder="e.g. Tap to sign in"><p class="hint">Shown along the bottom of the screen with every slide. Leave it empty for none.</p></div>
       <div class="field" id="signinBox" hidden><label for="setSignin">Sign-in page (optional)</label>
         <div class="row"><input type="text" id="setSignin" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="e.g. https://kiosk.efcaquila.net/" class="grow" style="flex:1 1 200px;width:auto"><button type="button" class="btn sm" id="signinTest">Test</button></div>
-        <div class="row"><label for="setSigninIdle" class="label" style="margin:0">Back to the slides after</label><select id="setSigninIdle" style="width:auto"><option value="30">30 seconds</option><option value="45">45 seconds</option><option value="60">1 minute</option><option value="90">1.5 minutes</option><option value="120">2 minutes</option><option value="180">3 minutes</option><option value="300">5 minutes</option></select><span class="hint">with no taps</span></div>
-        <p class="hint">The screen shows this page. When nobody has used it for that long, it shows the slides; a tap brings the sign-in page back, fresh for the next person. During a party (or a blackout) it stays on that and taps do nothing.</p></div>
+        <div class="field"><label for="setSigninOpen">A tap</label><select id="setSigninOpen"><option value="page">Goes to the sign-in page</option><option value="frame">Shows it inside the slides</option></select></div>
+        <div class="row" id="signinIdleRow"><label for="setSigninIdle" class="label" style="margin:0">Back to the slides after</label><select id="setSigninIdle" style="width:auto"><option value="30">30 seconds</option><option value="45">45 seconds</option><option value="60">1 minute</option><option value="90">1.5 minutes</option><option value="120">2 minutes</option><option value="180">3 minutes</option><option value="300">5 minutes</option></select><span class="hint">with no taps</span></div>
+        <p class="hint" id="signinHint"></p></div>
       <div class="field" id="quietBox" hidden><span class="label">Slideshow hours</span>
         <label class="check"><input type="checkbox" id="setQuiet"> Only play the slideshow at set times</label>
         <div id="quietRow" style="display:flex;flex-direction:column;gap:10px">
@@ -408,7 +409,7 @@ function draw() {
   $('#offBox').hidden = !('offs' in S); if ('offs' in S) { offState = JSON.parse(JSON.stringify(S.offs || [])); drawOffs(); }
   $('#bannerBox').hidden = !('banner' in S); $('#setBanner').value = S.banner || '';
   $('#signinBox').hidden = !('signin_url' in S);
-  if ('signin_url' in S) { $('#setSignin').value = S.signin_url || ''; const iv = String(S.signin_idle || 60); if (![...$('#setSigninIdle').options].some(o => o.value === iv)) $('#setSigninIdle').insertAdjacentHTML('beforeend', `<option value="${iv}">${iv} seconds</option>`); $('#setSigninIdle').value = iv; }
+  if ('signin_url' in S) { $('#setSignin').value = S.signin_url || ''; $('#setSigninOpen').value = S.signin_open || 'page'; signinHint(); const iv = String(S.signin_idle || 60); if (![...$('#setSigninIdle').options].some(o => o.value === iv)) $('#setSigninIdle').insertAdjacentHTML('beforeend', `<option value="${iv}">${iv} seconds</option>`); $('#setSigninIdle').value = iv; }
   $('#quietBox').hidden = !('quiet_on' in S);
   if ('quiet_on' in S) {
     // Each day's hours: from quiet_days, or (older setting) the same every day: on at quiet_to, off at quiet_from
@@ -1433,6 +1434,14 @@ function importTemplates(after) {
 }
 
 /* ---------- Sign-in page: test it shows inside the display ---------- */
+function signinHint() {
+  const page = $('#setSigninOpen').value === 'page';
+  $('#signinIdleRow').hidden = page; $('#signinTest').hidden = page;
+  $('#signinHint').innerHTML = page
+    ? 'The slides show with "Tap to sign in"; a tap opens the sign-in page. To come back to the slides by itself, run the tablet link in the <b>Fully Kiosk Browser</b> app with <b>Auto Reload on Idle</b> set (e.g. 60 seconds). During a party (or a blackout) taps do nothing.'
+    : 'The screen shows this page. When nobody has used it for that long, it shows the slides; a tap brings the sign-in page back, fresh for the next person. During a party (or a blackout) it stays on that and taps do nothing. Use Test: some sites (like ESC) refuse to be shown inside another page.';
+}
+$('#setSigninOpen').onchange = signinHint;
 $('#signinTest').onclick = () => {
   const raw = $('#setSignin').value.trim(), url = raw ? cleanLink(raw) : '';
   if (!url) return toast('Paste the sign-in link first.');
@@ -1538,6 +1547,7 @@ $('#setForm').onsubmit = async e => {
     if (raw && !url) return toast("That doesn't look like a link.");
     if (url && !/^https:/i.test(url)) return toast('The sign-in page needs a secure link (https://).');
     rec.signin_url = url || null; rec.signin_idle = +$('#setSigninIdle').value;
+    if ('signin_open' in state.settings) rec.signin_open = $('#setSigninOpen').value;
   }
   if (!$('#offBox').hidden) {
     readOffs();

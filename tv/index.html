@@ -532,10 +532,11 @@
   }
 
   // ---------- Sign-in mode (tablets): the sign-in page until nobody has touched it for a while, then the slides ----------
-  var signinOpen = false, signinUrl = null, signinIdle = 60, signinT = null, signinBlocked = false;
+  var signinOpen = false, signinUrl = null, signinIdle = 60, signinT = null, signinBlocked = false, signinPage = true;
   function signinAllowed() { return !!(signinUrl && !signinBlocked); }
   function openSignin() {
     if (signinOpen || !signinAllowed()) return;
+    if (signinPage) { try { location.href = signinUrl; } catch (e) { /* ignore */ } return; }   // go to it (a kiosk app brings the slides back)
     var f = $('signin');
     if (f.getAttribute('src') !== signinUrl) f.setAttribute('src', signinUrl);
     f.style.display = ''; signinOpen = true; signinActive();
@@ -556,8 +557,9 @@
     signinBlocked = !!(f && (f.only || f.blackout));   // not during a party or a blackout
     if (url !== signinUrl) { signinUrl = url; if (signinOpen) closeSignin(); }
     signinIdle = st.signin_idle || 60;
+    signinPage = st.signin_open !== 'frame';
     if (!signinAllowed()) { closeSignin(); return; }
-    if (first) openSignin();
+    if (first && !signinPage) openSignin();   // shown inside: start on it
   }
   var idleT;
   function wake() { document.body.className = document.body.className.replace(/\bidle\b/g, ''); clearTimeout(idleT); idleT = setTimeout(function () { document.body.className += ' idle'; }, 3000); }

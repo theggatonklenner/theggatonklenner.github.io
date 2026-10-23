@@ -107,6 +107,11 @@ alter table public.tv_settings add column if not exists banner text;
 -- seconds, then the slideshow; a tap brings it back (not during a party or a blackout)
 alter table public.tv_settings add column if not exists signin_url text;
 alter table public.tv_settings add column if not exists signin_idle int not null default 60;
+-- 'page': a tap goes to the sign-in page itself (for sites that can't be shown inside another page, like ESC; a kiosk
+-- app such as Fully Kiosk brings the slides back when idle). 'frame': shown inside the display, which comes back by itself.
+alter table public.tv_settings add column if not exists signin_open text not null default 'page';
+alter table public.tv_settings drop constraint if exists tv_settings_signin_open_check;
+alter table public.tv_settings add constraint tv_settings_signin_open_check check (signin_open in ('page', 'frame'));
 alter table public.tv_settings drop constraint if exists tv_settings_signin_check;
 alter table public.tv_settings add constraint tv_settings_signin_check check (signin_idle between 10 and 900 and (signin_url is null or signin_url = '' or signin_url ~* '^https://'));   -- a message along the bottom, e.g. "Tap to sign in" ('' = none)
 update public.tv_settings set banner = case when id = 2 then 'Tap to sign in' else '' end where banner is null;
@@ -350,7 +355,7 @@ begin
   -- Blacked out from the remote or the editor: a black screen, whatever else is on
   if s.blackout then
     return jsonb_build_object(
-      'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle),
+      'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open),
       'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
       'quiet', 'black', 'blackout', true, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
@@ -374,7 +379,7 @@ begin
   end if;
   if one_slide is not null then
     return jsonb_build_object(
-      'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle),
+      'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open),
       'version', greatest(s.updated_at, one_changed), 'slides', jsonb_build_array(one_slide), 'live', '{}'::jsonb, 'today', today,
       'only', true, 'only_until', one_until, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
@@ -397,7 +402,7 @@ begin
          then now_time >= s.quiet_from and now_time < s.quiet_to
          else now_time >= s.quiet_from or now_time < s.quiet_to end) end) then
     return jsonb_build_object(
-      'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle),
+      'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open),
       'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
       'quiet', s.quiet_style, 'off', off_now, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
@@ -437,7 +442,7 @@ begin
 
   return jsonb_build_object(
     'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', s.show_clock, 'show_logo', s.show_logo, 'banner', nullif(trim(coalesce(s.banner, '')), ''),
-      'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle),
+      'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open),
     'remote', coalesce(s.remote_until > now(), false), 'display', s.display, 'location', loc,
     'version', greatest(coalesce(changed, s.updated_at), s.updated_at),
     'slides', slides, 'live', live, 'today', today);

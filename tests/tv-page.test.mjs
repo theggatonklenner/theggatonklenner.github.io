@@ -890,6 +890,8 @@ try {
   await page.goto(BASE + '/tv/edit/index.html?display=tablet');
   await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
   await page.waitForSelector('#signinBox:not([hidden])');
+  ok(await page.inputValue('#setSigninOpen') === 'page' && await page.isHidden('#signinTest') && (await page.textContent('#signinHint')).includes('Fully Kiosk'), 'by default a tap goes to the sign-in page (for sites like ESC), with how to set up the kiosk app');
+  await page.selectOption('#setSigninOpen', 'frame');
   await page.fill('#setSignin', 'signin.test/ama'); await page.selectOption('#setSigninIdle', '30');
   await page.click('#setSave'); await toastSays(page, 'Settings saved'); await page.waitForTimeout(400);
   const sgn = (await db.query(`select signin_url, signin_idle from tv_settings where id = 2`)).rows[0];
@@ -921,8 +923,19 @@ try {
   await db.query(`delete from tv_party_bookings`); await sp2.evaluate(() => window.__tv.reload()); await sp2.waitForTimeout(1000);
   await sp2.click('.layer.on', { force: true }); await sp2.waitForTimeout(400);
   ok(await sp2.isVisible('#signin'), 'after the party, a tap opens the sign-in page again');
+  // Going to the page instead (sites that can't be shown inside, like ESC)
+  await db.query(`update tv_settings set signin_open = 'page' where id = 2`);
+  const sp3 = await sic.newPage(); await sp3.goto(BASE + `/tv/index.html?code=${TC}`); await sp3.waitForSelector('.layer.on'); await sp3.waitForTimeout(500);
+  ok(await sp3.isHidden('#signin') && sp3.url().startsWith(BASE), 'it starts on the slides');
+  await Promise.all([sp3.waitForURL(/signin\.test/, { timeout: 5000 }).catch(() => {}), sp3.click('.layer.on', { force: true })]);
+  ok(sp3.url().startsWith('https://signin.test/ama'), 'a tap goes to the sign-in page itself');
+  await db.query(`insert into tv_party_bookings (slide_id, starts_at, ends_at) values ($1, now() - interval '1 minute', now() + interval '1 hour')`, [tpid]);
+  await sp3.goto(BASE + `/tv/index.html?code=${TC}`); await sp3.waitForSelector('.layer.on'); await sp3.waitForTimeout(800);
+  await sp3.click('.layer.on', { force: true }); await sp3.waitForTimeout(800);
+  ok(sp3.url().startsWith(BASE) && (await sp3.textContent('#stage')).includes('Happy Birthday Zoe!'), 'during a party a tap does nothing');
+  await db.query(`delete from tv_party_bookings`);
   await sic.close();
-  await db.query(`update tv_settings set signin_url = null, signin_idle = 60 where id = 2`); await db.query(`delete from tv_slides where display = 'tablet'`);
+  await db.query(`update tv_settings set signin_url = null, signin_idle = 60, signin_open = 'page' where id = 2`); await db.query(`delete from tv_slides where display = 'tablet'`);
 
   // Saving egress: only changes are sent, and photos are kept on the screen
   console.log('\nSaving egress');
