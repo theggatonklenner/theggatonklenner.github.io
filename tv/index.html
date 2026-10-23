@@ -77,7 +77,6 @@
   .quiet .qlogo { position: absolute; left: 50%; top: 50%; width: 22vh; height: 22vh; margin: -11vh 0 0 -11vh; border-radius: 3vh; background: #fff url(../icons/ama-id-cards.png) center/86% no-repeat; opacity: .55; }
   .card.qr { flex-direction: row; align-items: center; }
   .qr .qtext { flex: 1; min-width: 0; padding-right: 5vw; }
-  .qr .qlink { font-size: 2.6vw; font-weight: 700; margin-top: 3vh; opacity: .9; word-break: break-all; }
   .qr .qbox { flex: none; width: 66vh; height: 66vh; max-width: 40vw; max-height: 40vw; background: #fff; border-radius: 2.4vh; padding: 1.2vh; box-sizing: border-box; }
   .qr .qbox img { display: block; width: 100%; height: 100%; }
   .paused { position: absolute; right: 2.2vw; bottom: 2.4vh; z-index: 6; background: rgba(0,0,0,.6); color: #fff; font-size: 1.6vw; font-weight: 700; padding: .6vh 1.2vw; border-radius: 99px; }
@@ -268,9 +267,8 @@
       return '<div class="card ' + themeOf(s) + bg + '">' + (s.media_path ? '<div class="shade"></div>' : '') + (s.theme === 'party' ? confetti() : '') + '<div class="belt"></div>' + (s.title ? '<h1>' + esc(s.title) + '</h1>' : '') + (s.body ? '<div class="body">' + esc(s.body) + '</div>' : '') + '</div>';
     }
     if (s.kind === 'qr') {
-      var shortLink = String(s.link || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '');
       return '<div class="card qr ' + themeOf(s) + '"><div class="qtext"><div class="belt"></div>' + (s.title ? '<h1>' + esc(s.title) + '</h1>' : '') +
-        (s.body ? '<div class="body">' + esc(s.body) + '</div>' : '') + '<div class="qlink">' + esc(shortLink) + '</div></div>' +
+        (s.body ? '<div class="body">' + esc(s.body) + '</div>' : '') + '</div>' +
         '<div class="qbox"><img src="' + MEDIA + esc(s.media_path) + '" alt=""></div></div>';
     }
     if (s.kind === 'countdown') {

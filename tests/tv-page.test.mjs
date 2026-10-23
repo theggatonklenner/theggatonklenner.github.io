@@ -544,7 +544,7 @@ try {
   for (let i = 0; i < 12 && !qrSeen; i++) {
     const txt = await tv3.evaluate(() => { const l = document.querySelectorAll('.layer.on'); return l.length ? l[l.length - 1].textContent : ''; });
     if (txt.includes('Follow us on Instagram')) {
-      qrSeen = txt.includes('amamartialarts.com.au/free-trial?from=tv') && !txt.includes('https://');
+      qrSeen = !txt.includes('amamartialarts') && !txt.includes('https://');
       await tv3.waitForTimeout(1200); await tv3.screenshot({ path: join(SHOTS, 'tv-qr.png') });
       const img = await tv3.$eval('.layer.on .qbox img', i => ({ w: i.naturalWidth, shown: i.getBoundingClientRect().width }));
       qrSeen = qrSeen && img.w > 0 && img.shown > 300;
@@ -552,7 +552,7 @@ try {
     }
     await tv3.evaluate(() => window.__tv.next()); await tv3.waitForTimeout(300);
   }
-  ok(qrSeen, 'the TV shows the QR slide: heading, short link and a big code');
+  ok(qrSeen, 'the TV shows the QR slide: heading and a big code, without the link');
   await tvc3.close(); await ctx.close();
   await db.query(`delete from tv_slides where kind = 'qr'`);
 
