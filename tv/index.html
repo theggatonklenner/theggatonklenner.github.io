@@ -2,7 +2,7 @@
 <html lang="en-AU">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#04794b">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -18,7 +18,7 @@
 <script src="../config.js"></script>
 <style>
   /* Plays full screen on the dojang TV. Written for older smart TV browsers: no newer CSS or JS. */
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; -ms-touch-action: none; }   /* no pinch zoom or double-tap zoom */
   body { font-family: "Source Sans 3", "Segoe UI", Arial, sans-serif; color: #fff; -webkit-font-smoothing: antialiased; }
   body.idle, body.idle * { cursor: none !important; }
   .layer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; transition: opacity .9s ease; overflow: hidden; }
@@ -650,6 +650,15 @@
     if (!signinAllowed()) { closeSignin(); return; }
     if (first && !signinPage) openSignin();   // shown inside: start on it
   }
+  // No zooming in (pinch, double tap, ctrl + scroll): it's a display, and during a party nobody should be able to change it
+  function noZoom(e) { if (!e.touches || e.touches.length > 1 || e.scale && e.scale !== 1) { try { e.preventDefault(); } catch (er) { /* ignore */ } } }
+  try {
+    document.addEventListener('touchmove', noZoom, { passive: false });
+    document.addEventListener('gesturestart', function (e) { e.preventDefault(); }, { passive: false });   // iPad
+    document.addEventListener('wheel', function (e) { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+    var lastTouch = 0;
+    document.addEventListener('touchend', function (e) { var n = Date.now(); if (n - lastTouch < 350) e.preventDefault(); lastTouch = n; }, { passive: false });   // double tap
+  } catch (e) { /* older browsers: the viewport setting still stops it */ }
   var idleT;
   function wake() { document.body.className = document.body.className.replace(/\bidle\b/g, ''); clearTimeout(idleT); idleT = setTimeout(function () { document.body.className += ' idle'; }, 3000); }
   document.addEventListener('mousemove', wake); wake();

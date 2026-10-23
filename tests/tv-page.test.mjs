@@ -522,7 +522,7 @@ try {
   await page.uncheck(`#qd${todayDow}On`);   // off all day today, so the TV is quiet now
   await page.selectOption('#setQStyle', 'logo'); await page.click('#setSave'); await toastSays(page, 'Settings saved');
   const qs = (await db.query(`select quiet_on, quiet_style, quiet_days from tv_settings where id = 1`)).rows[0];
-  ok(qs.quiet_on && qs.quiet_style === 'logo' && qs.quiet_days['6'].on === '08:00' && qs.quiet_days['2'].off === '20:45' && qs.quiet_days[String(todayDow)] === null, 'each day saves its own hours, and a day can be off all day');
+  ok(qs.quiet_on && qs.quiet_style === 'logo' && (todayDow === 6 || qs.quiet_days['6'].on === '08:00') && (todayDow === 2 || qs.quiet_days['2'].off === '20:45') && qs.quiet_days[String(todayDow)] === null, 'each day saves its own hours, and a day can be off all day');
   await page.waitForTimeout(1000);   // the form redraws after saving
   await page.fill('#qd3From', '18:00'); await page.fill('#qd3To', '17:00'); if (todayDow === 3) await page.check('#qd3On');
   await page.click('#setSave');
@@ -951,6 +951,7 @@ try {
   const mp = await sic.newPage(); await mp.goto(mainUrl); await mp.waitForSelector('.layer.on'); await mp.waitForTimeout(600);
   await mp.click('.layer.on', { force: true }); await mp.waitForTimeout(600);
   ok(mp.url().includes('kiosk=main') && (await mp.textContent('#stage')).includes('Happy Birthday Zoe!'), 'the main screen shows the party and taps do nothing');
+  ok(await mp.evaluate(() => /user-scalable=no/.test(document.querySelector('meta[name=viewport]').content) && getComputedStyle(document.body).touchAction === 'none'), 'and it can\'t be zoomed in');
   await db.query(`delete from tv_party_bookings`);
   await ss.evaluate(() => window.__tv.reload()); await ss.waitForTimeout(800);
   ok(api.some(x => x.path === '/api/url' && /signin\.test/.test(x.body)), 'when the party ends, the screensaver also tells FreeKiosk to put the sign-in page back (in case the party page is paused)');
