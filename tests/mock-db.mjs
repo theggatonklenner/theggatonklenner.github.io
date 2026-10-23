@@ -1,7 +1,7 @@
 // In-memory stand-in for the parts of Supabase the staff function uses.
 export function makeDb() {
-  const t = { staff_roles: [], staff_permissions: [], prep_roles: [], push_subscriptions: [] };
-  const opts = { permissionsMissing: false };
+  const t = { staff_roles: [], staff_permissions: [], prep_roles: [], push_subscriptions: [], tv_permissions: [] };
+  const opts = { permissionsMissing: false, tvMissing: false };
   const users = []; let nextId = 1;
   const tokens = new Map();
   function query(table) {
@@ -17,6 +17,7 @@ export function makeDb() {
       then(res, rej) { return Promise.resolve().then(run).then(res, rej); }
     };
     function run() {
+      if (table === 'tv_permissions' && opts.tvMissing) return { data: null, error: { message: 'relation "public.tv_permissions" does not exist' } };
       if (table === 'staff_permissions' && opts.permissionsMissing) return { data: null, error: { message: 'relation "public.staff_permissions" does not exist' } };
       const match = r => filters.every(f => f(r));
       if (op === 'select') { const d = rows().filter(match); return { data: single ? d[0] || null : d, error: null }; }
@@ -24,6 +25,7 @@ export function makeDb() {
         for (const r of payload.rows) {
           if (table === 'staff_roles') { const i = t.staff_roles.findIndex(x => x.email === r.email); i >= 0 ? (t.staff_roles[i] = { ...r }) : t.staff_roles.push({ ...r }); }
           if (table === 'prep_roles') { if (!t.prep_roles.some(x => x.email === r.email && x.role === r.role)) t.prep_roles.push({ ...r }); }
+          if (table === 'tv_permissions') { if (!t.tv_permissions.some(x => x.email === r.email && x.permission === r.permission)) t.tv_permissions.push({ ...r }); }
           if (table === 'staff_permissions') { if (!t.staff_permissions.some(x => x.email === r.email && x.permission === r.permission)) t.staff_permissions.push({ ...r }); }
         }
         return { data: null, error: null };

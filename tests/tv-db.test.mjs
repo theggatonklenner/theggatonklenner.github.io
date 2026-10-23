@@ -49,6 +49,22 @@ ok(!(await tryAs('station@ama.test', `insert into tv_slides (kind, title) values
 ok(!(await tryAs('nobody@ama.test', `insert into tv_slides (kind, title) values ('text', 'x')`)).ok, 'a login with no roles cannot');
 ok(!(await tryAs(null, `insert into tv_slides (kind, title) values ('text', 'x')`)).ok && (await tryAs(null, `select * from tv_slides`)).ok === false || (await tryAs(null, `select * from tv_slides`)).n === 0, 'the public cannot read or change slides directly');
 ok((await tryAs('nobody@ama.test', `select * from tv_settings`)).n === 0, 'non-staff cannot see the screen code');
+
+console.log('\nTV permissions');
+const tvp = (await db.query(`select email, permission from tv_permissions order by email`)).rows.map(r => r.email + ':' + r.permission).join();
+ok(tvp === 'jo@ama.test:edit,tate@ama.test:edit', `first run: everyone who could edit the TV keeps it, the print station doesn't (${tvp})`);
+await as('tate@ama.test', () => db.exec(`insert into tv_permissions values ('tvonly@ama.test', 'edit'), ('remote@ama.test', 'remote')`));
+ok((await tryAs('tvonly@ama.test', `insert into tv_slides (kind, title) values ('text', 'From TV only')`)).ok, 'someone with only the TV editor ticked can add slides');
+ok((await as('tvonly@ama.test', () => db.query(`select can_view_cards() a`))).rows[0].a === false && (await tryAs('tvonly@ama.test', `select * from prep_students`)).n === 0, "...but can't see AMA ID Cards or Black Belt Prep");
+ok((await tryAs('remote@ama.test', `select * from tv_slides`)).n > 0 && (await tryAs('remote@ama.test', `select tv_remote_send('next')`)).ok, 'TV remote only: can see the slides and press the remote buttons');
+ok(!(await tryAs('remote@ama.test', `insert into tv_slides (kind, title) values ('text', 'x')`)).ok && (await tryAs('remote@ama.test', `select * from tv_settings`)).n === 0
+  && (await as('remote@ama.test', () => db.query(`select tv_is_staff() a`))).rows[0].a === false, "...but can't change slides, see the screen code or open the editor");
+ok(!(await tryAs('jo@ama.test', `insert into tv_permissions values ('x@ama.test', 'edit')`)).ok && !(await tryAs('tvonly@ama.test', `delete from tv_permissions`)).n, 'only admins can change TV permissions');
+await as('tate@ama.test', () => db.exec(`delete from tv_permissions where email = 'jo@ama.test'`));
+await db.exec(SQL);
+ok(!(await tryAs('jo@ama.test', `insert into tv_slides (kind, title) values ('text', 'x')`)).ok, 'unticking takes TV access away, and running the setup again does not give it back');
+ok((await tryAs('tate@ama.test', `insert into tv_slides (kind, title) values ('text', 'Admin')`)).ok, 'admins can always use the TV');
+await as('tate@ama.test', () => db.exec(`insert into tv_permissions values ('jo@ama.test', 'edit'); delete from tv_slides where title in ('From TV only', 'Admin'); update tv_settings set remote_until = null, remote_cmd = null`));
 ok((await db.query(`select created_by from tv_slides where title = 'Welcome'`)).rows[0].created_by === 'tate@ama.test', 'records who added a slide');
 ok(!(await tryAs('tate@ama.test', `insert into tv_slides (kind, title) values ('photo', 'no file')`)).ok, 'a photo slide needs a file');
 ok(!(await tryAs('tate@ama.test', `insert into tv_slides (kind, title) values ('live', 'no kind')`)).ok, 'a live slide needs to say which live info');
@@ -202,7 +218,7 @@ await as('tate@ama.test', () => db.exec(`delete from tv_slides where kind = 'qr'
 
 console.log('\nPhone remote');
 const poll = async (after, state = {}) => (await as(null, () => db.query(`select tv_remote_poll($1, 'screen-abc123', $2, $3::jsonb) r`, [code, after, JSON.stringify(state)]))).rows[0].r;
-ok(!(await tryAs(null, `select tv_remote_send('next')`)).ok && !(await tryAs('nobody@ama.test', `select tv_remote_send('next')`)).ok, 'only staff can press the remote buttons');
+ok(!(await tryAs(null, `select tv_remote_send('next')`)).ok && !(await tryAs('nobody@ama.test', `select tv_remote_send('next')`)).ok, 'only staff with TV access can press the remote buttons');
 let p0 = await poll(null);
 ok(p0.on === false && !p0.cmd, 'the remote is off until someone opens it');
 const verBefore = (await feedNow()).version;

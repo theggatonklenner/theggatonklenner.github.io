@@ -284,7 +284,10 @@ const ago = iso => { const s = Math.max(0, Math.round((Date.now() - new Date(iso
 async function load() {
   const staff = await sb.rpc('tv_is_staff');
   if (staff.error) return problem(/tv_is_staff|schema cache|does not exist|function/i.test(staff.error.message || '') ? 'setup' : staff.error.message);
-  if (!staff.data) return problem('noaccess');
+  if (!staff.data) {
+    const rem = await sb.rpc('tv_can', { p_perm: 'remote' });
+    return problem(rem.data ? 'remoteonly' : 'noaccess');
+  }
   const [{ data: slides, error: e1 }, { data: settings, error: e2 }] = await Promise.all([
     sb.from('tv_slides').select('*').order('position').order('created_at'),
     sb.from('tv_settings').select('*').eq('id', 1).maybeSingle()
@@ -310,10 +313,12 @@ function problem(kind) {
   show('#problem');
   $('#problem').innerHTML = kind === 'setup'
     ? `<h2>Setup needed</h2><p class="hint">The TV display isn't set up in Supabase yet. In Supabase, open SQL Editor &gt; New query, paste the whole of <code>supabase/tv-setup.sql</code> from the theggatonklenner.github.io repository, click Run (choose "with RLS" if asked), then tap Try again.</p><div class="row"><button class="btn primary" id="retry">Try again</button></div>`
+    : kind === 'remoteonly'
+    ? `<h2>TV remote</h2><p class="hint">Your login can use the TV remote, but not the editor.</p><div class="row"><a class="btn primary" href="../remote/">Open the remote</a></div>`
     : kind === 'noaccess'
-    ? `<h2>No access</h2><p class="hint">The TV editor is for AMA staff. Your login needs a permission in AMA ID Cards or a role in Black Belt Prep.</p><div class="row"><button class="btn primary" id="retry">Try again</button></div>`
+    ? `<h2>No access</h2><p class="hint">Your login doesn't have TV access. Ask an admin to give it to you on the Staff logins page.</p><div class="row"><button class="btn primary" id="retry">Try again</button></div>`
     : `<h2>Can't open the TV editor</h2><p class="hint">${esc(kind)}</p><div class="row"><button class="btn primary" id="retry">Try again</button></div>`;
-  $('#retry').onclick = load;
+  if ($('#retry')) $('#retry').onclick = load;
 }
 
 /* ---------- The list ---------- */

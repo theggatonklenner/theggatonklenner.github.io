@@ -92,6 +92,29 @@ try {
   await page.waitForFunction(() => document.querySelector('#list [data-email="jo@ama.test"]').textContent.includes('Approve prints'));
   ok(db._t.staff_permissions.filter(x => x.email === 'jo@ama.test').map(x => x.permission).sort().join() === 'approve,edit' && db._t.prep_roles.filter(x => x.email === 'jo@ama.test').map(x => x.role).join() === 'grading', 'roles saved in both apps');
 
+  // Dojang TV
+  ok((await page.textContent('#list [data-email="tate@ama.test"]')).includes('TV: Admin'), 'the list shows TV access (admins always have it)');
+  await page.click('#addBtn'); await page.fill('#addEmail', 'tvonly@ama.test'); await page.click('#addGen');
+  ok((await page.$$('#tvChecks input[type=radio]')).length === 3 && await page.isChecked('#tvChecks input[value=""]'), 'adding a login has a Dojang TV choice, No access to start with');
+  await page.check('#tvChecks input[value="remote"]'); await page.click('#addGo');
+  await page.waitForSelector('#list [data-email="tvonly@ama.test"]');
+  const tvRow = await page.textContent('#list [data-email="tvonly@ama.test"]');
+  ok(tvRow.includes('TV: Remote only') && tvRow.includes('ID Cards: No access') && tvRow.includes('Prep: No access'), 'a login can have just the TV remote and nothing else');
+  await page.click('#list [data-email="tvonly@ama.test"]'); await page.waitForSelector('#tvChecks');
+  ok(await page.isChecked('#tvChecks input[value="remote"]'), 'their TV choice shows when opened');
+  await page.check('#tvChecks input[value="edit"]');
+  await page.screenshot({ path: process.env.SHOT_DIR ? join(process.env.SHOT_DIR, 'staff-tv.png') : join(tmpdir(), 'staff-tv.png') });
+  await page.click('#saveRoles');
+  await page.waitForFunction(() => document.querySelector('#list [data-email="tvonly@ama.test"]').textContent.includes('TV: Editor'));
+  ok(db._t.tv_permissions.filter(x => x.email === 'tvonly@ama.test').map(x => x.permission).join() === 'edit', 'changed to the TV editor');
+  db._opts.tvMissing = true;
+  await page.reload(); await page.waitForSelector('#list [data-email]');
+  await page.click('#list [data-email="tvonly@ama.test"]'); await page.waitForSelector('#rolesForm');
+  ok((await page.textContent('#rolesForm')).includes('first run supabase/tv-setup.sql') && !(await page.$('#tvChecks')), 'before the TV is set up, it says what to run');
+  await page.evaluate(() => document.querySelector('#dlg').close());
+  db._opts.tvMissing = false;
+  await page.reload(); await page.waitForSelector('#list [data-email]');
+
   // Password
   await page.click('#list [data-email="jo@ama.test"]'); await page.waitForSelector('#pwForm');
   await page.fill('#newPw', 'brandnewpass'); await page.click('#savePw');

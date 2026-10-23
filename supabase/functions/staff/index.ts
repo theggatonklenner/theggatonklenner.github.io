@@ -1,23 +1,26 @@
 // @ts-nocheck
-// AMA Grading Toolkit: staff logins for AMA ID Cards and Black Belt Prep, in one place.
+// AMA Grading Toolkit: staff logins for AMA ID Cards, Black Belt Prep and the dojang TV, in one place.
 //
 // Deploy in Supabase: Edge Functions > Deploy a new function > Via Editor, name it "staff",
 // paste this whole file, Deploy. Then turn OFF "Verify JWT with legacy secret" (or "Enforce JWT verification") for the function
 // (it checks the signed-in person itself).
 //
 // Only people who are an admin in BOTH apps can use it. It can:
-//   list      every login, with its AMA ID Cards and Black Belt Prep permissions
+//   list      every login, with its AMA ID Cards, Black Belt Prep and TV permissions
 //   create    add a login with a starting password and permissions (or update an existing login)
 //   password  set a new password for a login
 //   roles     change a login's permissions in either app
 //   remove    delete a login and its permissions in both apps
 // AMA ID Cards needs supabase/permissions.sql (tick-box permissions) from the ama-id-cards repository.
+// TV permissions need supabase/tv-setup.sql from this repository (until then they're left out).
 
 export const CARD_PERMS = ['admin', 'edit', 'delete', 'send', 'approve', 'viewer', 'printer'];
 export const PREP_ROLES = ['admin', 'instructor', 'attendance', 'payments', 'grading', 'certificates', 'idcards', 'viewer'];
+export const TV_PERMS = ['edit', 'remote'];
 const APPS = {
   card: { table: 'staff_permissions', col: 'permission', allowed: CARD_PERMS, name: 'AMA ID Cards' },
-  prep: { table: 'prep_roles', col: 'role', allowed: PREP_ROLES, name: 'Black Belt Prep' }
+  prep: { table: 'prep_roles', col: 'role', allowed: PREP_ROLES, name: 'Black Belt Prep' },
+  tv: { table: 'tv_permissions', col: 'permission', allowed: TV_PERMS, name: 'Dojang TV' }
 };
 
 const cors = {
@@ -86,23 +89,27 @@ export async function handle(req, db) {
 
     const body = await req.json().catch(() => ({}));
     const action = body.action;
+    const tvReady = !(await db.from('tv_permissions').select('email').limit(1)).error;
 
     if (action === 'list') {
-      const [users, cardRes, prepRes] = await Promise.all([allUsers(db), db.from('staff_permissions').select('email, permission'), db.from('prep_roles').select('email, role')]);
+      const [users, cardRes, prepRes, tvRes] = await Promise.all([allUsers(db), db.from('staff_permissions').select('email, permission'), db.from('prep_roles').select('email, role'),
+        tvReady ? db.from('tv_permissions').select('email, permission') : Promise.resolve({ data: [] })]);
       if (cardRes.error) throw cardRes.error;
       if (prepRes.error) throw prepRes.error;
-      const card = new Map(), prep = new Map();
+      if (tvRes.error) throw tvRes.error;
+      const card = new Map(), prep = new Map(), tv = new Map();
       (cardRes.data || []).forEach(r => card.set(r.email, [...(card.get(r.email) || []), r.permission]));
       (prepRes.data || []).forEach(r => prep.set(r.email, [...(prep.get(r.email) || []), r.role]));
+      (tvRes.data || []).forEach(r => tv.set(r.email, [...(tv.get(r.email) || []), r.permission]));
       const order = (list, all) => (list || []).sort((a, b) => all.indexOf(a) - all.indexOf(b));
       const row = (email, u) => ({ email, has_login: !!u, created_at: u ? u.created_at : null, last_sign_in_at: u && u.last_sign_in_at || null,
-        card_perms: order(card.get(email), CARD_PERMS), prep_roles: order(prep.get(email), PREP_ROLES) });
+        card_perms: order(card.get(email), CARD_PERMS), prep_roles: order(prep.get(email), PREP_ROLES), tv_perms: order(tv.get(email), TV_PERMS) });
       const rows = users.filter(u => u.email).map(u => row(u.email.toLowerCase(), u));
       const seen = new Set(rows.map(r => r.email));
       // Permissions given to an email that has no login yet
-      new Set([...card.keys(), ...prep.keys()]).forEach(email => { if (!seen.has(email)) rows.push(row(email, null)); });
+      new Set([...card.keys(), ...prep.keys(), ...tv.keys()]).forEach(email => { if (!seen.has(email)) rows.push(row(email, null)); });
       rows.sort((a, b) => a.email.localeCompare(b.email));
-      return json({ me, users: rows, card_perms: CARD_PERMS, prep_roles: PREP_ROLES });
+      return json({ me, users: rows, card_perms: CARD_PERMS, prep_roles: PREP_ROLES, tv_perms: tvReady ? TV_PERMS : null });
     }
 
     const email = String(body.email || '').trim().toLowerCase();
@@ -110,6 +117,8 @@ export async function handle(req, db) {
     const password = String(body.password || '');
     const cardWant = body.card_perms === undefined ? undefined : clean(body.card_perms, CARD_PERMS);
     const prepWant = body.prep_roles === undefined ? undefined : clean(body.prep_roles, PREP_ROLES);
+    // "TV editor" includes the remote, so only one of the two is kept
+    const tvWant = body.tv_perms === undefined || !tvReady ? undefined : (l => l.includes('edit') ? ['edit'] : l)(clean(body.tv_perms, TV_PERMS));
 
     if (action === 'create') {
       const existing = await findUser(db, email);
@@ -124,6 +133,7 @@ export async function handle(req, db) {
       }
       await setPerms(db, 'card', email, cardWant || []);
       await setPerms(db, 'prep', email, prepWant || []);
+      if (tvReady) await setPerms(db, 'tv', email, tvWant || []);
       return json({ ok: true, existed: !!existing });
     }
 
@@ -146,6 +156,7 @@ export async function handle(req, db) {
       }
       if (cardWant) await setPerms(db, 'card', email, cardWant);
       if (prepWant) await setPerms(db, 'prep', email, prepWant);
+      if (tvWant) await setPerms(db, 'tv', email, tvWant);
       return json({ ok: true });
     }
 
@@ -154,6 +165,7 @@ export async function handle(req, db) {
       for (const app of ['card', 'prep']) { const last = await lastAdmin(db, app, email, []); if (last) return fail(last); }
       await setPerms(db, 'prep', email, []);
       await setPerms(db, 'card', email, []);
+      if (tvReady) await setPerms(db, 'tv', email, []);
       await db.from('staff_roles').delete().eq('email', email); // old single roles, if still there
       const user = await findUser(db, email);
       if (user) {

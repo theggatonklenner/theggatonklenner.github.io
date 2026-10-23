@@ -88,5 +88,26 @@ ok(r.status === 200, 'another admin can change your roles when an admin remains'
 r = await call(SAM, { action: 'roles', email: 'sam@ama.test', prep_roles: ['viewer'] });
 ok(r.status === 400, 'the last admin cannot be removed');
 
+console.log('\nDojang TV');
+const tvOf = e => db._t.tv_permissions.filter(x => x.email === e).map(x => x.permission).sort().join();
+r = await call(SAM, { action: 'list' });
+ok(r.body.tv_perms.join() === 'edit,remote' && Array.isArray(r.body.users[0].tv_perms), 'lists the TV permissions too');
+r = await call(SAM, { action: 'create', email: 'tvonly@ama.test', password: 'longenough', card_perms: [], prep_roles: [], tv_perms: ['remote', 'bogus'] });
+ok(r.status === 200 && tvOf('tvonly@ama.test') === 'remote' && cardOf('tvonly@ama.test') === '' && prepOf('tvonly@ama.test') === '', 'a login can have just the TV remote, and nothing in the other apps');
+r = await call(SAM, { action: 'roles', email: 'tvonly@ama.test', tv_perms: ['edit', 'remote'] });
+ok(r.status === 200 && tvOf('tvonly@ama.test') === 'edit', 'TV editor includes the remote, so only one is kept');
+r = await call(SAM, { action: 'list' });
+ok(r.body.users.find(u => u.email === 'tvonly@ama.test').tv_perms.join() === 'edit', 'and the list shows it');
+r = await call(SAM, { action: 'roles', email: 'tvonly@ama.test', card_perms: ['viewer'] });
+ok(r.status === 200 && tvOf('tvonly@ama.test') === 'edit' && cardOf('tvonly@ama.test') === 'viewer', "changing other apps leaves the TV ticks alone");
+r = await call(SAM, { action: 'remove', email: 'tvonly@ama.test' });
+ok(r.status === 200 && tvOf('tvonly@ama.test') === '', 'removing a login removes its TV access too');
+db._opts.tvMissing = true;
+r = await call(SAM, { action: 'list' });
+ok(r.status === 200 && r.body.tv_perms === null, 'before the TV is set up, the TV section is left out');
+r = await call(SAM, { action: 'create', email: 'later@ama.test', password: 'longenough', card_perms: ['viewer'], tv_perms: ['edit'] });
+ok(r.status === 200 && cardOf('later@ama.test') === 'viewer', '...and logins can still be added');
+db._opts.tvMissing = false;
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

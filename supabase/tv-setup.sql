@@ -1,8 +1,8 @@
 -- TV display: database setup
 -- Run in Supabase > SQL Editor (choose "with RLS" if asked). Safe to run again.
 --
--- Slides for the dojang TV. Staff (anyone with a permission in AMA ID Cards other than the print
--- station, or a role in Black Belt Prep) edit them on the editor page. The TV itself doesn't sign in:
+-- Slides for the dojang TV. Staff with the TV editor ticked (see "Who can use the TV" below) edit them on
+-- the editor page. The TV itself doesn't sign in:
 -- it shows the slideshow once the screen code (Settings on the editor page) is entered, and only
 -- gets what's on screen (slides, plus the live AMA info below).
 --
@@ -22,22 +22,62 @@
 -- Party mode: the TV shows only one slide (e.g. a birthday message) until a set time, then goes back to
 -- the normal slideshow by itself. That slide is kept out of the normal slideshow so it can be reused.
 
--- ---------- Who can edit ----------
-create or replace function public.tv_is_staff() returns boolean
+-- ---------- Who can use the TV ----------
+-- TV permissions, ticked on the Staff logins page (staff/):
+--   edit     the TV editor: slides, party mode, events, settings (and the remote)
+--   remote   only the phone remote
+-- Admins in AMA ID Cards or Black Belt Prep can always do everything. Someone with only TV ticks can't open
+-- AMA ID Cards or Black Belt Prep.
+do $$
+begin
+  if to_regclass('public.tv_permissions') is null then
+    create table public.tv_permissions (
+      email      text not null,
+      permission text not null check (permission in ('edit', 'remote')),
+      created_at timestamptz not null default now(),
+      primary key (email, permission)
+    );
+    -- First run: everyone who could edit the TV before keeps it
+    if to_regclass('public.staff_permissions') is not null then
+      execute $q$ insert into public.tv_permissions (email, permission)
+        select distinct lower(email), 'edit' from public.staff_permissions where permission <> 'printer' on conflict do nothing $q$;
+    end if;
+    if to_regclass('public.prep_roles') is not null then
+      execute $q$ insert into public.tv_permissions (email, permission)
+        select distinct lower(email), 'edit' from public.prep_roles on conflict do nothing $q$;
+    end if;
+  end if;
+end $$;
+
+-- Can the signed-in person do this on the TV? ('edit' or 'remote'; edit includes the remote; 'admin' = an admin in either app)
+create or replace function public.tv_can(p_perm text) returns boolean
   language plpgsql stable security definer set search_path = public as $$
 declare me text := lower(auth.jwt() ->> 'email'); yes boolean := false;
 begin
   if me is null then return false; end if;
   if to_regclass('public.staff_permissions') is not null then
-    execute 'select exists (select 1 from public.staff_permissions where email = $1 and permission <> ''printer'')' into yes using me;
+    execute 'select exists (select 1 from public.staff_permissions where email = $1 and permission = ''admin'')' into yes using me;
     if yes then return true; end if;
   end if;
   if to_regclass('public.prep_roles') is not null then
-    execute 'select exists (select 1 from public.prep_roles where email = $1)' into yes using me;
+    execute 'select exists (select 1 from public.prep_roles where email = $1 and role = ''admin'')' into yes using me;
+    if yes then return true; end if;
   end if;
-  return yes;
+  if p_perm = 'admin' then return false; end if;   -- only the apps' admins manage TV permissions
+  return exists (select 1 from public.tv_permissions where email = me and (permission = p_perm or permission = 'edit'));
 end $$;
+grant execute on function public.tv_can(text) to authenticated;
+create or replace function public.tv_is_staff() returns boolean   -- can use the TV editor
+  language sql stable security definer set search_path = public as $$ select public.tv_can('edit') $$;
 grant execute on function public.tv_is_staff() to authenticated;
+
+alter table public.tv_permissions enable row level security;
+drop policy if exists "see own tv permissions" on public.tv_permissions;
+drop policy if exists "admins manage tv permissions" on public.tv_permissions;
+create policy "see own tv permissions" on public.tv_permissions for select to authenticated
+  using (email = lower(auth.jwt() ->> 'email') or public.tv_can('admin'));
+create policy "admins manage tv permissions" on public.tv_permissions for all to authenticated
+  using (public.tv_can('admin')) with check (public.tv_can('admin'));
 
 -- ---------- Settings ----------
 create table if not exists public.tv_settings (
@@ -134,7 +174,7 @@ alter table public.tv_screens add column if not exists loaded_at timestamptz;   
 alter table public.tv_screens enable row level security;
 drop policy if exists "staff see screens" on public.tv_screens;
 drop policy if exists "staff remove screens" on public.tv_screens;
-create policy "staff see screens" on public.tv_screens for select to authenticated using (public.tv_is_staff());
+create policy "staff see screens" on public.tv_screens for select to authenticated using (public.tv_can('remote'));
 create policy "staff remove screens" on public.tv_screens for delete to authenticated using (public.tv_is_staff());
 alter table public.tv_slides alter column position drop default;
 
@@ -166,6 +206,8 @@ drop policy if exists "staff edit tv settings" on public.tv_settings;
 drop policy if exists "staff edit tv slides" on public.tv_slides;
 create policy "staff edit tv settings" on public.tv_settings for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
 create policy "staff edit tv slides"   on public.tv_slides   for all to authenticated using (public.tv_is_staff()) with check (public.tv_is_staff());
+drop policy if exists "remote sees tv slides" on public.tv_slides;
+create policy "remote sees tv slides" on public.tv_slides for select to authenticated using (public.tv_can('remote'));
 
 -- ---------- Birthday poster templates ----------
 -- A design with the name area left empty, plus where the name goes and how it looks (see tv/poster.js).
@@ -328,7 +370,7 @@ create or replace function public.tv_remote_send(p_cmd text, p_slide uuid defaul
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare n bigint;
 begin
-  if not public.tv_is_staff() then raise exception 'Only AMA staff can use the TV remote' using errcode = '42501'; end if;
+  if not public.tv_can('remote') then raise exception 'Your login doesn''t have the TV remote ticked' using errcode = '42501'; end if;
   if p_cmd not in ('hello', 'next', 'back', 'pause', 'play', 'show', 'done') then raise exception 'Unknown button'; end if;
   update public.tv_settings set
       remote_seq = remote_seq + 1, remote_at = now(),

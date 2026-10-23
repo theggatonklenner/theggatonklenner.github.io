@@ -609,7 +609,15 @@ try {
   await page.click('#signOut'); await page.waitForSelector('#signIn:not([hidden])');
   await page.fill('#siEmail', 'jo@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
   await page.waitForSelector('#problem:not([hidden])');
-  ok((await page.textContent('#problem')).includes('for AMA staff'), 'someone who is not staff cannot edit the TV');
+  ok((await page.textContent('#problem')).includes("doesn't have TV access"), 'someone without TV access cannot edit the TV');
+  await db.query(`insert into tv_permissions values ('jo@ama.test', 'remote')`);
+  await page.click('#retry'); await page.waitForSelector('#problem a[href="../remote/"]', { timeout: 5000 }).catch(() => {});
+  ok((await page.textContent('#problem')).includes('can use the TV remote, but not the editor'), 'someone with the remote only is sent to the remote');
+  await page.goto(BASE + '/tv/remote/index.html'); await page.waitForSelector('#app:not([hidden]), #problem:not([hidden])');
+  ok(await page.isVisible('#app') && (await page.$$('#list [data-show]')).length > 0, '...and the remote works for them');
+  await db.query(`delete from tv_permissions where email = 'jo@ama.test'`);
+  await page.reload(); await page.waitForSelector('#problem:not([hidden])');
+  ok((await page.textContent('#problem')).includes("doesn't have the TV remote"), 'without TV access, the remote says so');
   await ctx.close();
 
   ok(errors.length === 0, 'no errors in the browser console' + (errors.length ? ': ' + errors.slice(0, 3).join(' / ') : ''));

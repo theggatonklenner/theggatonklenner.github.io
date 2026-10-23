@@ -38,7 +38,7 @@
   [hidden] { display: none !important; }
   button, input, select { font: inherit; color: inherit; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  input[type=checkbox] { accent-color: var(--accent); width: 20px; height: 20px; flex: none; }
+  input[type=checkbox], input[type=radio] { accent-color: var(--accent); width: 20px; height: 20px; flex: none; }
 
   .appbar { position: sticky; top: 0; z-index: 20; background: var(--surface); border-bottom: 1px solid var(--line); padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px; }
   .appbar-inner { max-width: 820px; margin: 0 auto; display: flex; align-items: center; gap: 10px; }
@@ -121,7 +121,7 @@
 
   <section id="app" hidden>
     <div class="view-head"><h2>Logins</h2><button class="btn primary sm" id="addBtn">Add login</button></div>
-    <p class="hint">Logins and permissions for AMA ID Cards and Black Belt Prep. Tap someone to change their permissions, set a new password or remove their login.</p>
+    <p class="hint">Logins and permissions for AMA ID Cards, Black Belt Prep and the dojang TV. Tap someone to change their permissions, set a new password or remove their login.</p>
     <input type="search" id="search" placeholder="Search email" aria-label="Search email" style="margin:12px 0">
     <ul class="people" id="list"></ul>
     <p class="hint" id="count" style="margin-top:8px"></p>
@@ -138,6 +138,7 @@ const SUPABASE_URL = 'https://ptdrcxngaptcgswfbjhg.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_YsRY6SlgR7U_ohn_xxQD1A_lrowkIGS'; // public by design; the function checks who is signed in
 const FN = SUPABASE_URL + '/functions/v1/staff';
 const CARD = { admin: 'Admin', edit: 'Edit people', delete: 'Delete people', send: 'Send to print', approve: 'Approve prints', viewer: 'View only', printer: 'Print station' };
+const TV = { remote: 'Remote only', edit: 'Editor' };
 const PREP = { admin: 'Admin', instructor: 'Instructor', attendance: 'Attendance', payments: 'Payments', grading: 'Grading', certificates: 'Certificates', idcards: 'ID cards', viewer: 'Viewer' };
 
 const $ = s => document.querySelector(s);
@@ -180,7 +181,8 @@ async function load() {
   try {
     const d = await api({ action: 'list' });
     if (!Array.isArray(d.card_perms)) { const er = new Error('The "staff" function in Supabase is an older copy. Update it with the latest supabase/functions/staff/index.ts.'); er.setup = true; er.outdated = true; throw er; }
-    state.me = d.me; state.users = d.users.map(u => ({ ...u, card_perms: u.card_perms || [], prep_roles: u.prep_roles || [] }));
+    state.me = d.me; state.users = d.users.map(u => ({ ...u, card_perms: u.card_perms || [], prep_roles: u.prep_roles || [], tv_perms: u.tv_perms || [] }));
+    state.tv = d.tv_perms === undefined ? 'outdated' : d.tv_perms === null ? 'setup' : 'ready';   // TV permissions: function and database ready?
     show('#app'); draw();
   } catch (e) {
     show('#problem');
@@ -199,7 +201,7 @@ function draw() {
   $('#list').innerHTML = rows.length ? rows.map(u => `<li><button class="person" data-email="${esc(u.email)}">
       <div class="who"><strong>${esc(u.email)}</strong>
         <span class="meta">${u.card_perms.includes('admin') && u.prep_roles.includes('admin') ? '<span class="chip">Admin</span>' : ''}
-          <span>ID Cards: ${esc(listText(u.card_perms, CARD))}</span><span>·</span><span>Prep: ${esc(listText(u.prep_roles, PREP))}</span>
+          <span>ID Cards: ${esc(listText(u.card_perms, CARD))}</span><span>·</span><span>Prep: ${esc(listText(u.prep_roles, PREP))}</span>${state.tv === 'ready' ? `<span>·</span><span>TV: ${esc(tvText(u))}</span>` : ''}
           ${!u.has_login ? '<span class="tag warn">No login yet</span>' : !u.last_sign_in_at ? '<span class="tag muted">Never signed in</span>' : ''}
           ${u.email === state.me ? '<span class="tag muted">You</span>' : ''}</span></div>
       <span class="chev" aria-hidden="true">›</span></button></li>`).join('')
@@ -209,6 +211,14 @@ function draw() {
 }
 
 const checks = (id, names, cur) => `<div class="checks" id="${id}">${Object.entries(names).map(([k, t]) => `<label class="check"><input type="checkbox" value="${k}"${cur.includes(k) ? ' checked' : ''}> ${t}</label>`).join('')}</div>`;
+// Dojang TV: one choice (the editor includes the remote). Admins in either app can always use the TV.
+const isAdmin = u => u.card_perms.includes('admin') || u.prep_roles.includes('admin');
+const tvText = u => isAdmin(u) ? 'Admin' : u.tv_perms.includes('edit') ? 'Editor' : u.tv_perms.includes('remote') ? 'Remote only' : 'No access';
+const tvField = cur => state.tv === 'ready'
+  ? `<div class="field"><span class="label">Dojang TV</span><div class="checks" id="tvChecks">${[['', 'No access'], ['remote', 'Remote only'], ['edit', 'Editor']].map(([k, t]) =>
+      `<label class="check"><input type="radio" name="tvPerm" value="${k}"${(cur.includes('edit') ? 'edit' : cur.includes('remote') ? 'remote' : '') === k ? ' checked' : ''}> ${t}</label>`).join('')}</div><p class="hint">Remote only: the phone remote. Editor: slides, party mode, events and settings, plus the remote. Admins in AMA ID Cards or Black Belt Prep can always use the TV.</p></div>`
+  : `<div class="field"><span class="label">Dojang TV</span><p class="hint">${state.tv === 'setup' ? 'To set who can use the TV, first run supabase/tv-setup.sql in Supabase.' : 'To set who can use the TV, update the "staff" function in Supabase with the latest supabase/functions/staff/index.ts.'}</p></div>`;
+const tvPicked = () => { const r = document.querySelector('#tvChecks input:checked'); return state.tv !== 'ready' ? undefined : r && r.value ? [r.value] : []; };
 const picked = id => [...document.querySelectorAll(`#${id} input:checked`)].map(i => i.value);
 const makePassword = () => { const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const r = crypto.getRandomValues(new Uint32Array(12)); return Array.from(r, n => a[n % a.length]).join(''); };
 const ROLE_HELP = '<p class="hint">Admin can do everything in that app. Tick only what each person needs; with no ticks they can\'t use that app. Print station is only for the printer laptop\'s login.</p>';
@@ -222,6 +232,7 @@ function openPerson(email) {
       <h3>Permissions</h3>
       <div class="field"><span class="label">AMA ID Cards</span>${checks('cardChecks', CARD, u.card_perms)}</div>
       <div class="field"><span class="label">Black Belt Prep</span>${checks('prepChecks', PREP, u.prep_roles)}</div>
+      ${tvField(u.tv_perms)}
       ${self ? '<p class="hint">You can\'t remove your own admin access.</p>' : ROLE_HELP}
       <div class="row"><button class="btn primary" id="saveRoles" type="submit">Save permissions</button></div>
     </form>
@@ -229,11 +240,11 @@ function openPerson(email) {
       <div class="row"><input type="text" id="newPw" class="grow" autocomplete="new-password" placeholder="At least 8 characters" aria-label="New password" style="flex:1 1 180px;width:auto"><button type="button" class="btn sm" id="genPw">Make one</button></div>
       <p class="hint">Give the new password to them in person. They can keep using it.</p>
       <div class="row"><button class="btn" id="savePw" type="submit">Set password</button></div></form>` : `<div class="section"><p class="hint">To give them a login, use Add login with this email.</p></div>`}
-    ${!self ? `<div class="section"><div class="row"><button class="btn danger" id="removeBtn">${u.has_login ? 'Remove login' : 'Remove roles'}</button></div><p class="hint">Removes their access to both apps. Their name stays on anything they did.</p></div>` : ''}
+    ${!self ? `<div class="section"><div class="row"><button class="btn danger" id="removeBtn">${u.has_login ? 'Remove login' : 'Remove roles'}</button></div><p class="hint">Removes their access to all the apps. Their name stays on anything they did.</p></div>` : ''}
   </div>`);
   $('#rolesForm').onsubmit = async e => {
     e.preventDefault(); $('#saveRoles').disabled = true;
-    try { await api({ action: 'roles', email, card_perms: picked('cardChecks'), prep_roles: picked('prepChecks') }); dlg.close(); toast('Permissions saved'); await load(); }
+    try { await api({ action: 'roles', email, card_perms: picked('cardChecks'), prep_roles: picked('prepChecks'), tv_perms: tvPicked() }); dlg.close(); toast('Permissions saved'); await load(); }
     catch (er) { toast(er.message, 7000); $('#saveRoles').disabled = false; }
   };
   const pw = $('#pwForm');
@@ -249,7 +260,7 @@ function openPerson(email) {
   }
   const rm = $('#removeBtn');
   if (rm) rm.onclick = async () => {
-    if (!await confirmBox(`Remove ${email}? They will no longer be able to sign in to AMA ID Cards or Black Belt Prep.`, 'Remove', true)) return openPerson(email);
+    if (!await confirmBox(`Remove ${email}? They will no longer be able to sign in to AMA ID Cards, Black Belt Prep or the TV.`, 'Remove', true)) return openPerson(email);
     try { await api({ action: 'remove', email }); toast(`${email} removed`); await load(); }
     catch (er) { toast(er.message, 7000); openPerson(email); }
   };
@@ -262,6 +273,7 @@ function openAdd() {
     <div class="field"><label for="addPw">Starting password</label><div class="row"><input type="text" id="addPw" autocomplete="new-password" placeholder="At least 8 characters" style="flex:1 1 180px;width:auto"><button type="button" class="btn sm" id="addGen">Make one</button></div></div>
     <div class="field"><span class="label">AMA ID Cards</span>${checks('cardChecks', CARD, [])}</div>
     <div class="field"><span class="label">Black Belt Prep</span>${checks('prepChecks', PREP, [])}</div>
+    ${tvField([])}
     ${ROLE_HELP}
     <p class="hint">If the email already has a login, its permissions are updated. Leave the password blank to keep their current one.</p>
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" id="addGo" type="submit">Add login</button></div>
@@ -273,7 +285,7 @@ function openAdd() {
     if (password && password.length < 8) return toast('The password needs at least 8 characters.');
     $('#addGo').disabled = true;
     try {
-      const r = await api({ action: 'create', email, password, card_perms: picked('cardChecks'), prep_roles: picked('prepChecks') });
+      const r = await api({ action: 'create', email, password, card_perms: picked('cardChecks'), prep_roles: picked('prepChecks'), tv_perms: tvPicked() });
       dlg.close(); toast(r.existed ? `${email} already had a login; permissions updated` : `Login added for ${email}${password ? '. Give them the starting password.' : ''}`, 6000); await load();
     } catch (er) { toast(er.message, 7000); $('#addGo').disabled = false; }
   };
