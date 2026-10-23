@@ -73,6 +73,13 @@
   .names .n span { font-size: 2.4vw; opacity: .85; }
 
   /* Corner bits */
+  .quiet { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: #000; }
+  .quiet .qlogo { position: absolute; left: 50%; top: 50%; width: 22vh; height: 22vh; margin: -11vh 0 0 -11vh; border-radius: 3vh; background: #fff url(../icons/ama-id-cards.png) center/86% no-repeat; opacity: .55; }
+  .card.qr { flex-direction: row; align-items: center; }
+  .qr .qtext { flex: 1; min-width: 0; padding-right: 5vw; }
+  .qr .qlink { font-size: 2.6vw; font-weight: 700; margin-top: 3vh; opacity: .9; word-break: break-all; }
+  .qr .qbox { flex: none; width: 66vh; height: 66vh; max-width: 40vw; max-height: 40vw; background: #fff; border-radius: 2.4vh; padding: 1.2vh; box-sizing: border-box; }
+  .qr .qbox img { display: block; width: 100%; height: 100%; }
   .logo { position: absolute; left: 2.2vw; top: 2.4vh; width: 5vw; height: 5vw; border-radius: 1vw; background: #fff url(../icons/ama-id-cards.png) center/86% no-repeat; z-index: 5; box-shadow: 0 .3vw 1vw rgba(0,0,0,.3); }
   .clock { position: absolute; right: 2.4vw; top: 2.4vh; z-index: 5; font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-weight: 700; font-size: 3vw; padding: .6vh 1.2vw; border-radius: 1vw; background: rgba(0,0,0,.45); color: #fff; }
   .dot { position: absolute; right: 1vw; bottom: 1.4vh; width: 1vw; height: 1vw; border-radius: 50%; background: #f2867d; z-index: 6; display: none; }
@@ -129,8 +136,9 @@
   if (!screenId) { screenId = 'tv-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); store.set('tvScreen', screenId); }
   // Tell the editor this TV is on and what it's showing; reload if "Refresh the TV" was pressed
   function showingNow() {
+    if (feed && feed.quiet) return 'Quiet hours (' + (feed.quiet === 'black' ? 'black screen' : 'logo') + ')';
     var s = playlist[index]; if (!s) return feed && feed.only ? 'Party mode' : 'Waiting for slides';
-    var name = s.title || (s.kind === 'live' ? { next_grading: 'Next grading', events: 'Events this month', month: 'Month theme' }[s.live_kind] : { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown' }[s.kind]);
+    var name = s.title || (s.kind === 'live' ? { next_grading: 'Next grading', events: 'Events this month', month: 'Month theme' }[s.live_kind] : { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown', qr: 'QR code' }[s.kind]);
     return (feed.only ? 'Party mode: ' : '') + name + (playlist.length > 1 ? ' (' + (index + 1) + ' of ' + playlist.length + ')' : '');
   }
   function checkIn() {
@@ -185,7 +193,7 @@
   function apply(f, first) {
     if (first || !feed) { feed = f; version = f.version; build(); setCorners(); next(); return; }
     var wasOnly = feed.only ? (feed.slides[0] || {}).id : null, isOnly = f.only ? (f.slides[0] || {}).id : null;
-    if (wasOnly !== isOnly || (f.only && f.version !== version)) {   // party mode started, ended or changed: switch now
+    if (wasOnly !== isOnly || (feed.quiet || '') !== (f.quiet || '') || (f.only && f.version !== version)) {   // party mode started, ended or changed: switch now
       pending = null; feed = f; version = f.version; build(); setCorners(); index = -1; next(); return;
     }
     if (f.version !== version || JSON.stringify(f.live) !== JSON.stringify(feed.live) || JSON.stringify(f.settings) !== JSON.stringify(feed.settings)) pending = f;   // switch over at the next slide
@@ -256,6 +264,12 @@
       var bg = s.media_path ? ' bgphoto" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')' : '';
       return '<div class="card ' + themeOf(s) + bg + '">' + (s.media_path ? '<div class="shade"></div>' : '') + (s.theme === 'party' ? confetti() : '') + '<div class="belt"></div>' + (s.title ? '<h1>' + esc(s.title) + '</h1>' : '') + (s.body ? '<div class="body">' + esc(s.body) + '</div>' : '') + '</div>';
     }
+    if (s.kind === 'qr') {
+      var shortLink = String(s.link || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '');
+      return '<div class="card qr ' + themeOf(s) + '"><div class="qtext"><div class="belt"></div>' + (s.title ? '<h1>' + esc(s.title) + '</h1>' : '') +
+        (s.body ? '<div class="body">' + esc(s.body) + '</div>' : '') + '<div class="qlink">' + esc(shortLink) + '</div></div>' +
+        '<div class="qbox"><img src="' + MEDIA + esc(s.media_path) + '" alt=""></div></div>';
+    }
     if (s.kind === 'countdown') {
       var to = s.count_to === 'grading' ? live.next_grading.date : s.event_on, n = daysTo(to);
       var what = s.title || (s.count_to === 'grading' ? 'Black belt grading' : 'Countdown');
@@ -305,6 +319,12 @@
   function next() {
     clearTimeout(timer);
     if (pending) { feed = pending; version = pending.version; pending = null; build(); setCorners(); index = -1; }
+    if (feed && feed.quiet) {   // quiet hours: stays like this until the feed says otherwise
+      layerOn = null; index = -1;
+      stage.innerHTML = '<div class="layer on"><div class="quiet">' + (feed.quiet === 'logo' ? '<div class="qlogo"></div>' : '') + '</div></div>';
+      return;
+    }
+    if (stage.querySelector('.quiet')) stage.innerHTML = '';   // quiet hours just ended
     if (!playlist.length) { showMessage('AMA Marrickville', 'No slides yet. Add some in the TV editor.'); timer = setTimeout(next, 30000); return; }
     index = (index + 1) % playlist.length;
     var s = playlist[index];

@@ -166,6 +166,30 @@ ev = await feedEvents();
 ok(ev.length === 2 && ev[0].events.length === 0 && titles(ev[1]).includes('Next month thing'), 'once this month has nothing left, next month shows');
 await as('tate@ama.test', () => db.exec(`delete from tv_events; delete from tv_months`));
 
+console.log('\nQuiet hours and QR codes');
+const syd = `(now() at time zone 'Australia/Sydney')`;
+const feedNow = async () => (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
+await as('tate@ama.test', () => db.exec(`update tv_settings set only_slide = null, only_until = null, quiet_on = true, quiet_style = 'logo',
+  quiet_from = (${syd} - interval '1 hour')::time, quiet_to = (${syd} + interval '1 hour')::time`));
+f = await feedNow();
+ok(f.quiet === 'logo' && f.slides.length === 0 && !f.settings.show_clock, 'in quiet hours the TV gets no slides, just the logo');
+await as('tate@ama.test', () => db.exec(`update tv_settings set quiet_style = 'black'`));
+ok((await feedNow()).quiet === 'black', 'or a black screen');
+await as('tate@ama.test', () => db.exec(`update tv_settings set quiet_from = (${syd} + interval '1 hour')::time, quiet_to = (${syd} - interval '1 hour')::time`));
+ok(!(await feedNow()).quiet, 'outside quiet hours the slideshow plays (a 9 pm to 7 am style window that crosses midnight)');
+await as('tate@ama.test', () => db.exec(`update tv_settings set quiet_from = (${syd} - interval '1 minute')::time, quiet_to = (${syd} - interval '2 minutes')::time`));
+ok((await feedNow()).quiet === 'black', 'a window that wraps past midnight covers now');
+const qp = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, theme, party) values ('text', 'Party in quiet hours', 'party', true) returning id`))).rows[0].id;
+await as('tate@ama.test', () => db.query(`update tv_settings set only_slide = $1, only_until = now() + interval '1 hour'`, [qp]));
+ok((await feedNow()).only === true, 'a party still shows during quiet hours');
+await as('tate@ama.test', () => db.exec(`update tv_settings set only_slide = null, only_until = null, quiet_on = false`));
+ok(!(await feedNow()).quiet, 'quiet hours can be turned off');
+ok(!(await tryAs('tate@ama.test', `update tv_settings set quiet_style = 'off'`)).ok, 'only black or logo');
+ok(!(await tryAs('tate@ama.test', `insert into tv_slides (kind, link, media_path) values ('qr', 'not a link', 'qr/x.png')`)).ok, 'a QR slide needs a proper link');
+await as('tate@ama.test', () => db.exec(`insert into tv_slides (kind, title, link, media_path) values ('qr', 'Follow us', 'https://instagram.com/ama', 'qr/x.png')`));
+ok((await feedNow()).slides.some(x => x.kind === 'qr' && x.link === 'https://instagram.com/ama'), 'QR slides reach the TV with their link');
+await as('tate@ama.test', () => db.exec(`delete from tv_slides where kind = 'qr' or title = 'Party in quiet hours'`));
+
 console.log('\nFiles');
 const pol = (await db.query(`select policyname, roles::text r from pg_policies where tablename = 'objects' and policyname like 'tv files%'`)).rows;
 ok(pol.length === 4 && pol.every(p => p.r.includes('authenticated') && !p.r.includes('anon')), 'only signed-in staff can add, change or remove TV files');

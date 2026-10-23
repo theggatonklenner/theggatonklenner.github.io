@@ -201,6 +201,14 @@
         <div class="field"><label for="setSecs">Seconds per slide</label><input type="number" id="setSecs" min="3" max="600" step="1"></div>
         <div class="field"><span class="label">On screen</span><label class="check"><input type="checkbox" id="setClock"> Clock</label><label class="check" style="min-height:28px"><input type="checkbox" id="setLogo"> AMA logo</label></div>
       </div>
+      <div class="field" id="quietBox" hidden><span class="label">Quiet hours</span>
+        <label class="check"><input type="checkbox" id="setQuiet"> Turn the slideshow off at night</label>
+        <div class="grid2" id="quietRow">
+          <div class="field"><label for="setQFrom">From</label><input type="time" id="setQFrom"></div>
+          <div class="field"><label for="setQTo">Until</label><input type="time" id="setQTo"></div>
+          <div class="field" style="grid-column:1/-1"><label for="setQStyle">The TV shows</label><select id="setQStyle"><option value="logo">Just the AMA logo (dimmed, on black)</option><option value="black">A black screen</option></select></div>
+        </div>
+        <p class="hint">Every day. A party still shows during quiet hours. Many TVs also have their own off timer in their settings, which saves power.</p></div>
       <div class="row"><button class="btn primary" type="submit" id="setSave">Save settings</button></div>
     </form>
   </section>
@@ -231,7 +239,7 @@ const LIVE = {
 };
 // An old slide of a kind that's since been removed still opens, so it can be deleted
 const liveInfo = k => LIVE[k] || ['Live', 'No longer shown on the TV'];
-const KIND = { photo: 'Photo', video: 'Video', text: 'Info slide', live: 'Live', countdown: 'Countdown' };
+const KIND = { photo: 'Photo', video: 'Video', text: 'Info slide', live: 'Live', countdown: 'Countdown', qr: 'QR code' };
 const state = { me: '', slides: [], partySlides: [], settings: null, templates: null, bookings: null, screens: null, nextGrading: null, events: null, months: null };
 
 /* ---------- Small helpers ---------- */
@@ -303,6 +311,7 @@ function problem(kind) {
 
 /* ---------- The list ---------- */
 function thumb(s) {
+  if (s.kind === 'qr') return `<div class="thumb t-${esc(s.theme)}"><span style="width:40px;height:40px;border-radius:4px;background:#fff url('${MEDIA + esc(s.media_path)}') center/90% no-repeat"></span></div>`;
   if (s.kind === 'photo') return `<div class="thumb" style="background-image:url('${MEDIA + esc(s.media_path)}')"></div>`;
   if (s.kind === 'video') return `<div class="thumb"><span class="play"></span></div>`;
   if (s.kind === 'text') return `<div class="thumb t-${esc(s.theme)}"${s.media_path ? ` style="background-image:linear-gradient(rgba(0,0,0,.45),rgba(0,0,0,.45)),url('${MEDIA + esc(s.media_path)}')"` : ''}>${esc((s.title || 'Info').slice(0, 24))}</div>`;
@@ -316,6 +325,11 @@ function draw() {
   drawParty();
   $('#code').textContent = S.screen_code;
   $('#setSecs').value = S.seconds; $('#setClock').checked = S.show_clock; $('#setLogo').checked = S.show_logo;
+  $('#quietBox').hidden = !('quiet_on' in S);
+  if ('quiet_on' in S) {
+    $('#setQuiet').checked = S.quiet_on; $('#setQFrom').value = String(S.quiet_from || '21:00').slice(0, 5); $('#setQTo').value = String(S.quiet_to || '07:00').slice(0, 5); $('#setQStyle').value = S.quiet_style || 'logo';
+    $('#quietRow').hidden = !S.quiet_on; $('#setQuiet').onchange = () => { $('#quietRow').hidden = !$('#setQuiet').checked; };
+  }
   $('#previewBtn').href = `../?code=${encodeURIComponent(S.screen_code)}&preview=1`;
   drawStatus(); drawEvents();
   $('#list').innerHTML = list.length ? list.map((s, i) => {
@@ -360,6 +374,7 @@ $('#addBtn').onclick = () => {
       <button data-add="photos"><b>Photos</b><span>One or several at once, or a PDF (each page becomes a slide)</span></button>
       <button data-add="video"><b>Video</b><span>MP4, up to 50 MB, plays without sound</span></button>
       <button data-add="text"><b>Info slide</b><span>Announcements, class times, notices</span></button>
+      <button data-add="qr"><b>QR code</b><span>"Scan to book a free trial", Instagram, any link</span></button>
       <button data-add="countdown"><b>Countdown</b><span>"Grading in 12 days", "Comp in 3 weeks"</span></button>
       ${Object.entries(LIVE).map(([k, [n, d]]) => `<button data-add="live:${k}"><b>Live: ${esc(n)}</b><span>${esc(d)}</span></button>`).join('')}
     </div>
@@ -369,6 +384,7 @@ $('#addBtn').onclick = () => {
     if (a === 'photos') { dlg.close(); $('#pickPhotos').click(); }
     else if (a === 'video') { dlg.close(); $('#pickVideo').click(); }
     else if (a === 'text') openSlide(null, { kind: 'text', theme: 'green' });
+    else if (a === 'qr') openSlide(null, { kind: 'qr', theme: 'green' });
     else if (a === 'countdown') openSlide(null, { kind: 'countdown', theme: 'green', count_to: 'date' });
     else addLive(a.split(':')[1]);
   });
@@ -513,6 +529,11 @@ function openSlide(s, fresh) {
       <div class="field"><label for="slBody">Text</label><textarea id="slBody" placeholder="e.g. The dojang is closed for the public holiday. Classes are back on Tuesday.">${esc(x.body || '')}</textarea></div>
       ${themePick}
       <div class="field"><span class="label">Background photo (optional)</span><div class="row"><span class="hint grow" id="bgName">${bgPath ? 'Photo added' : 'None'}</span><button type="button" class="btn sm" id="bgPick">${bgPath ? 'Change' : 'Add photo'}</button><button type="button" class="btn sm danger" id="bgClear" ${bgPath ? '' : 'hidden'}>Remove</button></div></div>`,
+    qr: () => `<div class="field"><label for="slLink">Link</label><input type="text" id="slLink" inputmode="url" autocapitalize="off" spellcheck="false" autocomplete="off" maxlength="500" value="${esc(x.link || '')}" placeholder="e.g. instagram.com/amamarrickville"></div>
+      <div class="field"><label for="slTitle">Heading</label><input type="text" id="slTitle" maxlength="120" value="${esc(x.title || '')}" placeholder="e.g. Scan to book a free trial"></div>
+      <div class="field"><label for="slBody">Text (optional)</label><textarea id="slBody" style="min-height:70px" placeholder="e.g. Point your phone camera at the code.">${esc(x.body || '')}</textarea></div>
+      <div class="row" style="align-items:center"><canvas id="qrPrev" width="120" height="120" style="width:120px;height:120px;border-radius:8px;background:#fff;border:1px solid var(--line)"></canvas><p class="hint grow" id="qrNote">Paste the link and the code appears here. Test it with your phone camera before you save.</p></div>
+      ${themePick}`,
     countdown: () => `<div class="field"><label for="slTitle">Event</label><input type="text" id="slTitle" maxlength="120" value="${esc(x.title || '')}" placeholder="e.g. Comp, Christmas break"></div>
       <div class="field"><span class="label">Count down to</span><div class="cd-to">
         <label class="check"><input type="radio" name="cdTo" value="date" ${x.count_to !== 'grading' ? 'checked' : ''}> A date</label>
@@ -525,7 +546,7 @@ function openSlide(s, fresh) {
       ${x.live_kind === 'events' || x.live_kind === 'month' ? '<div class="row"><button type="button" class="btn" id="slEvents">Edit events</button></div>' : ''}`
   }[x.kind]();
   openDlg(`<form class="dlg" id="slForm">
-    <div class="dlg-head"><div><h3>${isNew ? (x.kind === 'countdown' ? 'New countdown' : 'New info slide') : esc(x.kind === 'live' ? 'Live: ' + liveInfo(x.live_kind)[0] : KIND[x.kind])}</h3>${!isNew && x.updated_by ? `<p class="hint">Last changed by ${esc(x.updated_by)}</p>` : ''}</div><button class="x" data-close>Close</button></div>
+    <div class="dlg-head"><div><h3>${isNew ? (x.kind === 'countdown' ? 'New countdown' : x.kind === 'qr' ? 'New QR code' : 'New info slide') : esc(x.kind === 'live' ? 'Live: ' + liveInfo(x.live_kind)[0] : KIND[x.kind])}</h3>${!isNew && x.updated_by ? `<p class="hint">Last changed by ${esc(x.updated_by)}</p>` : ''}</div><button class="x" data-close>Close</button></div>
     ${body}
     <div class="grid2">
       <div class="field"><label for="slSecs">Seconds on screen</label><input type="number" id="slSecs" min="3" max="600" step="1" value="${x.seconds || ''}" placeholder="${x.kind === 'video' ? 'Whole video' : 'Default (' + state.settings.seconds + ')'}"></div>
@@ -537,6 +558,16 @@ function openSlide(s, fresh) {
   </form>`);
   const t = $('#slTitle'); if (t && isNew) t.focus();
   if ($('#slEvents')) $('#slEvents').onclick = () => openEvents();
+  if (x.kind === 'qr') {
+    const prev = async () => {
+      const link = cleanLink($('#slLink').value), c = $('#qrPrev'), g = c.getContext('2d');
+      g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+      if (!link) { $('#qrNote').textContent = $('#slLink').value.trim() ? "That doesn't look like a link yet." : 'Paste the link and the code appears here. Test it with your phone camera before you save.'; return; }
+      try { await drawQr(c, link); $('#qrNote').textContent = `Opens ${link}. Test it with your phone camera before you save.`; }
+      catch (er) { $('#qrNote').textContent = er.message || String(er); }
+    };
+    $('#slLink').oninput = prev; prev(); if (isNew) $('#slLink').focus();
+  }
   if (x.kind === 'countdown') {
     const cdTo = () => $('#slForm input[name=cdTo]:checked').value;
     const prev = () => {
@@ -563,6 +594,16 @@ function openSlide(s, fresh) {
     if (from && until && until < from) return toast('"Show until" is before "Show from".');
     const rec = { title: t ? (t.value.trim() || null) : x.title, seconds: $('#slSecs').value ? Math.max(3, Math.min(600, +$('#slSecs').value)) : null, enabled: $('#slOn').checked, starts_on: from, ends_on: until };
     if (x.kind === 'text') { rec.body = $('#slBody').value.trim() || null; rec.media_path = bgPath; if (!rec.title && !rec.body) return toast('Add a heading or some text.'); }
+    if (x.kind === 'qr') {
+      rec.body = $('#slBody').value.trim() || null;
+      const link = cleanLink($('#slLink').value);
+      if (!link) return toast('Paste the link the code should open.');
+      rec.link = link;
+      if (link !== x.link || !x.media_path) {
+        try { const c = document.createElement('canvas'); await drawQr(c, link, 1000); rec.media_path = await upload('qr', await new Promise(r => c.toBlob(r, 'image/png')), 'png', 'image/png'); }
+        catch (er) { return toast('Not saved: ' + (er.message || er), 6000); }
+      }
+    }
     if (x.kind === 'countdown') {
       rec.count_to = $('#slForm input[name=cdTo]:checked').value;
       rec.event_on = rec.count_to === 'date' ? ($('#slEvent').value || null) : null;
@@ -574,6 +615,7 @@ function openSlide(s, fresh) {
     $('#slSave').disabled = true;
     const { error } = isNew ? await sb.from('tv_slides').insert({ ...rec, kind: x.kind, theme: rec.theme || 'green' }) : await sb.from('tv_slides').update(rec).eq('id', s.id);
     if (error) { $('#slSave').disabled = false; return toast('Not saved: ' + error.message, 5000); }
+    if (!isNew && s.kind === 'qr' && rec.media_path && s.media_path && s.media_path !== rec.media_path) sb.storage.from('tv').remove([s.media_path]).catch(() => {});
     if (!isNew && s.kind === 'text' && s.media_path && s.media_path !== bgPath) sb.storage.from('tv').remove([s.media_path]).catch(() => {});
     dlg.close(); toast(isNew ? 'Added' : 'Saved'); load();
   };
@@ -584,6 +626,40 @@ function openSlide(s, fresh) {
     if (s.media_path) sb.storage.from('tv').remove([s.media_path]).catch(() => {});
     toast('Deleted'); load();
   };
+}
+
+/* ---------- QR codes ---------- */
+// "instagram.com/ama" -> "https://instagram.com/ama"; anything that isn't a web link -> ''
+function cleanLink(v) {
+  v = String(v || '').trim(); if (!v) return '';
+  if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+  try {
+    const u = new URL(v);
+    if (!/^https?:$/.test(u.protocol) || !/\.[a-z]{2,}$/i.test(u.hostname)) return '';
+    return u.pathname === '/' && !u.search && !u.hash ? u.origin : u.href;
+  } catch (e) { return ''; }
+}
+const QRLIB = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+let qrLoading = null;
+function loadQr() {
+  if (window.qrcode) return Promise.resolve(window.qrcode);
+  if (!qrLoading) qrLoading = new Promise((ok, bad) => {
+    const sc = document.createElement('script'); sc.src = QRLIB;
+    sc.onload = () => ok(window.qrcode); sc.onerror = () => { qrLoading = null; bad(new Error('Could not load the QR code maker. Check your connection.')); };
+    document.head.appendChild(sc);
+  });
+  return qrLoading;
+}
+// Black squares on white, with the blank border phones need to read it
+async function drawQr(canvas, text, size) {
+  const lib = await loadQr();
+  if (lib.stringToBytesFuncs && lib.stringToBytesFuncs['UTF-8']) lib.stringToBytes = lib.stringToBytesFuncs['UTF-8'];
+  const q = lib(0, 'M'); q.addData(text); q.make();
+  const n = q.getModuleCount(), cell = Math.max(1, Math.floor((size || canvas.width) / (n + 8)));
+  canvas.width = canvas.height = cell * (n + 8);
+  const g = canvas.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, canvas.width, canvas.height); g.fillStyle = '#000';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) g.fillRect((c + 4) * cell, (r + 4) * cell, cell, cell);
+  return canvas;
 }
 
 /* ---------- Events calendar ---------- */
@@ -1119,7 +1195,16 @@ function importTemplates(after) {
 $('#setForm').onsubmit = async e => {
   e.preventDefault();
   const secs = Math.max(3, Math.min(600, +$('#setSecs').value || 10));
-  const { error } = await sb.from('tv_settings').update({ seconds: secs, show_clock: $('#setClock').checked, show_logo: $('#setLogo').checked }).eq('id', 1);
+  const rec = { seconds: secs, show_clock: $('#setClock').checked, show_logo: $('#setLogo').checked };
+  if (!$('#quietBox').hidden) {
+    rec.quiet_on = $('#setQuiet').checked;
+    if (rec.quiet_on) {
+      if (!$('#setQFrom').value || !$('#setQTo').value) return toast('Fill in both quiet hours times.');
+      if ($('#setQFrom').value === $('#setQTo').value) return toast('The quiet hours start and end at the same time.');
+      rec.quiet_from = $('#setQFrom').value; rec.quiet_to = $('#setQTo').value; rec.quiet_style = $('#setQStyle').value;
+    }
+  }
+  const { error } = await sb.from('tv_settings').update(rec).eq('id', 1);
   if (error) return toast('Not saved: ' + error.message, 5000);
   toast('Settings saved'); load();
 };

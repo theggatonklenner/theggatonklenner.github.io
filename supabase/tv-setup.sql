@@ -52,6 +52,12 @@ insert into public.tv_settings (id) values (1) on conflict (id) do nothing;
 alter table public.tv_settings add column if not exists only_slide uuid;          -- party mode: the one slide to show
 alter table public.tv_settings add column if not exists only_until timestamptz;   -- ... until this time
 alter table public.tv_settings add column if not exists reload_at timestamptz;    -- "Refresh the TV" was pressed at this time
+alter table public.tv_settings add column if not exists quiet_on boolean not null default false;   -- quiet hours: no slideshow at night
+alter table public.tv_settings add column if not exists quiet_from time not null default '21:00';
+alter table public.tv_settings add column if not exists quiet_to time not null default '07:00';
+alter table public.tv_settings add column if not exists quiet_style text not null default 'logo';
+alter table public.tv_settings drop constraint if exists tv_settings_quiet_check;
+alter table public.tv_settings add constraint tv_settings_quiet_check check (quiet_style in ('black', 'logo'));
 alter table public.tv_settings drop constraint if exists tv_settings_code_check;
 alter table public.tv_settings add constraint tv_settings_code_check check (screen_code ~ '^[A-Z0-9]{4,12}$');
 
@@ -84,7 +90,10 @@ alter table public.tv_slides add column if not exists party boolean not null def
 alter table public.tv_slides add column if not exists event_on date;                           -- countdown: the day it counts to
 alter table public.tv_slides add column if not exists count_to text;                           -- countdown: 'date' or 'grading'
 alter table public.tv_slides drop constraint if exists tv_slides_kind_check;
-alter table public.tv_slides add constraint tv_slides_kind_check check (kind in ('photo', 'video', 'text', 'live', 'countdown'));
+alter table public.tv_slides add constraint tv_slides_kind_check check (kind in ('photo', 'video', 'text', 'live', 'countdown', 'qr'));
+alter table public.tv_slides add column if not exists link text;   -- QR code slides: the link the code opens
+alter table public.tv_slides drop constraint if exists tv_slides_qr_check;
+alter table public.tv_slides add constraint tv_slides_qr_check check (kind <> 'qr' or (link ~* '^https?://' and media_path is not null));
 alter table public.tv_slides drop constraint if exists tv_slides_countdown_check;
 delete from public.tv_slides where kind = 'live' and live_kind in ('congrats', 'sessions');   -- these slides were removed
 alter table public.tv_slides drop constraint if exists tv_slides_live_kind_check;
@@ -201,6 +210,7 @@ declare
   m0 date := date_trunc('month', (now() at time zone 'Australia/Sydney'))::date;   -- this month
   m1 date := (date_trunc('month', (now() at time zone 'Australia/Sydney')) + interval '1 month')::date;   -- next month
   two boolean;
+  now_time time := (now() at time zone 'Australia/Sydney')::time;
 begin
   select * into s from public.tv_settings where id = 1;
   if not found or upper(trim(coalesce(p_code, ''))) <> s.screen_code then
@@ -227,9 +237,19 @@ begin
       'only', true, 'only_until', one_until);
   end if;
 
+  -- Quiet hours (a party still shows): a black screen or just the logo, e.g. 9 pm to 7 am
+  if s.quiet_on and s.quiet_from <> s.quiet_to and (case when s.quiet_from < s.quiet_to
+       then now_time >= s.quiet_from and now_time < s.quiet_to
+       else now_time >= s.quiet_from or now_time < s.quiet_to end) then
+    return jsonb_build_object(
+      'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false),
+      'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
+      'quiet', s.quiet_style, 'quiet_until', s.quiet_to);
+  end if;
+
   select coalesce(jsonb_agg(jsonb_build_object(
            'id', t.id, 'kind', t.kind, 'title', t.title, 'body', t.body, 'media_path', t.media_path,
-           'theme', t.theme, 'live_kind', t.live_kind, 'seconds', t.seconds, 'event_on', t.event_on, 'count_to', t.count_to) order by t.position, t.created_at), '[]'::jsonb),
+           'theme', t.theme, 'live_kind', t.live_kind, 'seconds', t.seconds, 'event_on', t.event_on, 'count_to', t.count_to, 'link', t.link) order by t.position, t.created_at), '[]'::jsonb),
          max(t.updated_at)
     into slides, changed
     from public.tv_slides t

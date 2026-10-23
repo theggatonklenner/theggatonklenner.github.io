@@ -16,6 +16,7 @@ const { startServer } = await import(pathToFileURL(join(PREP_TESTS, 'fake-supaba
 const { chromium } = await import(process.env.PLAYWRIGHT || '/opt/npm-tools/node_modules/playwright/index.mjs');
 const read = p => readFileSync(p, 'utf8');
 const PDFJS = process.env.PDFJS || '/tmp/claude-0/-home-claude/eaa02a79-d300-5a00-9b7a-e09b12f5efb0/scratchpad/pdfjs/node_modules/pdfjs-dist/build';   // pdfjs-dist@3.11.174
+const QRDIR = process.env.QR_MODULES || '/tmp/claude-0/-home-claude/eaa02a79-d300-5a00-9b7a-e09b12f5efb0/scratchpad/qr/node_modules';   // qrcode-generator@1.4.4, jsqr, pngjs
 const SHOTS = process.env.SHOT_DIR || join(tmpdir(), 'tv-shots'); mkdirSync(SHOTS, { recursive: true });
 let passed = 0, failed = 0;
 const ok = (c, m) => { if (c) { passed++; console.log('  pass  ' + m); } else { failed++; console.log('  FAIL  ' + m); } };
@@ -52,7 +53,7 @@ const browser = await chromium.launch();
 const errors = [];
 async function context(size, offline = false) {
   const ctx = await browser.newContext({ viewport: size, serviceWorkers: 'block', ...(size.width < 500 ? { isMobile: true, hasTouch: true } : {}) });
-  await ctx.route('https://cdn.jsdelivr.net/**', r => r.fulfill({ contentType: 'text/javascript', body: read(join(PREP_TESTS, 'node_modules/@supabase/supabase-js/dist/umd/supabase.js')) }));
+  await ctx.route('https://cdn.jsdelivr.net/**', r => r.fulfill({ contentType: 'text/javascript', body: r.request().url().includes('qrcode-generator') ? read(join(QRDIR, 'qrcode-generator/qrcode.js')) : read(join(PREP_TESTS, 'node_modules/@supabase/supabase-js/dist/umd/supabase.js')) }));
   if (process.env.FONTS_DIR) {   // real poster fonts (from @fontsource) instead of none
     await ctx.route('https://fonts.googleapis.com/**', r => {
       const fam = decodeURIComponent((r.request().url().split('family=')[1] || '').split('&')[0]).split(':')[0].replace(/\+/g, ' ');
@@ -479,6 +480,69 @@ try {
   ok(monText.includes(monthName) && /This is the Month of\s*(Testing|Health & Nutrition)/.test(monText), 'the month theme slide says "This is the Month of ..."');
   await tvc2.close();
   await db.query(`delete from tv_slides where live_kind in ('events', 'month')`);
+
+  // QR code slides and quiet hours
+  console.log('\nQR codes and quiet hours');
+  ({ ctx, page } = await context({ width: 390, height: 844 }));
+  await page.goto(BASE + '/tv/edit/index.html');
+  await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+  await page.waitForSelector('#list [data-open]');
+  await page.click('#addBtn'); await page.click('[data-add="qr"]'); await page.waitForSelector('#slLink');
+  await page.fill('#slLink', 'not a link'); await page.waitForTimeout(200);
+  ok((await page.textContent('#qrNote')).includes("doesn't look like a link"), 'a QR slide spots something that is not a link');
+  await page.fill('#slLink', 'instagram.com/amamarrickville'); await page.waitForFunction(() => document.querySelector('#qrNote').textContent.includes('Opens'));
+  ok((await page.textContent('#qrNote')).includes('https://instagram.com/amamarrickville'), 'the QR preview shows the full link it opens');
+  await page.fill('#slTitle', 'Follow us on Instagram'); await page.fill('#slBody', 'Point your phone camera at the code.');
+  await page.click('#slSave'); await toastSays(page, 'Added');
+  await page.waitForTimeout(300);
+  const qrs = (await db.query(`select link, media_path, title from tv_slides where kind = 'qr'`)).rows[0];
+  const { PNG } = await import(join(QRDIR, 'pngjs/lib/png.js')), jsQR = (await import(join(QRDIR, 'jsqr/dist/jsQR.js'))).default;
+  const png = PNG.sync.read(files.get(qrs.media_path).body), dec = jsQR(new Uint8ClampedArray(png.data), png.width, png.height);
+  ok(qrs.link === 'https://instagram.com/amamarrickville' && dec && dec.data === qrs.link, `the QR code is made, uploaded, and scans to the link (${png.width} px)`);
+  const oldQr = qrs.media_path;
+  await page.click(`#list [data-open]:has-text("Follow us on Instagram")`); await page.waitForSelector('#slLink');
+  await page.fill('#slLink', 'https://www.amamartialarts.com.au/free-trial?from=tv'); await page.click('#slSave'); await toastSays(page, 'Saved'); await page.waitForTimeout(300);
+  const qr2 = (await db.query(`select link, media_path from tv_slides where kind = 'qr'`)).rows[0];
+  const png2 = PNG.sync.read(files.get(qr2.media_path).body), dec2 = jsQR(new Uint8ClampedArray(png2.data), png2.width, png2.height);
+  ok(dec2 && dec2.data === 'https://www.amamartialarts.com.au/free-trial?from=tv' && !files.has(oldQr), 'changing the link makes a new code and removes the old one');
+
+  // Quiet hours on now
+  const hm = d => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  await page.check('#setQuiet'); await page.fill('#setQFrom', hm(new Date(Date.now() - 3600e3))); await page.fill('#setQTo', hm(new Date(Date.now() + 3600e3)));
+  await page.selectOption('#setQStyle', 'logo'); await page.click('#setSave'); await toastSays(page, 'Settings saved');
+  const qs = (await db.query(`select quiet_on, quiet_style from tv_settings`)).rows[0];
+  ok(qs.quiet_on && qs.quiet_style === 'logo', 'quiet hours saved in Settings');
+
+  const tvc3 = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  await tvc3.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+  await tvc3.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+  await tvc3.route('**/storage/v1/**', r => { const m = new URL(r.request().url()).pathname.match(/\/tv\/(.+)$/), f = m && files.get(decodeURIComponent(m[1])); return f ? r.fulfill({ status: 200, contentType: f.type, body: f.body }) : r.fulfill({ status: 404, body: '' }); });
+  const tv3 = await tvc3.newPage(); tv3.on('pageerror', e => errors.push('tv: ' + e.message));
+  await tv3.goto(BASE + `/tv/index.html?code=${CODE}&preview=1`); await tv3.waitForSelector('.layer.on');
+  await tv3.waitForTimeout(500); await tv3.screenshot({ path: join(SHOTS, 'tv-quiet.png') });
+  ok(await tv3.isVisible('.quiet .qlogo') && await tv3.isHidden('#clock') && (await tv3.evaluate(() => window.__tv.state().count)) === 0, 'in quiet hours the TV shows just the dimmed logo');
+  const dbIs = async (sql, tries = 30) => { for (let i = 0; i < tries; i++) { if ((await db.query(sql)).rows[0].ok) return true; await page.waitForTimeout(200); } return false; };
+  await page.selectOption('#setQStyle', 'black'); await page.click('#setSave'); await dbIs(`select quiet_style = 'black' ok from tv_settings`);
+  await tv3.evaluate(() => window.__tv.reload()); await tv3.waitForFunction(() => document.querySelector('.quiet') && !document.querySelector('.qlogo'), null, { timeout: 5000 }).catch(() => {});
+  ok(await tv3.isVisible('.quiet') && !(await tv3.$('.qlogo')), 'or a black screen');
+  await page.uncheck('#setQuiet'); await page.click('#setSave'); await dbIs(`select not quiet_on ok from tv_settings`);
+  await tv3.evaluate(() => window.__tv.reload()); await tv3.waitForFunction(() => !document.querySelector('.quiet'), null, { timeout: 5000 }).catch(() => {});
+  ok(!(await tv3.$('.quiet')) && (await tv3.evaluate(() => window.__tv.state().count)) > 0, 'when quiet hours end, the slideshow comes straight back');
+  let qrSeen = false;
+  for (let i = 0; i < 12 && !qrSeen; i++) {
+    const txt = await tv3.evaluate(() => { const l = document.querySelectorAll('.layer.on'); return l.length ? l[l.length - 1].textContent : ''; });
+    if (txt.includes('Follow us on Instagram')) {
+      qrSeen = txt.includes('amamartialarts.com.au/free-trial?from=tv') && !txt.includes('https://');
+      await tv3.waitForTimeout(1200); await tv3.screenshot({ path: join(SHOTS, 'tv-qr.png') });
+      const img = await tv3.$eval('.layer.on .qbox img', i => ({ w: i.naturalWidth, shown: i.getBoundingClientRect().width }));
+      qrSeen = qrSeen && img.w > 0 && img.shown > 300;
+      break;
+    }
+    await tv3.evaluate(() => window.__tv.next()); await tv3.waitForTimeout(300);
+  }
+  ok(qrSeen, 'the TV shows the QR slide: heading, short link and a big code');
+  await tvc3.close(); await ctx.close();
+  await db.query(`delete from tv_slides where kind = 'qr'`);
 
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));
