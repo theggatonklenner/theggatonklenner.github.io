@@ -233,6 +233,8 @@
         <div class="field"><span class="label">On screen</span><label class="check"><input type="checkbox" id="setClock"> Clock</label><label class="check" style="min-height:28px"><input type="checkbox" id="setLogo"> AMA logo</label></div>
       </div>
       <div class="field" id="bannerBox" hidden><label for="setBanner">Message at the bottom (optional)</label><input type="text" id="setBanner" maxlength="80" placeholder="e.g. Tap to sign in"><p class="hint">Shown along the bottom of the screen with every slide. Leave it empty for none.</p></div>
+      <div class="field" id="batBox" hidden><label for="setBatWarn">Low battery warning</label>
+        <div class="row"><span class="hint">Red bar at the top below</span><input type="number" id="setBatWarn" min="0" max="100" step="5" style="width:90px">%<span class="hint">(0 = off). It hides while charging.</span></div></div>
       <div class="field" id="signinBox" hidden><label for="setSignin">Sign-in page (optional)</label>
         <div class="row"><input type="text" id="setSignin" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="e.g. https://kiosk.efcaquila.net/" class="grow" style="flex:1 1 200px;width:auto"><button type="button" class="btn sm" id="signinTest">Test</button></div>
         <div class="field"><label for="setSigninOpen">A tap</label><select id="setSigninOpen"><option value="kiosk">Handled by FreeKiosk (slides as its screensaver)</option><option value="page">Goes to the sign-in page</option><option value="frame">Shows it inside the slides</option></select></div>
@@ -410,6 +412,7 @@ function draw() {
   $('#setSecs').value = S.seconds; $('#setClock').checked = S.show_clock; $('#setLogo').checked = S.show_logo;
   $('#offBox').hidden = !('offs' in S); if ('offs' in S) { offState = JSON.parse(JSON.stringify(S.offs || [])); drawOffs(); }
   $('#bannerBox').hidden = !('banner' in S); $('#setBanner').value = S.banner || '';
+  $('#batBox').hidden = !('battery_warn' in S); if ('battery_warn' in S) $('#setBatWarn').value = S.battery_warn;
   $('#signinBox').hidden = !('signin_url' in S);
   if ('signin_url' in S) { $('#setSignin').value = S.signin_url || ''; $('#setSigninOpen').value = S.signin_open || 'page';
     if (!('kiosk_port' in S)) { const k = $('#setSigninOpen option[value="kiosk"]'); if (k) k.remove(); if (S.signin_open === 'kiosk') $('#setSigninOpen').value = 'page'; }
@@ -953,8 +956,10 @@ function drawStatus() {
       const live = Date.now() - new Date(x.last_seen) < ONLINE_MS;
       const what = x.showing ? esc(x.showing) : 'Starting up';
       const label = x.name ? esc(x.name) : list.length > 1 ? `${N === 'TV' ? 'TV' : 'Tablet'} ${i + 1}` : '';
+      const bt = x.details && x.details.battery, btWarn = (state.settings && state.settings.battery_warn) || 0;
+      const batt = bt && bt.level != null ? ` <span class="tag${!bt.charging && btWarn && bt.level < btWarn ? ' warn' : ' muted'}" title="Battery">${bt.charging ? 'Charging ' : 'Battery '}${esc(bt.level)}%</span>` : '';
       const where = state.locations ? ` <span class="tag${x.location ? '' : ' warn'}">${x.location ? esc(locName([x.location])) : 'No location'}</span>` : '';
-      return `<li><div class="grow"><b>${label ? label + ': ' : ''}${live ? 'Showing: ' + what : 'Offline'}</b>${where}
+      return `<li><div class="grow"><b>${label ? label + ': ' : ''}${live ? 'Showing: ' + what : 'Offline'}</b>${where}${batt}
         <div>${live ? `Checked in ${esc(ago(x.last_seen))}` : `Last seen ${esc(ago(x.last_seen))}${x.showing ? `, showing ${what}` : ''}`}${x.started_at ? ` · page loaded ${esc(ago(x.started_at))}` : ''}</div></div>
         <div class="row" style="flex-wrap:nowrap"><button class="btn sm" data-name-tv="${esc(x.screen_id)}">${state.locations ? 'Edit' : x.name ? 'Rename' : 'Name'}</button>${!live ? `<button class="btn sm" data-forget-tv="${esc(x.screen_id)}">Remove</button>` : ''}</div></li>`;
     }).join('')}</ul>` : ''}
@@ -1548,6 +1553,7 @@ $('#setForm').onsubmit = async e => {
   const secs = Math.max(3, Math.min(600, +$('#setSecs').value || 10));
   const rec = { seconds: secs, show_clock: $('#setClock').checked, show_logo: $('#setLogo').checked };
   if (!$('#bannerBox').hidden) rec.banner = $('#setBanner').value.trim();
+  if (!$('#batBox').hidden) { const b = +$('#setBatWarn').value; if (!(b >= 0 && b <= 100)) return toast('The battery warning is a % from 0 to 100.'); rec.battery_warn = Math.round(b); }
   if (!$('#signinBox').hidden) {
     const raw = $('#setSignin').value.trim(), url = raw ? cleanLink(raw) : '';
     if (raw && !url) return toast("That doesn't look like a link.");

@@ -348,6 +348,7 @@ ok(fsi.settings.signin === 'https://signin.example.com/ama' && fsi.settings.sign
 ok(!(await tryAs('tate@ama.test', `update tv_settings set signin_url = 'javascript:alert(1)' where id = 2`)).ok && !(await tryAs('tate@ama.test', `update tv_settings set signin_idle = 2 where id = 2`)).ok, 'only https links, and a sensible wait');
 await as('tate@ama.test', () => db.exec(`update tv_settings set signin_url = null, signin_idle = 60 where id = 2`));
 
+ok((await feedNow()).settings.battery_warn === 20, 'screens get the low battery level (20% to start)');
 console.log('\nSaving egress');
 const full1 = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
 const same1 = (await as(null, () => db.query(`select tv_feed($1, null, null, $2) f`, [code, full1.hash]))).rows[0].f;

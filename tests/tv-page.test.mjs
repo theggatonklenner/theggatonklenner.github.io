@@ -980,6 +980,32 @@ try {
     await ec.close();
   }
 
+  // Low battery
+  console.log('\nLow battery');
+  {
+    const bc = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    await bc.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+    await bc.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+    const bp = await bc.newPage(); await bp.goto(BASE + `/tv/index.html?code=${CODE}`); await bp.waitForSelector('.layer.on');
+    await bp.evaluate(() => window.__tv.battery(15, false)); await bp.waitForTimeout(300);
+    ok(await bp.isVisible('#lowbat') && (await bp.textContent('#lowbat')).includes('15%'), 'below 20% (not charging) a red bar asks for it to be plugged in');
+    await bp.screenshot({ path: join(SHOTS, 'low-battery.png') });
+    await bp.evaluate(() => window.__tv.battery(15, true)); await bp.waitForTimeout(300);
+    ok(await bp.isHidden('#lowbat'), 'it hides while charging');
+    await bp.evaluate(() => window.__tv.battery(64, false)); await bp.waitForTimeout(300);
+    ok(await bp.isHidden('#lowbat'), 'and above the level');
+    await bp.evaluate(() => window.__tv.battery(12, false)); await bp.evaluate(() => window.__tv.checkIn()); await bp.waitForTimeout(800);
+    ({ ctx, page } = await context({ width: 390, height: 844 }));
+    await page.goto(BASE + '/tv/edit/index.html');
+    await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+    await page.waitForSelector('#status:not([hidden])'); await page.evaluate(() => pollStatus()); await page.waitForTimeout(600);
+    ok((await page.textContent('#status')).includes('Battery 12%'), 'the editor shows each device\'s battery');
+    await page.fill('#setBatWarn', '30'); await page.click('#setSave'); await toastSays(page, 'Settings saved'); await page.waitForTimeout(300);
+    ok((await db.query(`select battery_warn from tv_settings where id = 1`)).rows[0].battery_warn === 30, 'the level can be changed in Settings');
+    await db.query(`update tv_settings set battery_warn = 20 where id = 1`);
+    await ctx.close(); await bc.close();
+  }
+
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));
   await page.goto(BASE + '/tv/edit/index.html');

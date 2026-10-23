@@ -116,6 +116,10 @@ alter table public.tv_settings add constraint tv_settings_signin_open_check chec
 -- asks FreeKiosk's REST API on the tablet (port below, optional key) to put the party on the main screen, so taps don't
 -- leave it; afterwards it goes back to the sign-in page.
 alter table public.tv_settings add column if not exists kiosk_port int not null default 8080;
+-- Low battery: a red bar along the top of the screen below this % (when not charging); 0 = off
+alter table public.tv_settings add column if not exists battery_warn int not null default 20;
+alter table public.tv_settings drop constraint if exists tv_settings_battery_check;
+alter table public.tv_settings add constraint tv_settings_battery_check check (battery_warn between 0 and 100);
 alter table public.tv_settings add column if not exists kiosk_key text;
 alter table public.tv_settings drop constraint if exists tv_settings_kiosk_port_check;
 alter table public.tv_settings add constraint tv_settings_kiosk_port_check check (kiosk_port between 1 and 65535);
@@ -363,7 +367,7 @@ begin
   if s.blackout then
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open,
-        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, '')),
+        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn),
       'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
       'quiet', 'black', 'blackout', true, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
@@ -388,7 +392,7 @@ begin
   if one_slide is not null then
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open,
-        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, '')),
+        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn),
       'version', greatest(s.updated_at, one_changed), 'slides', jsonb_build_array(one_slide), 'live', '{}'::jsonb, 'today', today,
       'only', true, 'only_until', one_until, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
@@ -412,7 +416,7 @@ begin
          else now_time >= s.quiet_from or now_time < s.quiet_to end) end) then
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open,
-        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, '')),
+        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn),
       'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
       'quiet', s.quiet_style, 'off', off_now, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
@@ -453,7 +457,7 @@ begin
   return jsonb_build_object(
     'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', s.show_clock, 'show_logo', s.show_logo, 'banner', nullif(trim(coalesce(s.banner, '')), ''),
       'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open,
-        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, '')),
+        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn),
     'remote', coalesce(s.remote_until > now(), false), 'display', s.display, 'location', loc,
     'version', greatest(coalesce(changed, s.updated_at), s.updated_at),
     'slides', slides, 'live', live, 'today', today);

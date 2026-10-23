@@ -101,6 +101,9 @@
   .screen input { font: 700 5vw "Barlow Semi Condensed", Arial, sans-serif; letter-spacing: .3em; text-transform: uppercase; text-align: center; width: 36vw; padding: 1.5vh 1vw; border: 0; border-radius: 1vw; color: #16211b; }
   .screen button { font: 700 2.6vw "Source Sans 3", Arial, sans-serif; margin-top: 3vh; padding: 1.5vh 4vw; border: 0; border-radius: 1vw; background: #f2d500; color: #16211b; cursor: pointer; }
   .screen .err { color: #ffd9d4; font-weight: 700; min-height: 3vh; }
+  .lowbat { position: absolute; left: 0; right: 0; top: 0; z-index: 9; background: #c62828; color: #fff; text-align: center; font-weight: 700; font-size: 2.2vw; padding: 1vh 3vw; }
+  @media (orientation: portrait) { .lowbat { font-size: 4.6vw; padding: 1.4vh 4vw; } body.haslowbat .logo, body.haslowbat .clock { top: 7.5vh; } }
+  body.haslowbat .logo, body.haslowbat .clock { top: 9vh; }
   .signin { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border: 0; background: #fff; z-index: 8; }
   .banner { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; text-align: center; background: #f2d500; color: #16211b; font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-weight: 700; font-size: 3vw; padding: 1.6vh 4vw; letter-spacing: .02em; }
   body.hasbanner .card { padding-bottom: 14vh; }
@@ -151,6 +154,7 @@
 <div class="logo" id="logo" style="display:none"></div>
 <div class="paused" id="pausedTag" style="display:none">Paused</div>
 <div class="banner" id="banner" style="display:none"></div>
+<div class="lowbat" id="lowbat" style="display:none"></div>
 <iframe class="signin" id="signin" title="Sign in" allow="camera; microphone; clipboard-write" style="display:none"></iframe>
 <div class="clock" id="clock" style="display:none"></div>
 <div class="dot" title="No connection"></div>
@@ -204,7 +208,7 @@
     fetch(BASE + '/rest/v1/rpc/tv_checkin', {
       method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'apikey': CFG.SUPABASE_KEY },
       body: JSON.stringify({ p_code: code, p_screen: screenId, p_loc: LOC, p_showing: showingNow(), p_started: STARTED,
-        p_details: { w: window.innerWidth, h: window.innerHeight, slides: playlist.length, offline: /offline/.test(document.body.className), browser: navigator.userAgent.slice(0, 160) } })
+        p_details: { battery: battery.level != null ? { level: battery.level, charging: battery.charging } : null, w: window.innerWidth, h: window.innerHeight, slides: playlist.length, offline: /offline/.test(document.body.className), browser: navigator.userAgent.slice(0, 160) } })
     }).then(function (r) { return r.ok ? r.json() : null; }).then(function (r) {
       if (r && r.reload) location.reload();
     }).catch(function () { /* not set up yet, or no connection */ });
@@ -321,6 +325,7 @@
     var st = feed.settings || {};
     $('logo').style.display = st.show_logo ? '' : 'none';
     $('clock').style.display = st.show_clock ? '' : 'none';
+    if (typeof batteryDraw === 'function') batteryDraw();
     $('banner').innerHTML = st.banner ? esc(st.banner) : '';
     $('banner').style.display = st.banner ? '' : 'none';
     document.body.className = document.body.className.replace(/\bhasbanner\b/g, '') + (st.banner ? ' hasbanner' : '');
@@ -534,6 +539,42 @@
     })['catch'](function () {});
   }
 
+  // ---------- Battery: the % (the browser's own reading, or FreeKiosk's), and a red bar when it's low ----------
+  var battery = { level: null, charging: null }, batTry = 0;
+  function batteryDraw() {
+    var st = (feed && feed.settings) || {}, warn = st.battery_warn == null ? 20 : st.battery_warn, el = $('lowbat');
+    var low = warn > 0 && battery.level != null && battery.level < warn && !battery.charging;
+    el.style.display = low ? '' : 'none';
+    document.body.className = document.body.className.replace(/\bhaslowbat\b/g, '') + (low ? ' haslowbat' : '');
+    if (low) el.innerHTML = 'Battery low (' + battery.level + '%). Please plug this ' + (feed && feed.display === 'tablet' ? 'tablet' : 'screen') + ' in.';
+  }
+  function batterySet(level, charging) {
+    var l = Math.round(level), c = !!charging;
+    var changed = l !== battery.level || c !== battery.charging;
+    battery.level = l; battery.charging = c; batteryDraw();
+    if (changed) setTimeout(checkIn, 1000);
+  }
+  if (navigator.getBattery) {
+    try {
+      navigator.getBattery().then(function (b) {
+        var up = function () { batterySet(b.level * 100, b.charging); };
+        up(); b.addEventListener('levelchange', up); b.addEventListener('chargingchange', up);
+      })['catch'](function () {});
+    } catch (e) { /* not available */ }
+  }
+  // No reading from the browser: ask FreeKiosk (if this tablet uses it), once a minute
+  setInterval(function () {
+    var st = (feed && feed.settings) || {};
+    if (battery.level != null && !batTry) return;
+    if (st.signin_open !== 'kiosk' || PREVIEW) return;
+    batTry = 1;
+    var headers = {}; if (st.kiosk_key) headers['X-Api-Key'] = st.kiosk_key;
+    fetch('http://127.0.0.1:' + (st.kiosk_port || 8080) + '/api/battery', { mode: 'cors', headers: headers }).then(function (r) { return r.json(); }).then(function (j) {
+      var d = (j && (j.data || j)) || {}; if (d.battery) d = d.battery;
+      if (d.level != null) batterySet(d.level, d.charging);
+    })['catch'](function () {});
+  }, 60000);
+
   // ---------- FreeKiosk: keep a party on the main screen ----------
   // Our slides are FreeKiosk's screensaver and the sign-in page is its main page. A tap closes a screensaver, so during
   // a party (or blackout) this asks FreeKiosk's REST API (on the tablet itself) to show the party as the main page,
@@ -608,7 +649,7 @@
   setInterval(function () { if (code) load(false); }, POLL_MS);
   // As FreeKiosk's screensaver, check twice as often, so a party moves onto the main screen within 10 seconds
   setInterval(function () { var st = feed && feed.settings; if (code && st && st.signin_open === 'kiosk' && !KIOSK_MAIN && !PREVIEW) load(false); }, POLL_MS / 2);
-  window.__tv = { next: next, remotePoll: remotePoll, paused: function () { return paused; }, reload: function () { load(false); }, checkIn: checkIn, started: STARTED, state: function () { return { index: index, count: playlist.length, ids: playlist.map(function (s) { return s.id; }) }; } };   // for testing
+  window.__tv = { battery: function (l, c) { batterySet(l, c); }, next: next, remotePoll: remotePoll, paused: function () { return paused; }, reload: function () { load(false); }, checkIn: checkIn, started: STARTED, state: function () { return { index: index, count: playlist.length, ids: playlist.map(function (s) { return s.id; }) }; } };   // for testing
   load(true);
 })();
 </script>
