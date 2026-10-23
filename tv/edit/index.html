@@ -1320,29 +1320,57 @@ function importTemplates(after) {
     let list;
     try { const j = JSON.parse(await f.text()); list = (j.templates || []).filter(x => x && x.title && ((x.image && x.settings) || (x.tablet && x.tablet.image && x.tablet.settings))); if (!list.length) throw new Error(); }
     catch (er) { return toast("That isn't a poster templates file.", 5000); }
-    const have = new Map((state.templates || []).map(t => [t.title.toLowerCase(), t]));
-    let added = 0, tablets = 0, skipped = 0, noMatch = 0, n = 0;
+    const tpls = state.templates || [];
+    // Find the template a file entry belongs to: same name, or one of its other names (e.g. Hedgehog / Sonic)
+    const norm = v => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const findFor = x => {
+      const keys = [x.title].concat(x.match || []).map(norm).filter(Boolean);
+      return tpls.find(t => keys.includes(norm(t.title))) || tpls.find(t => keys.some(k => k.length > 3 && norm(t.title).includes(k)));
+    };
+    let added = 0, tablets = 0, skipped = 0, n = 0;
+    const unmatched = [], used = new Set();
     const up = async img => { const b = await (await fetch(img)).blob(); return upload('templates', b, 'jpg', b.type || 'image/jpeg'); };
+    const addTablet = async (cur, x) => {
+      const path = await up(x.tablet.image);
+      const { error } = await sb.from('tv_poster_templates').update({ tablet_image_path: path, tablet_settings: x.tablet.settings, updated_at: new Date().toISOString() }).eq('id', cur.id);
+      if (error) throw error;
+      if (cur.tablet_image_path) sb.storage.from('tv').remove([cur.tablet_image_path]).catch(() => {});
+      tablets++; used.add(cur.id);
+    };
     try {
       for (const x of list) {
         toast(`Importing ${++n} of ${list.length}...`, 0);
-        const cur = have.get(x.title.toLowerCase());
+        const cur = findFor(x);
+        if (cur && used.has(cur.id) && x.tablet) { unmatched.push(x); continue; }
         if (!cur) {
-          if (!x.image || !x.settings) { noMatch++; continue; }   // a tablet version needs its TV template first
-          const rec = { title: x.title, image_path: await up(x.image), settings: x.settings, position: (state.templates || []).length + added + 1 };
+          if (!x.image || !x.settings) { unmatched.push(x); continue; }   // a tablet version on its own: ask which template it's for
+          const rec = { title: x.title, image_path: await up(x.image), settings: x.settings, position: tpls.length + added + 1 };
           if (x.tablet) { rec.tablet_image_path = await up(x.tablet.image); rec.tablet_settings = x.tablet.settings; tablets++; }
           const { error } = await sb.from('tv_poster_templates').insert(rec); if (error) throw error; added++;
-        } else if (x.tablet) {
-          const path = await up(x.tablet.image);
-          const { error } = await sb.from('tv_poster_templates').update({ tablet_image_path: path, tablet_settings: x.tablet.settings, updated_at: new Date().toISOString() }).eq('id', cur.id);
-          if (error) throw error;
-          if (cur.tablet_image_path) sb.storage.from('tv').remove([cur.tablet_image_path]).catch(() => {});
-          tablets++;
-        } else skipped++;
+        } else if (x.tablet) await addTablet(cur, x);
+        else skipped++;
       }
-      toast([added && `Imported ${added} template${added === 1 ? '' : 's'}`, tablets && `${tablets} tablet version${tablets === 1 ? '' : 's'}`, skipped && `skipped ${skipped} already here`, noMatch && `${noMatch} tablet version${noMatch === 1 ? ' has' : 's have'} no matching template here`].filter(Boolean).join(', ') || 'Nothing new in that file.', 5000);
-      await load(); if (after) after();
-    } catch (er) { toast('Import stopped: ' + (er.message || er), 6000); await load(); }
+    } catch (er) { toast('Import stopped: ' + (er.message || er), 6000); await load(); return; }
+    const done = () => toast([added && `Imported ${added} template${added === 1 ? '' : 's'}`, tablets && `added ${tablets} tablet version${tablets === 1 ? '' : 's'}`, skipped && `skipped ${skipped} already here`].filter(Boolean).join(', ') || 'Nothing new in that file.', 5000);
+    await load();
+    if (!unmatched.length || !(state.templates || []).length) { done(); if (after) after(); return; }
+    // Some tablet versions didn't match a template by name: pick which template each one goes with
+    const free = () => (state.templates || []);
+    openDlg(`<form class="dlg" id="mForm"><div class="dlg-head"><div><h3>Which template is each one for?</h3><p class="hint">${tablets ? `Added ${tablets} tablet version${tablets === 1 ? '' : 's'}. ` : ''}These didn't match a template by name. Pick the template each tablet design goes with.</p></div><button class="x" data-close>Close</button></div>
+      <ul class="saved">${unmatched.map((x, i) => `<li><div class="thumb" style="width:40px;height:56px;background-image:url('${x.tablet.image}')"></div><div class="grow"><b>${esc(x.title)}</b>
+        <select data-match="${i}" aria-label="Template for ${esc(x.title)}" style="margin-top:4px"><option value="">Skip</option>${free().map(t => `<option value="${t.id}">${esc(t.title)}${hasTablet(t) ? ' (replace its tablet version)' : ''}</option>`).join('')}</select></div></li>`).join('')}</ul>
+      <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="mSave">Add tablet versions</button></div></form>`);
+    $('#mForm').onsubmit = async ev => {
+      ev.preventDefault(); $('#mSave').disabled = true;
+      try {
+        for (const sel of $$('#mForm [data-match]')) {
+          if (!sel.value) continue;
+          const cur = (state.templates || []).find(t => t.id === sel.value);
+          toast('Adding...', 0); await addTablet(cur, unmatched[+sel.dataset.match]);
+        }
+        dlg.close(); await load(); done(); if (after) after();
+      } catch (er) { $('#mSave').disabled = false; toast('Stopped: ' + (er.message || er), 6000); }
+    };
   };
   $('#pickImport').click();
 }

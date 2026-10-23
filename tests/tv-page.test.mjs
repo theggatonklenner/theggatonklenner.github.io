@@ -677,7 +677,9 @@ try {
     await page.click('#partyStart'); await page.waitForSelector('#pForm');
     await page.click('#pForm [data-m="poster"]'); await page.waitForSelector('#pManage'); await page.click('#pManage'); await page.waitForSelector('#tImport');
     await page.click('#tImport'); await page.setInputFiles('#pickImport', TABLET_TPL);
-    await toastSays(page, 'tablet version');
+    await page.waitForSelector('#mForm, #tBack:not(:has-text("x"))', { timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(500);
+    if (await page.$('#mForm')) await page.click('#mSave');   // the test has fewer templates: skip the rest
     const tt = (await db.query(`select title, tablet_settings from tv_poster_templates where title = 'Turtles'`)).rows[0];
     ok(tt.tablet_settings && tt.tablet_settings.h > tt.tablet_settings.w, 'importing the tablet versions adds an upright design to the matching template');
     await page.waitForFunction(() => document.querySelector('#dlg').textContent.includes('TV and tablet versions'), null, { timeout: 15000 }).catch(() => {});
@@ -709,6 +711,30 @@ try {
     await page.waitForTimeout(500);
     ok((await db.query(`select count(*)::int n from tv_party_bookings where starts_at > now()`)).rows[0].n === 0, 'cancelling it cancels both');
   } else console.log('        (tablet templates file not found; linked poster tests skipped)');
+
+  // Tablet versions for templates named differently: matched by other names, or picked by hand
+  {
+    const img = 'data:image/png;base64,' + readFileSync(join(ROOT, 'icons/clipboard.png')).toString('base64');
+    const st = { size: 150, box: { cx: 620, base: 800, maxW: 900 }, font: 'Knewave', fill: '#ffffff', stroke: '#000000', strokeWidth: 0.09, uppercase: true, w: 1240, h: 1754 };
+    await db.query(`insert into tv_poster_templates (title, image_path, settings, position) select 'Sonic party', image_path, settings, 50 from tv_poster_templates limit 1`);
+    await db.query(`insert into tv_poster_templates (title, image_path, settings, position) select 'Mystery', image_path, settings, 51 from tv_poster_templates limit 1`);
+    await page.evaluate(() => load()); await page.waitForTimeout(800);
+    const f2 = join(tmpdir(), 'tv-test-tablet-match.json');
+    (await import('node:fs')).writeFileSync(f2, JSON.stringify({ app: 'ama-tv-templates', templates: [
+      { title: 'Hedgehog', match: ['Sonic'], tablet: { image: img, settings: st } }, { title: 'Unicorn', tablet: { image: img, settings: st } }] }));
+    await page.click('#partyStart'); await page.waitForSelector('#pForm');
+    await page.click('#pForm [data-m="poster"]'); await page.waitForSelector('#pManage'); await page.click('#pManage'); await page.waitForSelector('#tImport');
+    await page.click('#tImport'); await page.setInputFiles('#pickImport', f2);
+    await page.waitForSelector('#mForm', { timeout: 15000 }).catch(() => {});
+    ok((await db.query(`select tablet_settings is not null t from tv_poster_templates where title = 'Sonic party'`)).rows[0].t, 'a tablet version finds its template by another name (Hedgehog -> "Sonic party")');
+    ok(await page.isVisible('#mForm') && (await page.textContent('#mForm')).includes('Unicorn'), "one that doesn't match asks which template it's for");
+    const mid = (await db.query(`select id from tv_poster_templates where title = 'Mystery'`)).rows[0].id;
+    await page.selectOption('#mForm [data-match="0"]', mid); await page.click('#mSave');
+    await page.waitForFunction(() => !document.querySelector('#mForm'), null, { timeout: 10000 }).catch(() => {});
+    ok((await db.query(`select tablet_settings is not null t from tv_poster_templates where title = 'Mystery'`)).rows[0].t, '...and gets added to the one picked');
+    await page.evaluate(() => document.querySelector('#dlg').close());
+    await db.query(`delete from tv_poster_templates where title in ('Sonic party', 'Mystery')`);
+  }
   await ctx.close();
 
   // On a tablet: open the link, no code to type
