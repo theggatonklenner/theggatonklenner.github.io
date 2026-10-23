@@ -934,6 +934,26 @@ try {
   await sp3.click('.layer.on', { force: true }); await sp3.waitForTimeout(800);
   ok(sp3.url().startsWith(BASE) && (await sp3.textContent('#stage')).includes('Happy Birthday Zoe!'), 'during a party a tap does nothing');
   await db.query(`delete from tv_party_bookings`);
+  // FreeKiosk: sign-in page as its main page, our slides as its screensaver; a party goes onto the main screen
+  await db.query(`update tv_settings set signin_open = 'kiosk', kiosk_port = 8080 where id = 2`);
+  const api = [];
+  await sic.route('http://127.0.0.1:8080/**', async r => { api.push({ path: new URL(r.request().url()).pathname, body: r.request().postData() || '' }); return r.fulfill({ status: 200, contentType: 'application/json', body: '{"status":"ok"}' }); });
+  const ss = await sic.newPage(); await ss.goto(BASE + `/tv/index.html?code=${TC}`); await ss.waitForSelector('.layer.on'); await ss.waitForTimeout(600);
+  await ss.click('.layer.on', { force: true }); await ss.waitForTimeout(600);
+  ok(ss.url().startsWith(BASE) && api.length === 0 && await ss.isHidden('#signin'), 'as FreeKiosk\'s screensaver, a tap is left to FreeKiosk and nothing is sent');
+  await db.query(`insert into tv_party_bookings (slide_id, starts_at, ends_at) values ($1, now() - interval '1 minute', now() + interval '1 hour')`, [tpid]);
+  await ss.evaluate(() => window.__tv.reload()); await ss.waitForTimeout(1500);
+  const urlCall = api.find(x => x.path === '/api/url');
+  ok(urlCall && /kiosk=main/.test(JSON.parse(urlCall.body).url) && api.some(x => x.path === '/api/wake'), 'when a party starts, it asks FreeKiosk to put it on the main screen (and close the screensaver)');
+  await ss.evaluate(() => window.__tv.reload()); await ss.waitForTimeout(800);
+  ok(api.filter(x => x.path === '/api/url').length === 1, 'only once per party');
+  const mainUrl = JSON.parse(urlCall.body).url.replace(/^https?:\/\/[^/]+/, BASE);
+  const mp = await sic.newPage(); await mp.goto(mainUrl); await mp.waitForSelector('.layer.on'); await mp.waitForTimeout(600);
+  await mp.click('.layer.on', { force: true }); await mp.waitForTimeout(600);
+  ok(mp.url().includes('kiosk=main') && (await mp.textContent('#stage')).includes('Happy Birthday Zoe!'), 'the main screen shows the party and taps do nothing');
+  await db.query(`delete from tv_party_bookings`);
+  await Promise.all([mp.waitForURL(/signin\.test/, { timeout: 8000 }).catch(() => {}), mp.evaluate(() => window.__tv.reload())]);
+  ok(mp.url().startsWith('https://signin.test/ama'), 'when the party ends, the main screen goes back to the sign-in page');
   await sic.close();
   await db.query(`update tv_settings set signin_url = null, signin_idle = 60, signin_open = 'page' where id = 2`); await db.query(`delete from tv_slides where display = 'tablet'`);
 

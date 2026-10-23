@@ -215,6 +215,7 @@
   if (params.code) store.set('tvCode', params.code.toUpperCase());
   if (params.loc) store.set('tvLoc', params.loc.toLowerCase());   // a location link, e.g. &loc=sydenham
   var LOC = store.get('tvLoc') || null;
+  var KIOSK_MAIN = params.kiosk === 'main';   // FreeKiosk's main screen showing a party (see kioskSync)
   code = store.get('tvCode');
   function askCode(msg) {
     clearTimeout(timer); stage.innerHTML = '';
@@ -256,12 +257,12 @@
       if (f && f.same) {   // nothing has changed
         if (!feed) { try { var c = JSON.parse(store.get('tvFeed')); if (c) apply(c, true); } catch (e) { /* ignore */ } }
         if (!feed) { store.del('tvFeed'); lastHash = null; return load(first); }   // the saved copy is gone: ask for the whole thing
-        setTimeout(checkIn, 1500); remoteFromFeed(feed); return;
+        setTimeout(checkIn, 1500); remoteFromFeed(feed); kioskSync(feed); return;
       }
       store.set('tvFeed', JSON.stringify(f)); lastHash = f.hash || null; tidyMedia(f);
       setTimeout(checkIn, 1500);
       apply(f, first);
-      remoteFromFeed(f);
+      remoteFromFeed(f); kioskSync(f);
     }).catch(function () {
       document.body.className += ' offline';
       if (first || !feed) { var c = store.get('tvFeed'); if (c) { try { apply(JSON.parse(c), true); } catch (e) { /* ignore */ } } else showMessage('Connecting...', 'Check the TV is on the internet.'); }
@@ -531,6 +532,33 @@
     })['catch'](function () {});
   }
 
+  // ---------- FreeKiosk: keep a party on the main screen ----------
+  // Our slides are FreeKiosk's screensaver and the sign-in page is its main page. A tap closes a screensaver, so during
+  // a party (or blackout) this asks FreeKiosk's REST API (on the tablet itself) to show the party as the main page,
+  // where taps do nothing. That page (?kiosk=main) goes back to the sign-in page when the party is over.
+  var kioskDone = null, kioskTry = 0;
+  function kioskApi(st, path, body) {
+    var key = st.kiosk_key, opts = { method: 'POST', body: JSON.stringify(body || {}) };
+    if (key) { opts.mode = 'cors'; opts.headers = { 'Content-Type': 'application/json', 'X-Api-Key': key }; }
+    else { opts.mode = 'no-cors'; opts.headers = { 'Content-Type': 'text/plain' }; }   // works even without CORS headers
+    return fetch('http://127.0.0.1:' + (st.kiosk_port || 8080) + path, opts);
+  }
+  function kioskSync(f) {
+    var st = (f && f.settings) || {};
+    if (st.signin_open !== 'kiosk' || !st.signin || PREVIEW) return;
+    var lock = !!(f.only || f.blackout);
+    if (KIOSK_MAIN) { if (!lock) { try { location.href = st.signin; } catch (e) { /* ignore */ } } return; }   // over: back to sign-in
+    if (!lock) { kioskDone = null; return; }
+    var key = f.only ? 'party:' + ((f.slides[0] || {}).id || '') : 'blackout';
+    if (kioskDone === key || Date.now() - kioskTry < 30000) return;
+    kioskTry = Date.now();
+    var main = location.protocol + '//' + location.host + location.pathname + '?code=' + encodeURIComponent(code) + (LOC ? '&loc=' + encodeURIComponent(LOC) : '') + '&kiosk=main';
+    kioskApi(st, '/api/url', { url: main }).then(function () {
+      kioskDone = key;
+      return kioskApi(st, '/api/wake');   // close the screensaver so the main screen (the party) shows
+    })['catch'](function () { /* the REST API isn't on, or isn't reachable: the screensaver still comes back after its delay */ });
+  }
+
   // ---------- Sign-in mode (tablets): the sign-in page until nobody has touched it for a while, then the slides ----------
   var signinOpen = false, signinUrl = null, signinIdle = 60, signinT = null, signinBlocked = false, signinPage = true;
   function signinAllowed() { return !!(signinUrl && !signinBlocked); }
@@ -558,6 +586,7 @@
     if (url !== signinUrl) { signinUrl = url; if (signinOpen) closeSignin(); }
     signinIdle = st.signin_idle || 60;
     signinPage = st.signin_open !== 'frame';
+    if (st.signin_open === 'kiosk') signinBlocked = true;   // FreeKiosk shows the sign-in page; taps here do nothing
     if (!signinAllowed()) { closeSignin(); return; }
     if (first && !signinPage) openSignin();   // shown inside: start on it
   }
