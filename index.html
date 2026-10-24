@@ -12,6 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
 <style>
   /* Same look as AMA ID Cards: app bar, cards with soft shadows, colours from the AMA academy logo */
   :root {
@@ -57,98 +59,121 @@
   .item .chev { color: var(--muted); font-size: 22px; flex: none; }
   .chip { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--gold); color: var(--on-gold); white-space: nowrap; }
   footer { color: var(--muted); font-size: 14px; margin-top: 14px; }
+  .appbar-inner .grow { flex: 1; }
+  .who { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
+  .btn { font: inherit; font-weight: 600; min-height: 40px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .btn.link { border: 0; background: none; color: var(--accent); padding: 0; min-height: 0; text-decoration: underline; align-self: flex-start; }
+  .card { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 14px; font-weight: 600; }
+  input[type=email], input[type=password] { font: inherit; width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--fg); }
+  .hint { font-size: 14px; color: var(--muted); margin: 0; }
+  .msg { font-size: 14px; margin: 0; }
+  .msg.bad { color: #b3261e; }
+  @media (prefers-color-scheme: dark) { .msg.bad { color: #ff8a80; } }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <header class="appbar">
   <div class="appbar-inner">
     <div class="brand"><img src="icons/ama-id-cards.png" alt=""><h1>AMA Grading Toolkit</h1></div>
+    <span class="grow"></span><span class="who" id="who" hidden></span><button class="btn" id="signOut" hidden>Sign out</button>
   </div>
 </header>
 
 <main>
-  <p class="intro">Apps for AMA Marrickville. Sign in with your usual login.</p>
+  <p class="intro" id="intro">Apps for AMA Marrickville.</p>
 
-  <h2>Tools</h2>
-  <ul class="list">
-    <li>
-      <a class="item" href="https://theggatonklenner.github.io/Black-belt-prep-system/">
-        <img src="icons/black-belt-prep.png" alt="">
-        <div class="main"><div class="name">Black Belt Prep</div><div class="meta">Preparation cycles, attendance, payments, grading and certificates</div></div>
-        <span class="chev" aria-hidden="true">›</span>
-      </a>
-    </li>
-    <li>
-      <a class="item" href="https://theggatonklenner.github.io/ama-id-cards/">
-        <img src="icons/ama-id-cards.png" alt="">
-        <div class="main"><div class="name">AMA ID Cards</div><div class="meta">Make, approve and print member ID cards</div></div>
-        <span class="chev" aria-hidden="true">›</span>
-      </a>
-    </li>
-  </ul>
+  <section id="signIn" class="card" hidden>
+    <h2 style="margin:0">Sign in</h2>
+    <p class="hint">Sign in with your AMA login to see the apps you can use.</p>
+    <form id="siForm" style="display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label for="siEmail">Email</label><input type="email" id="siEmail" autocomplete="username" required></div>
+      <div class="field"><label for="siPass">Password</label><input type="password" id="siPass" autocomplete="current-password" required></div>
+      <p class="msg bad" id="siMsg" hidden></p>
+      <button class="btn primary" id="siGo" type="submit">Sign in</button>
+    </form>
+    <button class="btn link" id="forgot" type="button">Forgot your password?</button>
+  </section>
 
-  <h2>Dojang TV</h2>
-  <ul class="list">
-    <li>
-      <a class="item" href="tv/edit/">
-        <span class="glyph" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></span>
-        <div class="main"><div class="name">TV Display</div><div class="meta">Change the photos, videos and notices on the dojang TV</div></div>
-        <span class="chev" aria-hidden="true">›</span>
-      </a>
-    </li>
-    <li>
-      <a class="item" href="tv/edit/?display=tablet">
-        <span class="glyph" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M11 18h2"/></svg></span>
-        <div class="main"><div class="name">Tablet Display</div><div class="meta">Slides for the upright tablets, with a link that just works</div></div>
-        <span class="chev" aria-hidden="true">›</span>
-      </a>
-    </li>
-    <li>
-      <a class="item" href="tv/remote/">
-        <span class="glyph" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 8l-1.5 2 1.5 2M14 8l1.5 2-1.5 2"/><path d="M11 18h2"/></svg></span>
-        <div class="main"><div class="name">TV Remote</div><div class="meta">Next, Back, Pause and show any slide from your phone</div></div>
-        <span class="chev" aria-hidden="true">›</span>
-      </a>
-    </li>
-    <li>
-      <a class="item" href="tv/">
-        <span class="glyph" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="8 5 19 12 8 19 8 5"/></svg></span>
-        <div class="main"><div class="name">Play on this screen</div><div class="meta">Open on the TV's browser to show the slideshow</div></div>
-        <span class="chev" aria-hidden="true">›</span>
-      </a>
-    </li>
-  </ul>
-
-  <h2>Personal</h2>
-  <ul class="list">
-    <li>
-      <a class="item" href="https://theggatonklenner.github.io/clipboard/">
-        <img src="icons/clipboard.png" alt="">
-        <div class="main"><div class="name">Clipboard</div><div class="meta">Text templates you copy with one tap</div></div>
-        <span class="chev" aria-hidden="true">›</span>
-      </a>
-    </li>
-  </ul>
-
-  <h2>Admin</h2>
-  <ul class="list">
-    <li>
-      <a class="item" href="staff/">
-        <span class="glyph" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18.5 14.8c1.6.8 2.6 2.5 3 5.2"/></svg></span>
-        <div class="main"><div class="name">Staff logins<span class="chip">Admin</span></div><div class="meta">Add logins, set passwords and roles for both apps</div></div>
-        <span class="chev" aria-hidden="true">›</span>
-      </a>
-    </li>
-    <li>
-      <a class="item" href="https://supabase.com/dashboard/project/ptdrcxngaptcgswfbjhg" target="_blank" rel="noopener">
-        <span class="glyph" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></span>
-        <div class="main"><div class="name">Supabase<span class="chip">Admin</span></div><div class="meta">Database, logins, SQL updates and backups for both apps</div></div>
-        <span class="chev" aria-hidden="true">›</span>
-      </a>
-    </li>
-  </ul>
+  <div id="apps" hidden></div>
+  <p class="hint" id="loading">Loading...</p>
 
   <footer>Made by Tate Heggatonklenner</footer>
 </main>
+<script>
+// Shows only the apps the signed-in person can use. (Each app checks permissions itself as well;
+// this just keeps the page tidy.) The sign-in is shared with every app on this site.
+const CFG = window.TOOLKIT_CONFIG;
+const sb = supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY);
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const ICON = {
+  tv: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  tablet: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M11 18h2"/>',
+  remote: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 8l-1.5 2 1.5 2M14 8l1.5 2-1.5 2"/><path d="M11 18h2"/>',
+  play: '<polygon points="8 5 19 12 8 19 8 5"/>',
+  staff: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18.5 14.8c1.6.8 2.6 2.5 3 5.2"/>',
+  db: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'
+};
+const item = a => `<li><a class="item" href="${a.href}"${a.ext ? ' target="_blank" rel="noopener"' : ''}>
+  ${a.img ? `<img src="${a.img}" alt="">` : `<span class="glyph" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[a.icon]}</svg></span>`}
+  <div class="main"><div class="name">${esc(a.name)}${a.chip ? `<span class="chip">${esc(a.chip)}</span>` : ''}</div><div class="meta">${esc(a.meta)}</div></div>
+  <span class="chev" aria-hidden="true">›</span></a></li>`;
+
+async function access() {
+  const rpc = async (fn, args) => { try { const { data, error } = await sb.rpc(fn, args); return error ? null : data; } catch (e) { return null; } };
+  const [card, prep, edit, party, remote] = await Promise.all([rpc('my_permissions'), rpc('prep_my_roles'), rpc('tv_can', { p_perm: 'edit' }), rpc('tv_can', { p_perm: 'party' }), rpc('tv_can', { p_perm: 'remote' })]);
+  return { card: card || [], prep: prep || [], edit: !!edit, party: !!party || !!edit, remote: !!remote || !!edit };
+}
+function draw(a) {
+  const admin = a.card.includes('admin') && a.prep.includes('admin');
+  const tvAny = a.edit || a.party || a.remote;
+  const groups = [
+    ['Tools', [
+      a.prep.length && { href: 'https://theggatonklenner.github.io/Black-belt-prep-system/', img: 'icons/black-belt-prep.png', name: 'Black Belt Prep', meta: 'Preparation cycles, attendance, payments, grading and certificates' },
+      a.card.length && { href: 'https://theggatonklenner.github.io/ama-id-cards/', img: 'icons/ama-id-cards.png', name: 'AMA ID Cards', meta: 'Make, approve and print member ID cards' }]],
+    ['Dojang TV', [
+      a.party && { href: 'tv/edit/', icon: 'tv', name: a.edit ? 'TV Display' : 'TV party mode', meta: a.edit ? 'Change the photos, videos and notices on the dojang TV' : 'Birthday posters and messages on the dojang TV' },
+      a.party && { href: 'tv/edit/?display=tablet', icon: 'tablet', name: a.edit ? 'Tablet Display' : 'Tablet party mode', meta: a.edit ? 'Slides for the upright tablets, with a link that just works' : 'Birthday posters and messages on the tablets' },
+      a.remote && { href: 'tv/remote/', icon: 'remote', name: 'TV Remote', meta: 'Next, Back, Pause and show any slide from your phone' },
+      tvAny && { href: 'tv/', icon: 'play', name: 'Play on this screen', meta: "Open on the TV's browser to show the slideshow" }]],
+    ['Personal', [admin && { href: 'https://theggatonklenner.github.io/clipboard/', img: 'icons/clipboard.png', name: 'Clipboard', meta: 'Text templates you copy with one tap' }]],
+    ['Admin', [
+      admin && { href: 'staff/', icon: 'staff', name: 'Staff logins', chip: 'Admin', meta: 'Add logins, set passwords and roles for every app' },
+      admin && { href: 'https://supabase.com/dashboard/project/ptdrcxngaptcgswfbjhg', ext: true, icon: 'db', name: 'Supabase', chip: 'Admin', meta: 'Database, logins, SQL updates and backups' }]]
+  ].map(([h, l]) => [h, l.filter(Boolean)]).filter(([, l]) => l.length);
+  $('#apps').innerHTML = groups.length ? groups.map(([h, l]) => `<h2>${esc(h)}</h2><ul class="list">${l.map(item).join('')}</ul>`).join('')
+    : '<div class="card"><p class="msg">Your login doesn\'t have access to any apps yet. Ask an admin to give you permissions in Staff logins.</p></div>';
+  $('#apps').style.cssText = 'display:flex;flex-direction:column;gap:14px';
+}
+async function start() {
+  const { data: { session } } = await sb.auth.getSession();
+  $('#loading').hidden = true;
+  if (!session) { $('#signIn').hidden = false; $('#apps').hidden = true; $('#who').hidden = $('#signOut').hidden = true; $('#intro').textContent = 'Apps for AMA Marrickville.'; return; }
+  $('#signIn').hidden = true;
+  $('#who').textContent = session.user.email; $('#who').hidden = $('#signOut').hidden = false;
+  $('#intro').textContent = 'Apps for AMA Marrickville. Showing the ones your login can use.';
+  draw(await access()); $('#apps').hidden = false;
+}
+$('#siForm').onsubmit = async e => {
+  e.preventDefault(); $('#siGo').disabled = true; $('#siMsg').hidden = true;
+  const { error } = await sb.auth.signInWithPassword({ email: $('#siEmail').value.trim(), password: $('#siPass').value });
+  $('#siGo').disabled = false;
+  if (error) { $('#siMsg').textContent = /invalid/i.test(error.message) ? 'Wrong email or password.' : error.message; $('#siMsg').hidden = false; return; }
+  start();
+};
+$('#forgot').onclick = async () => {
+  const email = $('#siEmail').value.trim();
+  if (!email) { $('#siMsg').textContent = 'Type your email above first, then press "Forgot your password?" again.'; $('#siMsg').hidden = false; return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + '/welcome/' });
+  $('#siMsg').textContent = error ? error.message : `If ${email} has a login, an email with a link to choose a new password is on its way.`;
+  $('#siMsg').className = error ? 'msg bad' : 'msg'; $('#siMsg').hidden = false;
+};
+$('#signOut').onclick = async () => { await sb.auth.signOut(); start(); };
+start();
+</script>
 </body>
 </html>

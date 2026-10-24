@@ -41,9 +41,11 @@ export function makeDb() {
     }
     return q;
   }
+  const mail = [];
   const db = {
     from: query,
     auth: {
+      async resetPasswordForEmail(email, o) { mail.push({ kind: 'recovery', email, redirectTo: o && o.redirectTo }); return { data: {}, error: opts.mailFails ? { message: 'Error sending recovery email' } : null }; },
       async getUser(token) { const u = users.find(x => x.id === tokens.get(token)); return { data: { user: u || null } }; },
       admin: {
         async listUsers({ page, perPage }) { return { data: { users: users.slice((page - 1) * perPage, page * perPage) }, error: null }; },
@@ -52,11 +54,18 @@ export function makeDb() {
           const u = { id: 'u' + nextId++, email, password, created_at: new Date().toISOString() }; users.push(u);
           return { data: { user: u }, error: null };
         },
+        async inviteUserByEmail(email, o = {}) {
+          if (opts.mailFails) return { data: null, error: { message: 'Error sending invite email' } };
+          if (users.some(u => u.email === email)) return { error: { message: 'A user with this email address has already been registered' } };
+          const u = { id: 'u' + nextId++, email, password: null, created_at: new Date().toISOString(), user_metadata: o.data || {} }; users.push(u);
+          mail.push({ kind: 'invite', email, redirectTo: o.redirectTo, data: o.data });
+          return { data: { user: u }, error: null };
+        },
         async updateUserById(id, { password }) { const u = users.find(x => x.id === id); if (!u) return { error: { message: 'User not found' } }; u.password = password; return { data: { user: u }, error: null }; },
         async deleteUser(id) { const i = users.findIndex(x => x.id === id); users.splice(i, 1); return { error: null }; }
       }
     },
-    _t: t, _users: users, _opts: opts,
+    _t: t, _users: users, _opts: opts, _mail: mail,
     _login(email) { const u = users.find(x => x.email === email); const tok = 'tok-' + u.id; tokens.set(tok, u.id); return tok; }
   };
   return db;

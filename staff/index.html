@@ -246,7 +246,8 @@ function openPerson(email) {
     ${u.has_login ? `<form id="pwForm" class="section"><h3>New password</h3>
       <div class="row"><input type="text" id="newPw" class="grow" autocomplete="new-password" placeholder="At least 8 characters" aria-label="New password" style="flex:1 1 180px;width:auto"><button type="button" class="btn sm" id="genPw">Make one</button></div>
       <p class="hint">Give the new password to them in person. They can keep using it.</p>
-      <div class="row"><button class="btn" id="savePw" type="submit">Set password</button></div></form>` : `<div class="section"><p class="hint">To give them a login, use Add login with this email.</p></div>`}
+      <div class="row"><button class="btn" id="savePw" type="submit">Set password</button><button class="btn" id="mailPw" type="button">Email a set-password link</button></div>
+      <p class="hint">Or email them a link to choose their own (for a first login, or if they've forgotten it).</p></form>` : `<div class="section"><p class="hint">To give them a login, use Add login with this email.</p></div>`}
     ${!self ? `<div class="section"><div class="row"><button class="btn danger" id="removeBtn">${u.has_login ? 'Remove login' : 'Remove roles'}</button></div><p class="hint">Removes their access to all the apps. Their name stays on anything they did.</p></div>` : ''}
   </div>`);
   tvLink();
@@ -266,6 +267,13 @@ function openPerson(email) {
       catch (er) { toast(er.message, 7000); $('#savePw').disabled = false; }
     };
   }
+  const mp = $('#mailPw');
+  if (mp) mp.onclick = async () => {
+    mp.disabled = true;
+    try { await api({ action: 'invite', email }); toast(`Email sent to ${email}`, 5000); }
+    catch (er) { toast(er.message, 7000); }
+    mp.disabled = false;
+  };
   const rm = $('#removeBtn');
   if (rm) rm.onclick = async () => {
     if (!await confirmBox(`Remove ${email}? They will no longer be able to sign in to AMA ID Cards, Black Belt Prep or the TV.`, 'Remove', true)) return openPerson(email);
@@ -278,24 +286,30 @@ function openAdd() {
   openDlg(`<form id="addForm" class="dlg">
     <div class="dlg-head"><h3>Add login</h3><button class="x" data-close>Close</button></div>
     <div class="field"><label for="addEmail">Email</label><input type="email" id="addEmail" required autocomplete="off"></div>
-    <div class="field"><label for="addPw">Starting password</label><div class="row"><input type="text" id="addPw" autocomplete="new-password" placeholder="At least 8 characters" style="flex:1 1 180px;width:auto"><button type="button" class="btn sm" id="addGen">Make one</button></div></div>
+    <div class="field"><span class="label">How they sign in</span>
+      <label class="check"><input type="radio" name="addHow" value="email" checked> Email them a link to choose their own password</label>
+      <label class="check"><input type="radio" name="addHow" value="password" id="addHowPw"> Set a starting password</label></div>
+    <div class="field" id="addPwRow" hidden><label for="addPw">Starting password</label><div class="row"><input type="text" id="addPw" autocomplete="new-password" placeholder="At least 8 characters" style="flex:1 1 180px;width:auto"><button type="button" class="btn sm" id="addGen">Make one</button></div></div>
+    <p class="hint" id="addMailHint">They get a welcome email listing their apps, with a button to choose a password. The link works for a limited time; you can send a new one from their login.</p>
     <div class="field"><span class="label">AMA ID Cards</span>${checks('cardChecks', CARD, [])}</div>
     <div class="field"><span class="label">Black Belt Prep</span>${checks('prepChecks', PREP, [])}</div>
     ${tvField([])}
     ${ROLE_HELP}
-    <p class="hint">If the email already has a login, its permissions are updated. Leave the password blank to keep their current one.</p>
+    <p class="hint">If the email already has a login, its permissions are updated (no email is sent). Leave the password blank to keep their current one.</p>
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" id="addGo" type="submit">Add login</button></div>
   </form>`);
   $('#addGen').onclick = () => { $('#addPw').value = makePassword(); };
+  const how = () => (document.querySelector('input[name=addHow]:checked') || {}).value || 'email';
+  document.querySelectorAll('input[name=addHow]').forEach(r => r.onchange = () => { $('#addPwRow').hidden = how() !== 'password'; $('#addMailHint').hidden = how() !== 'email'; });
   tvLink();
   $('#addForm').onsubmit = async e => {
     e.preventDefault();
-    const email = $('#addEmail').value.trim().toLowerCase(), password = $('#addPw').value;
+    const email = $('#addEmail').value.trim().toLowerCase(), invite = how() === 'email', password = invite ? '' : $('#addPw').value;
     if (password && password.length < 8) return toast('The password needs at least 8 characters.');
     $('#addGo').disabled = true;
     try {
-      const r = await api({ action: 'create', email, password, card_perms: picked('cardChecks'), prep_roles: picked('prepChecks'), tv_perms: tvPicked() });
-      dlg.close(); toast(r.existed ? `${email} already had a login; permissions updated` : `Login added for ${email}${password ? '. Give them the starting password.' : ''}`, 6000); await load();
+      const r = await api({ action: 'create', email, password, invite, card_perms: picked('cardChecks'), prep_roles: picked('prepChecks'), tv_perms: tvPicked() });
+      dlg.close(); toast(r.existed ? `${email} already had a login; permissions updated` : r.emailed ? `Login added. A welcome email is on its way to ${email}.` : `Login added for ${email}${password ? '. Give them the starting password.' : ''}`, 6000); await load();
     } catch (er) { toast(er.message, 7000); $('#addGo').disabled = false; }
   };
 }

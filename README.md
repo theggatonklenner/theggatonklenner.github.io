@@ -1,12 +1,14 @@
 # AMA Grading Toolkit
 
-The home page at https://theggatonklenner.github.io, with links to the grading tools and admin tools.
+The home page at https://theggatonklenner.github.io. People sign in and see only the apps their login can use.
 
-- `index.html` the home page. To add a tool, copy one of the `<li>` blocks, change the link, name and description, and put its icon in `icons/`.
+- `index.html` the home page. The apps and who sees them are listed in `draw()` near the bottom (put a new tool's icon in `icons/`). It reads each person's permissions from AMA ID Cards (`my_permissions`), Black Belt Prep (`prep_my_roles`) and the TV (`tv_can`). Each app still checks permissions itself.
+- `welcome/` where the onboarding email (and "Forgot your password?") lands: the person chooses their password.
 - `tv/` **TV display** for the dojang TV (open on the TV), and `tv/edit/` the editor. Setup below.
 - `staff/` **Staff logins**: add logins, set passwords and set roles for AMA ID Cards and Black Belt Prep in one place.
 - `supabase/functions/staff/index.ts` the Supabase function behind Staff logins.
-- `tests/` checks for the staff function and page.
+- `supabase/email-templates/` the welcome and reset-password emails (pasted into Supabase, below).
+- `tests/` checks for the staff function and page, the home page and the welcome page.
 
 ## Setting up Staff logins (once, about 3 minutes)
 
@@ -21,11 +23,27 @@ Only people who are an admin in **both** AMA ID Cards and Black Belt Prep can us
 
 Signing in or out here also signs you in or out of the two apps on that device, because they share the same web address.
 
+## Onboarding emails (once, about 10 minutes)
+
+When you add a login on Staff logins, **Email them a link to choose their own password** (the default) sends a welcome email listing their apps, with a button to choose a password. It is sent from a Gmail account through Supabase:
+
+1. **Gmail app password.** Sign in to the Gmail account the emails should come from. It needs 2-Step Verification on (Google Account > Security). Then go to https://myaccount.google.com/apppasswords, make one called "AMA Supabase", and copy the 16 letters.
+2. **Supabase SMTP.** Authentication > Emails > **SMTP Settings**: turn on custom SMTP. Sender email: the Gmail address. Sender name: AMA Marrickville. Host `smtp.gmail.com`, port `465`, username: the Gmail address, password: the app password. Save.
+3. **Templates.** Authentication > Emails > Templates:
+   - **Invite user**: subject `Welcome to AMA: set up your login`, body: the whole of `supabase/email-templates/invite.html`.
+   - **Reset password**: subject `AMA: choose a new password`, body: the whole of `supabase/email-templates/reset.html`.
+4. **Allow the welcome page.** Authentication > URL Configuration > Redirect URLs: add `https://theggatonklenner.github.io/welcome/`.
+5. **Link time.** Authentication > Providers > Email (or Auth settings): set **Email OTP Expiration** to `86400` (24 hours), so the button still works the next day.
+6. Re-deploy the `staff` function with the latest `supabase/functions/staff/index.ts`.
+
+A login's details on Staff logins also have **Email a set-password link** (to send a new link, or for a forgotten password), and the home page's sign-in has **Forgot your password?**. Gmail allows about 500 emails a day, which is plenty.
+
 ## Tests
 
 ```
 node tests/staff-function.test.mjs
 node tests/staff-page.test.mjs     # needs Playwright and supabase-js (see the top of the file)
+node tests/landing-page.test.mjs   # the home page and the welcome page (same needs)
 node tests/tv-db.test.mjs
 node tests/tv-page.test.mjs        # TEMPLATES_JSON=templates file and FONTS_DIR=@fontsource folder to try real posters; also needs pdfjs-dist@3.11.174 (PDFJS=path to its build folder); TEST_PDF=your.pdf to try a real file
 ```

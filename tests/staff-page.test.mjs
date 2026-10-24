@@ -68,7 +68,9 @@ try {
   ok(list.includes('You') && (await page.textContent('#list [data-email="tate@ama.test"]')).includes('Admin'), 'you are marked, and admins get the gold Admin chip');
 
   // Add a login
-  await page.click('#addBtn'); await page.fill('#addEmail', 'Coach@AMA.test'); await page.fill('#addPw', 'short'); await page.click('#addGo');
+  await page.click('#addBtn'); await page.fill('#addEmail', 'Coach@AMA.test');
+  ok(await page.isChecked('input[name=addHow][value=email]') && await page.isHidden('#addPwRow'), 'a new login gets a welcome email by default (no password to type)');
+  await page.check('#addHowPw'); await page.fill('#addPw', 'short'); await page.click('#addGo');
   ok((await toastText()).includes('8 characters'), 'short starting password is refused');
   await page.click('#addGen');
   const pw = await page.inputValue('#addPw');
@@ -82,6 +84,23 @@ try {
   ok((await page.textContent('#list [data-email="coach@ama.test"]')).includes('Never signed in'), 'new login shows it has never signed in');
   await page.screenshot({ path: process.env.SHOT_DIR ? join(process.env.SHOT_DIR, 'staff-list.png') : join(tmpdir(), 'staff-list.png') });
 
+  // Onboarding email
+  await page.click('#addBtn'); await page.fill('#addEmail', 'newbie@ama.test');
+  await page.check('#prepChecks input[value="instructor"]'); await page.check('#tvChecks input[value="party"]');
+  await page.click('#addGo');
+  ok((await toastSays('welcome email')).includes('newbie@ama.test'), 'adding with the email option says a welcome email is on its way');
+  const inv = db._mail.find(m => m.kind === 'invite' && m.email === 'newbie@ama.test');
+  ok(inv && inv.redirectTo === 'https://theggatonklenner.github.io/welcome/' && inv.data.apps === 'Black Belt Prep and the dojang TV' && inv.data.invited_by === 'tate@ama.test', 'the invite goes to the welcome page and lists their apps');
+  ok(db._t.prep_roles.some(r => r.email === 'newbie@ama.test' && r.role === 'instructor') && db._users.some(u => u.email === 'newbie@ama.test'), 'their login and permissions are made');
+  await page.waitForSelector('#list [data-email="newbie@ama.test"]');
+  await page.click('#list [data-email="newbie@ama.test"]'); await page.waitForSelector('#mailPw');
+  await page.click('#mailPw');
+  ok((await toastSays('Email sent')).includes('newbie@ama.test') && db._mail.some(m => m.kind === 'recovery' && m.email === 'newbie@ama.test' && m.redirectTo.endsWith('/welcome/')), 'a set-password link can be emailed again from their login');
+  db._opts.mailFails = true; await page.click('#mailPw');
+  ok((await toastSays("didn't send")).includes("didn't send"), 'if the email fails, it says so');
+  db._opts.mailFails = false;
+  await page.click('#dlg [data-close]');
+
   // Change roles
   await page.click('#list [data-email="jo@ama.test"]'); await page.waitForSelector('#rolesForm');
   ok((await page.$$('#cardChecks input')).length === 7 && (await page.$$('#prepChecks input')).length === 8, 'both apps show tick boxes, laid out the same way');
@@ -94,7 +113,7 @@ try {
 
   // Dojang TV
   ok((await page.textContent('#list [data-email="tate@ama.test"]')).includes('TV: Admin'), 'the list shows TV access (admins always have it)');
-  await page.click('#addBtn'); await page.fill('#addEmail', 'tvonly@ama.test'); await page.click('#addGen');
+  await page.click('#addBtn'); await page.fill('#addEmail', 'tvonly@ama.test'); await page.check('#addHowPw'); await page.click('#addGen');
   ok((await page.$$('#tvChecks input[type=checkbox]')).length === 3 && (await page.$$('#tvChecks input:checked')).length === 0, 'adding a login has Dojang TV tick boxes (Editor, Party mode, Remote), none ticked to start with');
   await page.check('#tvChecks input[value="remote"]'); await page.click('#addGo');
   await page.waitForSelector('#list [data-email="tvonly@ama.test"]');

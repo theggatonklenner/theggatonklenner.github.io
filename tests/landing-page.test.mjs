@@ -1,0 +1,121 @@
+// The landing page (shows only the apps each login can use) and the welcome page (choose a password from
+// the onboarding email), in a headless browser with a pretend Supabase. Run: node tests/landing-page.test.mjs
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const { chromium } = await import(process.env.PLAYWRIGHT || '/opt/npm-tools/node_modules/playwright/index.mjs');
+const UMD = readFileSync(process.env.SUPABASE_UMD || '/home/claude/black-belt-prep-system/tests/node_modules/@supabase/supabase-js/dist/umd/supabase.js', 'utf8');
+
+let passed = 0, failed = 0;
+const ok = (c, m) => { if (c) { passed++; console.log('  pass  ' + m); } else { failed++; console.log('  FAIL  ' + m); } };
+
+// Who can do what
+const people = {
+  'tate@ama.test': { pw: 'password1', card: ['admin'], prep: ['admin'], tv: ['edit', 'party', 'remote'] },
+  'coach@ama.test': { pw: 'password1', card: [], prep: ['instructor'], tv: [] },
+  'party@ama.test': { pw: 'password1', card: [], prep: [], tv: ['party'] },
+  'nothing@ama.test': { pw: 'password1', card: [], prep: [], tv: [] },
+  'new@ama.test': { pw: null, card: [], prep: ['attendance'], tv: [], meta: { apps: 'Black Belt Prep' } }
+};
+const tokenFor = e => 'tok-' + e;
+const emailOf = req => { const t = (req.headers()['authorization'] || '').replace(/^Bearer\s+/i, ''); return t.startsWith('tok-') ? t.slice(4) : null; };
+const mail = [];
+const userJson = e => ({ id: 'id-' + e, email: e, aud: 'authenticated', role: 'authenticated', user_metadata: people[e].meta || {} });
+
+const browser = await chromium.launch();
+async function context() {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.route('https://cdn.jsdelivr.net/**', r => r.fulfill({ contentType: 'text/javascript', body: UMD }));
+  await ctx.route('https://fonts.googleapis.com/**', r => r.fulfill({ contentType: 'text/css', body: '' }));
+  await ctx.route('https://ptdrcxngaptcgswfbjhg.supabase.co/**', async r => {
+    const req = r.request(), url = new URL(req.url()), json = (b, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(b) });
+    if (url.pathname === '/auth/v1/token') {
+      const { email, password } = JSON.parse(req.postData() || '{}'), p = people[email];
+      if (!p || p.pw !== password) return json({ error: 'invalid_grant', error_description: 'Invalid login credentials' }, 400);
+      return json({ access_token: tokenFor(email), token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r', user: userJson(email) });
+    }
+    if (url.pathname === '/auth/v1/user') {
+      const e = emailOf(req); if (!e) return json({ msg: 'no user' }, 401);
+      if (req.method() === 'PUT') { people[e].pw = JSON.parse(req.postData()).password; }
+      return json(userJson(e));
+    }
+    if (url.pathname === '/auth/v1/recover') { mail.push({ email: JSON.parse(req.postData()).email, redirect: url.searchParams.get('redirect_to') }); return json({}); }
+    if (url.pathname === '/auth/v1/logout') return r.fulfill({ status: 204, body: '' });
+    if (url.pathname.startsWith('/rest/v1/rpc/')) {
+      const fn = url.pathname.split('/').pop(), p = people[emailOf(req)] || { card: [], prep: [], tv: [] };
+      if (fn === 'my_permissions') return json(p.card);
+      if (fn === 'prep_my_roles') return json(p.prep);
+      if (fn === 'tv_can') { const perm = JSON.parse(req.postData() || '{}').p_perm; return json(p.card.includes('admin') || p.tv.includes(perm) || (perm !== 'edit' && p.tv.includes('edit'))); }
+    }
+    return json({});
+  });
+  return ctx;
+}
+const LANDING = pathToFileURL(join(here, '../index.html')).href;
+const names = async page => page.$$eval('#apps .name', ns => ns.map(n => n.firstChild.textContent.trim()));
+async function signIn(page, email) {
+  await page.goto(LANDING); await page.waitForSelector('#signIn:not([hidden])');
+  await page.fill('#siEmail', email); await page.fill('#siPass', 'password1'); await page.click('#siGo');
+  await page.waitForSelector('#apps:not([hidden])');
+}
+
+try {
+  console.log('Landing page');
+  let ctx = await context(), page = await ctx.newPage();
+  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.goto(LANDING); await page.waitForSelector('#signIn:not([hidden])');
+  ok(await page.isHidden('#apps') && (await page.$$('#apps .item')).length === 0, 'signed out, it asks you to sign in and shows no apps');
+  await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'wrong'); await page.click('#siGo');
+  await page.waitForSelector('#siMsg:not([hidden])');
+  ok((await page.textContent('#siMsg')).includes('Wrong email or password'), 'a wrong password says so');
+  await page.fill('#siPass', 'password1'); await page.click('#siGo'); await page.waitForSelector('#apps:not([hidden])');
+  let n = await names(page);
+  ok(['Black Belt Prep', 'AMA ID Cards', 'TV Display', 'Tablet Display', 'TV Remote', 'Play on this screen', 'Clipboard', 'Staff logins', 'Supabase'].every(x => n.includes(x)), 'an admin sees every app (' + n.join(', ') + ')');
+  ok((await page.textContent('#who')) === 'tate@ama.test', 'it shows who is signed in');
+  await page.reload(); await page.waitForSelector('#apps:not([hidden])');
+  ok((await names(page)).length === n.length, 'it remembers the sign-in');
+  await page.click('#signOut'); await page.waitForSelector('#signIn:not([hidden])');
+  ok(true, 'Sign out goes back to the sign-in');
+
+  await signIn(page, 'coach@ama.test'); n = await names(page);
+  ok(n.join() === 'Black Belt Prep', 'an instructor sees only Black Belt Prep (' + n.join(', ') + ')');
+  await page.click('#signOut'); await page.waitForSelector('#signIn:not([hidden])');
+  await signIn(page, 'party@ama.test'); n = await names(page);
+  ok(n.includes('TV party mode') && n.includes('Tablet party mode') && !n.includes('TV Remote') && !n.includes('Black Belt Prep') && !n.includes('Staff logins'), 'party mode only sees the party pages (' + n.join(', ') + ')');
+  await page.click('#signOut'); await page.waitForSelector('#signIn:not([hidden])');
+  await signIn(page, 'nothing@ama.test');
+  ok((await page.textContent('#apps')).includes("doesn't have access to any apps"), 'a login with no permissions is told to ask an admin');
+  await page.click('#signOut'); await page.waitForSelector('#signIn:not([hidden])');
+
+  await page.fill('#siEmail', ''); await page.click('#forgot');
+  ok((await page.textContent('#siMsg')).includes('Type your email'), '"Forgot your password?" asks for the email first');
+  await page.fill('#siEmail', 'coach@ama.test'); await page.click('#forgot'); await page.waitForTimeout(500);
+  ok(mail.some(m => m.email === 'coach@ama.test' && /\/welcome\/$/.test(m.redirect || '')) && (await page.textContent('#siMsg')).includes('on its way'), 'then emails a link to the welcome page to choose a new password');
+  ok(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+
+  console.log('\nWelcome page');
+  ctx = await context(); page = await ctx.newPage(); page.on('pageerror', e => errors.push(e.message));
+  const W = pathToFileURL(join(here, '../welcome/index.html')).href;
+  await page.goto(W + '#access_token=' + tokenFor('new@ama.test') + '&expires_in=3600&expires_at=' + (Math.floor(Date.now() / 1000) + 3600) + '&refresh_token=r&token_type=bearer&type=invite');
+  await page.waitForSelector('#setPw:not([hidden])', { timeout: 6000 }).catch(() => {});
+  ok(await page.isVisible('#setPw') && (await page.textContent('#spFor')).includes('new@ama.test') && (await page.textContent('#spFor')).includes('Black Belt Prep'), 'the link from the email opens "Choose your password", with their apps');
+  ok(!page.url().includes('access_token'), 'the link details are taken out of the address bar');
+  await page.fill('#spPass', 'newpass12'); await page.fill('#spPass2', 'newpass13'); await page.click('#spGo');
+  ok((await page.textContent('#spMsg')).includes("don't match"), 'the two passwords must match');
+  await page.fill('#spPass2', 'newpass12'); await page.click('#spGo'); await page.waitForSelector('#done:not([hidden])');
+  ok(people['new@ama.test'].pw === 'newpass12', 'the password is saved');
+  ok(await page.getAttribute('#done a', 'href') === '../', '"Open your apps" goes to the landing page');
+  await page.goto(LANDING); await page.waitForSelector('#apps:not([hidden])');
+  ok((await names(page)).join() === 'Black Belt Prep', 'where they are already signed in, and see their apps');
+  await page.goto(W + '#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired');
+  await page.waitForSelector('#problem:not([hidden])');
+  ok((await page.textContent('#problem')).includes('run out'), 'an old link says it has run out and what to do');
+  ok(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+} catch (e) { failed++; console.log('  FAIL  stopped: ' + e.message); }
+await browser.close();
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);
