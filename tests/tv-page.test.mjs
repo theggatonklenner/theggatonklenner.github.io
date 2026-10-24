@@ -912,8 +912,11 @@ try {
   // Sign-in mode on the tablets
   console.log('\nSign-in mode');
   ({ ctx, page } = await context({ width: 390, height: 844 }));
-  await page.goto(BASE + '/tv/edit/index.html?display=tablet');
+  await page.goto(BASE + '/tv/edit/index.html?display=tv');
   await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+  await page.waitForSelector('#setSecs, #setForm', { timeout: 8000 }).catch(() => {}); await page.waitForTimeout(800);
+  ok(await page.isHidden('#signinBox') && await page.isHidden('#bannerBox'), 'the TV has no sign-in page or bottom message settings (it is a normal browser)');
+  await page.goto(BASE + '/tv/edit/index.html?display=tablet');
   await page.waitForSelector('#signinBox:not([hidden])');
   ok(await page.inputValue('#setSigninOpen') === 'page' && await page.isHidden('#signinTest') && (await page.textContent('#signinHint')).includes('Fully Kiosk'), 'by default a tap goes to the sign-in page (for sites like ESC), with how to set up the kiosk app');
   await page.selectOption('#setSigninOpen', 'frame');

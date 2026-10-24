@@ -332,9 +332,10 @@
     $('logo').style.display = st.show_logo ? '' : 'none';
     $('clock').style.display = st.show_clock ? '' : 'none';
     if (typeof batteryDraw === 'function') batteryDraw();
-    $('banner').innerHTML = st.banner ? esc(st.banner) : '';
-    $('banner').style.display = st.banner ? '' : 'none';
-    document.body.className = document.body.className.replace(/\bhasbanner\b/g, '') + (st.banner ? ' hasbanner' : '');
+    var ban = feed.display === 'tv' ? '' : st.banner;   // the bottom message is for the tablets (the TV isn't touched)
+    $('banner').innerHTML = ban ? esc(ban) : '';
+    $('banner').style.display = ban ? '' : 'none';
+    document.body.className = document.body.className.replace(/\bhasbanner\b/g, '') + (ban ? ' hasbanner' : '');
     tick();
   }
   function tick() {
@@ -595,7 +596,7 @@
   function kioskSync(f) {
     var st = (f && f.settings) || {};
     var lock = !!(f && (f.only || f.blackout));
-    if (PREVIEW) return;
+    if (PREVIEW || (f && f.display === 'tv')) { kioskNote = ''; return; }   // FreeKiosk is only on the tablets
     if (st.signin_open !== 'kiosk') { kioskNote = lock ? 'off (Settings: A tap is not "Handled by FreeKiosk")' : ''; return; }
     if (!st.signin) { kioskNote = 'no sign-in link in Settings'; return; }
     if (KIOSK_MAIN) kioskNote = lock ? 'main screen, party locked' : '';
@@ -641,12 +642,12 @@
   $('signin').addEventListener('load', function () { if (signinOpen) signinActive(); });
   function signinCheck(first, f) {
     var st = (f && f.settings) || {};
-    var url = st.signin || null;
+    var url = f && f.display === 'tv' ? null : (st.signin || null);   // the TV is a normal browser: no sign-in page
     signinBlocked = !!(f && (f.only || f.blackout));   // not during a party or a blackout
     if (url !== signinUrl) { signinUrl = url; if (signinOpen) closeSignin(); }
     signinIdle = st.signin_idle || 60;
     signinPage = st.signin_open !== 'frame';
-    if (st.signin_open === 'kiosk') signinBlocked = true;   // FreeKiosk shows the sign-in page; taps here do nothing
+    if (st.signin_open === 'kiosk' || (f && f.display === 'tv')) signinBlocked = true;   // FreeKiosk shows the sign-in page; taps here do nothing
     if (!signinAllowed()) { closeSignin(); return; }
     if (first && !signinPage) openSignin();   // shown inside: start on it
   }

@@ -413,10 +413,10 @@ function draw() {
   $('#code').textContent = S.screen_code;
   $('#setSecs').value = S.seconds; $('#setClock').checked = S.show_clock; $('#setLogo').checked = S.show_logo;
   $('#offBox').hidden = !('offs' in S); if ('offs' in S) { offState = JSON.parse(JSON.stringify(S.offs || [])); drawOffs(); }
-  $('#bannerBox').hidden = !('banner' in S); $('#setBanner').value = S.banner || '';
+  $('#bannerBox').hidden = !('banner' in S) || state.display !== 'tablet'; $('#setBanner').value = S.banner || '';   // tablets only (the TV isn't touched)
   $('#batBox').hidden = !('battery_warn' in S) || state.display !== 'tablet';   // tablets only
   if ('battery_warn' in S) $('#setBatWarn').value = S.battery_warn;
-  $('#signinBox').hidden = !('signin_url' in S);
+  $('#signinBox').hidden = !('signin_url' in S) || state.display !== 'tablet';   // tablets only: the TV is a normal browser
   if ('signin_url' in S) { $('#setSignin').value = S.signin_url || ''; $('#setSigninOpen').value = S.signin_open || 'page';
     if (!('kiosk_port' in S)) { const k = $('#setSigninOpen option[value="kiosk"]'); if (k) k.remove(); if (S.signin_open === 'kiosk') $('#setSigninOpen').value = 'page'; }
     $('#setKioskPort').value = S.kiosk_port || 8080; $('#setKioskKey').value = S.kiosk_key || ''; signinHint(); const iv = String(S.signin_idle || 60); if (![...$('#setSigninIdle').options].some(o => o.value === iv)) $('#setSigninIdle').insertAdjacentHTML('beforeend', `<option value="${iv}">${iv} seconds</option>`); $('#setSigninIdle').value = iv; }
@@ -1690,6 +1690,7 @@ $('#setForm').onsubmit = async e => {
   const secs = Math.max(3, Math.min(600, +$('#setSecs').value || 10));
   const rec = { seconds: secs, show_clock: $('#setClock').checked, show_logo: $('#setLogo').checked };
   if (!$('#bannerBox').hidden) rec.banner = $('#setBanner').value.trim();
+  if (state.display === 'tv' && state.settings) { if (state.settings.banner) rec.banner = ''; if (state.settings.signin_url) rec.signin_url = null; }   // clear any left over from before
   if (!$('#batBox').hidden) { const b = +$('#setBatWarn').value; if (!(b >= 0 && b <= 100)) return toast('The battery warning is a % from 0 to 100.'); rec.battery_warn = Math.round(b); }
   if (!$('#signinBox').hidden) {
     const raw = $('#setSignin').value.trim(), url = raw ? cleanLink(raw) : '';
