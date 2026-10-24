@@ -16,6 +16,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
 <script src="../config.js"></script>
+<script src="qrcode.js"></script>
 <style>
   /* Plays full screen on the dojang TV. Written for older smart TV browsers: no newer CSS or JS. */
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; -ms-touch-action: none; }   /* no pinch zoom or double-tap zoom */
@@ -23,6 +24,11 @@
   body.idle, body.idle * { cursor: none !important; }
   .layer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; transition: opacity .9s ease; overflow: hidden; }
   .layer.on { opacity: 1; }
+  /* Party with a QR code: the poster above, a big QR code along the bottom */
+  .pq-top { position: absolute; left: 0; right: 0; top: 0; bottom: 30%; overflow: hidden; }
+  .pqr { position: absolute; left: 0; right: 0; bottom: 0; height: 30%; background: #fff; color: #16211b; display: flex; align-items: center; justify-content: center; gap: 4vw; padding: 1.5vh 5vw; box-sizing: border-box; }
+  .pqr canvas { height: 92%; width: auto; image-rendering: pixelated; flex: none; }
+  .pqr .pqrt { font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-weight: 700; font-size: 5.2vw; line-height: 1.15; text-transform: uppercase; max-width: 46%; }
   .fill { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
   .blur { background-size: cover; background-position: center; -webkit-filter: blur(40px) brightness(.5); filter: blur(40px) brightness(.5); transform: scale(1.15); }
   .contain { background-size: contain; background-position: center; background-repeat: no-repeat; }
@@ -353,7 +359,25 @@
     return '<div class="confetti">' + out + '</div>';
   }
   function themeOf(s) { return 't-' + (s.theme || 'green'); }
+  function partyQr() { var st = (feed && feed.settings) || {}; return feed && feed.only && st.party_qr && window.qrcode ? st.party_qr : null; }
   function html(s) {
+    var q = partyQr();
+    if (q) return '<div class="pq-top">' + html0(s) + '</div><div class="pqr"><canvas class="pqrc"></canvas><div class="pqrt">' + esc(feed.settings.party_qr_text || 'Scan me') + '</div></div>';
+    return html0(s);
+  }
+  // Draws the QR code to fit its box: whole pixels per square, with the white border phones need
+  function drawPartyQr(layer) {
+    var c = layer.querySelector('.pqrc'), q = partyQr(); if (!c || !q) return;
+    try {
+      var qr = window.qrcode(0, 'M'); qr.addData(q); qr.make();
+      var n = qr.getModuleCount(), total = n + 4, box = Math.max(100, Math.round(layer.clientHeight * 0.3 * 0.92 * (window.devicePixelRatio || 1)));
+      var cell = Math.max(1, Math.floor(box / total)), size = cell * total;
+      c.width = size; c.height = size;
+      var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, size, size); g.fillStyle = '#000';
+      for (var r = 0; r < n; r++) for (var k = 0; k < n; k++) if (qr.isDark(r, k)) g.fillRect((k + 2) * cell, (r + 2) * cell, cell, cell);
+    } catch (e) { /* a link too long for a QR code: leave it blank */ }
+  }
+  function html0(s) {
     var live = feed.live || {};
     if (s.kind === 'photo') return '<div class="fill blur" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')"></div><div class="fill contain" style="background-image:url(\'' + MEDIA + esc(s.media_path) + '\')"></div>' + (s.title && !feed.only ? '<div class="caption">' + esc(s.title) + '</div>' : '');   // party mode: just the picture, no caption
     if (s.kind === 'text') {
@@ -432,6 +456,7 @@
     layer.setAttribute('data-slide', s.id);
     layer.innerHTML = html(s);
     stage.appendChild(layer);
+    drawPartyQr(layer);
     var secs = (s.seconds || (feed.settings && feed.settings.seconds) || 10) * 1000;
     var shown = false;
     var reveal = function () {

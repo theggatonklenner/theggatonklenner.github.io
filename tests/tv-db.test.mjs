@@ -208,6 +208,10 @@ ok((await feedNow()).quiet === 'black', 'a window that wraps past midnight cover
 const qp = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, theme, party) values ('text', 'Party in quiet hours', 'party', true) returning id`))).rows[0].id;
 await as('tate@ama.test', () => db.query(`update tv_settings set only_slide = $1, only_until = now() + interval '1 hour' where id = 1`, [qp]));
 ok((await feedNow()).only === true, 'a party still shows during quiet hours');
+await as('tate@ama.test', () => db.exec(`update tv_settings set party_qr_url = 'https://forms.gle/abc', party_qr_text = 'Scan me' where id = 1`));
+ok((await feedNow()).settings.party_qr === 'https://forms.gle/abc' && (await feedNow()).settings.party_qr_text === 'Scan me', 'during a party the feed has the QR code link and text');
+ok(!(await tryAs('tate@ama.test', `update tv_settings set party_qr_url = 'not a link' where id = 1`)).ok, 'the party QR code needs a proper link');
+await as('tate@ama.test', () => db.exec(`update tv_settings set party_qr_url = null, party_qr_text = null where id = 1`));
 await as('tate@ama.test', () => db.exec(`update tv_settings set only_slide = null, only_until = null, quiet_on = false where id = 1`));
 ok(!(await feedNow()).quiet, 'quiet hours can be turned off');
 ok(!(await tryAs('tate@ama.test', `update tv_settings set quiet_style = 'off' where id = 1`)).ok, 'only black or logo');

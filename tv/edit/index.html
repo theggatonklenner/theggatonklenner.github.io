@@ -235,6 +235,10 @@
         <div class="field"><span class="label">On screen</span><label class="check"><input type="checkbox" id="setClock"> Clock</label><label class="check" style="min-height:28px"><input type="checkbox" id="setLogo"> AMA logo</label></div>
       </div>
       <div class="field" id="bannerBox" hidden><label for="setBanner">Message at the bottom (optional)</label><input type="text" id="setBanner" maxlength="80" placeholder="e.g. Tap to sign in"><p class="hint">Shown along the bottom of the screen with every slide. Leave it empty for none.</p></div>
+      <div class="field" id="pqrBox" hidden><span class="label">QR code during parties</span>
+        <input type="text" id="setPqr" inputmode="url" autocapitalize="off" spellcheck="false" maxlength="1000" placeholder="Link, e.g. the participation waiver form">
+        <input type="text" id="setPqrText" maxlength="80" placeholder="Scan to complete the participation waiver" style="margin-top:6px" aria-label="Text next to the QR code">
+        <p class="hint">While a party is on, the tablets show the poster with a big QR code for this link along the bottom, easy to scan with a phone. Leave the link empty for none.</p></div>
       <div class="field" id="batBox" hidden><label for="setBatWarn">Low battery warning</label>
         <div class="row"><span class="hint">Red bar at the top below</span><input type="number" id="setBatWarn" min="0" max="100" step="5" style="width:90px">%<span class="hint">(0 = off). It hides while charging.</span></div></div>
       <div class="field" id="signinBox" hidden><label for="setSignin">Sign-in page (optional)</label>
@@ -415,6 +419,8 @@ function draw() {
   $('#offBox').hidden = !('offs' in S); if ('offs' in S) { offState = JSON.parse(JSON.stringify(S.offs || [])); drawOffs(); }
   $('#bannerBox').hidden = !('banner' in S) || state.display !== 'tablet'; $('#setBanner').value = S.banner || '';   // tablets only (the TV isn't touched)
   $('#batBox').hidden = !('battery_warn' in S) || state.display !== 'tablet';   // tablets only
+  $('#pqrBox').hidden = !('party_qr_url' in S) || state.display !== 'tablet';
+  $('#setPqr').value = S.party_qr_url || ''; $('#setPqrText').value = S.party_qr_text || '';
   if ('battery_warn' in S) $('#setBatWarn').value = S.battery_warn;
   $('#signinBox').hidden = !('signin_url' in S) || state.display !== 'tablet';   // tablets only: the TV is a normal browser
   if ('signin_url' in S) { $('#setSignin').value = S.signin_url || ''; $('#setSigninOpen').value = S.signin_open || 'page';
@@ -1331,67 +1337,20 @@ const tplSrc = t => t._local || (MEDIA + t.image_path);
 const drawSeq = {};
 async function drawPoster(canvas, t, name) {
   const key = canvas.id || 'x', seq = drawSeq[key] = (drawSeq[key] || 0) + 1;
-  try { const im = await loadImg(tplSrc(t)); if (t.settings && t.settings.qr) await loadQr(); if (seq !== drawSeq[key]) return; await AMAPoster.render(canvas, im, t.settings, name); }
+  try { const im = await loadImg(tplSrc(t)); if (seq !== drawSeq[key]) return; await AMAPoster.render(canvas, im, t.settings, name); }
   catch (er) { toast(er.message || String(er), 5000); }
 }
 async function posterBlob(t, name, type) {
   const c = document.createElement('canvas');
-  if (t.settings && t.settings.qr) await loadQr();
   await AMAPoster.render(c, await loadImg(tplSrc(t)), t.settings, name);
   return new Promise((ok, bad) => c.toBlob(b => b ? ok(b) : bad(new Error('Could not make the poster.')), type, 0.9));
 }
-// Find the QR code printed on a design (to draw a bigger one in its place)
-const JSQR = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
-let jsqrLoading = null;
-function loadJsQr() {
-  if (window.jsQR) return Promise.resolve(window.jsQR);
-  if (!jsqrLoading) jsqrLoading = new Promise((ok, bad) => {
-    const sc = document.createElement('script'); sc.src = JSQR;
-    sc.onload = () => ok(window.jsQR); sc.onerror = () => { jsqrLoading = null; bad(new Error('Could not load the QR code reader. Check your connection.')); };
-    document.head.appendChild(sc);
-  });
-  return jsqrLoading;
-}
-// -> { data, cx, cy, size (bigger), found (its size now) } in poster pixels, or null
-async function findQr(src, w, h) {
-  const [jsQR, im] = await Promise.all([loadJsQr(), loadImg(src)]);
-  const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const g = c.getContext('2d'); g.drawImage(im, 0, 0, w, h);
-  const r = jsQR(g.getImageData(0, 0, w, h).data, w, h);
-  if (!r || !r.data) return null;
-  const L = r.location, xs = [L.topLeftCorner.x, L.topRightCorner.x, L.bottomLeftCorner.x, L.bottomRightCorner.x], ys = [L.topLeftCorner.y, L.topRightCorner.y, L.bottomLeftCorner.y, L.bottomRightCorner.y];
-  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), found = Math.max(x1 - x0, y1 - y0);
-  return qrFit({ data: r.data, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, size: Math.min(found * 1.6, Math.min(w, h) * 0.42), found: Math.round(found) }, w, h);
-}
-// Keep the QR square inside the poster, and at least as big as the one in the design
-function qrFit(q, w, h) {
-  const m = Math.round(Math.min(w, h) * 0.02);
-  q.size = Math.round(Math.max(q.found || 0, Math.min(q.size, Math.min(w, h) - 2 * m)));
-  q.cx = Math.round(Math.min(w - m - q.size / 2, Math.max(m + q.size / 2, q.cx)));
-  q.cy = Math.round(Math.min(h - m - q.size / 2, Math.max(m + q.size / 2, q.cy)));
-  return q;
-}
-
 function openTemplates() {
   const list = state.templates || [];
   openDlg(`<div class="dlg"><div class="dlg-head"><div><h3>Poster templates</h3><p class="hint">Designs with the name area left empty. The name is drawn on when you make a poster.</p></div><button class="x" data-close>Close</button></div>
     <ul class="saved">${list.map(t => `<li>${`<div class="thumb" style="background-image:url('${MEDIA + esc(t.image_path)}')"></div>`}<div class="grow"><b>${esc(t.title)}</b><div class="hint">${hasTablet(t) ? 'TV and tablet versions' : 'TV version only'}</div></div>
       <button type="button" class="btn sm" data-edit="${t.id}">TV</button><button type="button" class="btn sm" data-tab="${t.id}">${hasTablet(t) ? 'Tablet' : 'Add tablet'}</button><button type="button" class="btn sm danger" data-del="${t.id}" aria-label="Delete ${esc(t.title)}">Delete</button></li>`).join('') || '<li class="hint">None yet.</li>'}</ul>
-    <div class="row"><button type="button" class="btn primary" id="tAdd">Add template</button><button type="button" class="btn" id="tImport">Import</button>${list.some(t => hasTablet(t) && !t.tablet_settings.qr) ? '<button type="button" class="btn" id="tQrAll">Bigger QR codes on the tablets</button>' : ''}<span class="grow"></span><button type="button" class="btn" id="tBack">Back to party mode</button></div></div>`);
-  const qa = $('#tQrAll'); if (qa) qa.onclick = async () => {
-    qa.disabled = true; let done = 0, miss = [];
-    for (const t of list.filter(x => hasTablet(x) && !x.tablet_settings.qr)) {
-      toast(`Finding QR codes... ${t.title}`, 0);
-      try {
-        const st = t.tablet_settings, q = await findQr(MEDIA + t.tablet_image_path, st.w || 1240, st.h || 1754);
-        if (!q) { miss.push(t.title); continue; }
-        const { error } = await sb.from('tv_poster_templates').update({ tablet_settings: { ...st, qr: q }, updated_at: new Date().toISOString() }).eq('id', t.id);
-        if (error) throw error; done++;
-      } catch (er) { miss.push(t.title); }
-    }
-    toast(`Bigger QR code on ${done} tablet design${done === 1 ? '' : 's'}${miss.length ? `. No QR code found on: ${miss.join(', ')}` : ''}. Change the size or position under Tablet on each template.`, 8000);
-    await load(); openTemplates();
-  };
+    <div class="row"><button type="button" class="btn primary" id="tAdd">Add template</button><button type="button" class="btn" id="tImport">Import</button><span class="grow"></span><button type="button" class="btn" id="tBack">Back to party mode</button></div></div>`);
   $('#tAdd').onclick = () => openTemplate(null);
   $('#tImport').onclick = () => importTemplates(openTemplates);
   $('#tBack').onclick = () => openParty();
@@ -1433,13 +1392,6 @@ function openTemplate(existing, ver) {
         <div class="grid2"><div class="field"><label for="tCurve">Curve</label><div class="range"><input type="range" id="tCurve" min="0" max="30" step="1" value="${st.curve || 0}"></div></div>
           <div class="field"><label for="tSpace">Letter spacing</label><div class="range"><input type="range" id="tSpace" min="0" max="0.2" step="0.01" value="${st.spacing || 0}"></div></div></div>
         <label class="check"><input type="checkbox" id="tCaps" ${st.uppercase ? 'checked' : ''}> Capital letters</label>
-        <div class="field"><span class="label">QR code</span>
-          ${st.qr ? `<div class="grid2"><div class="field"><label for="tQrSize">Size</label><div class="range"><input type="range" id="tQrSize" min="${Math.round(Math.max(120, (st.qr.found || 200) * 0.8))}" max="${Math.round(Math.min(st.w || 1920, st.h || 1080) * 0.9)}" step="2" value="${st.qr.size}"></div></div>
-              <div class="field"><label for="tQrX">Left / right</label><div class="range"><input type="range" id="tQrX" min="0" max="${st.w || 1920}" step="2" value="${st.qr.cx}"></div></div>
-              <div class="field"><label for="tQrY">Up / down</label><div class="range"><input type="range" id="tQrY" min="0" max="${st.h || 1080}" step="2" value="${st.qr.cy}"></div></div></div>
-            <p class="hint">A bigger, sharper copy of the design's QR code (${esc(st.qr.data.length > 60 ? st.qr.data.slice(0, 57) + '...' : st.qr.data)}) is drawn over it on every poster.</p>
-            <div class="row"><button type="button" class="btn sm" id="tQrOff">Use the design's own QR code</button></div>`
-          : `<div class="row"><button type="button" class="btn sm" id="tQrFind">Make the QR code bigger</button></div><p class="hint">Finds the QR code on the design and draws a bigger, sharper one in its place, so it's easier to scan.</p>`}</div>
         <div class="row"><button type="button" class="btn sm" id="tPick">Change the design</button><span class="grow"></span><button type="button" class="btn" id="tCancel">Cancel</button><button class="btn primary" type="submit" id="tSave">Save template</button></div>`}
     </form>`);
     const pickBtn = $('#tPick'); if (pickBtn) pickBtn.onclick = () => { $('#pickTpl').onchange = async e => {
@@ -1451,7 +1403,7 @@ function openTemplate(existing, ver) {
       } catch (er) { toast(er.message || String(er), 6000); }
     }; $('#pickTpl').click(); };
     const useBlob = async b => {
-      blob = b; t._local = URL.createObjectURL(b); delete S().qr;   // a new design: find its QR code again
+      blob = b; t._local = URL.createObjectURL(b);
       if (tab) {   // the poster is the design's own size; keep the name area in proportion
         const im = await loadImg(t._local), st = S(), ow = st.w || 1240, oh = st.h || 1754;
         st.w = im.naturalWidth; st.h = im.naturalHeight;
@@ -1478,14 +1430,6 @@ function openTemplate(existing, ver) {
       }
     };
     ['#tFont', '#tFill', '#tStroke', '#tSw', '#tCurve', '#tSpace', '#tCaps', '#tSample'].forEach(id => { $(id).oninput = () => { read(); redraw(); }; });
-    // QR code: find it on the design, then size and move the bigger one
-    const qf = $('#tQrFind'); if (qf) qf.onclick = async () => {
-      read(); qf.disabled = true;
-      try { const st = S(), q = await findQr(tplSrc(t), st.w || 1920, st.h || 1080); if (!q) { qf.disabled = false; return toast("Couldn't find a QR code on this design.", 5000); } st.qr = q; view(); }
-      catch (er) { qf.disabled = false; toast(er.message || String(er), 5000); }
-    };
-    const qo = $('#tQrOff'); if (qo) qo.onclick = () => { read(); delete S().qr; view(); };
-    [['#tQrSize', 'size'], ['#tQrX', 'cx'], ['#tQrY', 'cy']].forEach(([id, k]) => { const el = $(id); if (el) el.oninput = () => { const st = S(); st.qr[k] = +el.value; qrFit(st.qr, st.w || 1920, st.h || 1080); redraw(); }; });
     // Drag to mark the name area (in poster pixels)
     const at = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * cv.width, y: (e.clientY - r.top) / r.height * cv.height }; };
     let start = null;
@@ -1752,6 +1696,12 @@ $('#setForm').onsubmit = async e => {
   const secs = Math.max(3, Math.min(600, +$('#setSecs').value || 10));
   const rec = { seconds: secs, show_clock: $('#setClock').checked, show_logo: $('#setLogo').checked };
   if (!$('#bannerBox').hidden) rec.banner = $('#setBanner').value.trim();
+  if (!$('#pqrBox').hidden) {
+    let u = $('#setPqr').value.trim();
+    if (u && !/^https?:\/\//i.test(u)) u = 'https://' + u;
+    if (u && !/^https?:\/\/\S+\.\S+$/i.test(u)) return toast('The party QR code link doesn\'t look right. Paste the whole link.', 5000);
+    rec.party_qr_url = u || null; rec.party_qr_text = $('#setPqrText').value.trim() || null;
+  }
   if (state.display === 'tv' && state.settings) { if (state.settings.banner) rec.banner = ''; if (state.settings.signin_url) rec.signin_url = null; }   // clear any left over from before
   if (!$('#batBox').hidden) { const b = +$('#setBatWarn').value; if (!(b >= 0 && b <= 100)) return toast('The battery warning is a % from 0 to 100.'); rec.battery_warn = Math.round(b); }
   if (!$('#signinBox').hidden) {

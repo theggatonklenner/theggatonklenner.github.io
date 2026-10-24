@@ -118,6 +118,11 @@ alter table public.tv_settings add constraint tv_settings_signin_open_check chec
 alter table public.tv_settings add column if not exists kiosk_port int not null default 8080;
 -- Low battery: a red bar along the top of the screen below this % (when not charging); 0 = off
 alter table public.tv_settings add column if not exists battery_warn int not null default 20;
+-- During a party, a big QR code along the bottom (e.g. the participation waiver), with a line of text. Tablets.
+alter table public.tv_settings add column if not exists party_qr_url text;
+alter table public.tv_settings add column if not exists party_qr_text text;
+alter table public.tv_settings drop constraint if exists tv_settings_party_qr_check;
+alter table public.tv_settings add constraint tv_settings_party_qr_check check (party_qr_url is null or (party_qr_url ~* '^https?://\S+$' and length(party_qr_url) <= 1000));
 alter table public.tv_settings drop constraint if exists tv_settings_battery_check;
 alter table public.tv_settings add constraint tv_settings_battery_check check (battery_warn between 0 and 100);
 alter table public.tv_settings add column if not exists kiosk_key text;
@@ -398,7 +403,8 @@ begin
   if one_slide is not null then
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open,
-        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn),
+        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn,
+        'party_qr', nullif(trim(coalesce(s.party_qr_url, '')), ''), 'party_qr_text', nullif(trim(coalesce(s.party_qr_text, '')), '')),
       'version', greatest(s.updated_at, one_changed), 'slides', jsonb_build_array(one_slide), 'live', '{}'::jsonb, 'today', today,
       'only', true, 'only_until', one_until, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
