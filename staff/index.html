@@ -170,7 +170,11 @@ async function api(body) {
   } catch (e) { const er = new Error('Could not reach the staff function. Check your connection, and that the "staff" function is deployed in Supabase.'); er.setup = true; throw er; }
   const data = await res.json().catch(() => ({}));
   if (res.status === 404 && !data.error) { const er = new Error('The "staff" function is not set up in Supabase yet.'); er.setup = true; throw er; }
+  // An older staff function doesn't know about emails: it asks for a password, or doesn't know "invite"
+  const OLD = 'The staff function in Supabase is an older version without emails. Re-deploy it: Edge Functions > staff > Code, paste the whole of supabase/functions/staff/index.ts, Deploy.';
+  if (!res.ok && ((body.invite && /8 characters/.test(data.error || '')) || (body.action === 'invite' && /Unknown action/.test(data.error || '')))) throw new Error(OLD);
   if (!res.ok) { const er = new Error(data.error || data.message || 'Something went wrong.'); er.status = res.status; throw er; }
+  if (body.invite && !data.existed && !data.emailed) throw new Error(OLD + ' (The login was made without a password; after re-deploying, use "Email a set-password link" on it.)');
   return data;
 }
 
