@@ -47,7 +47,8 @@
     ctx.font = face(100);
     var cap = ctx.measureText('H').actualBoundingBoxAscent / 100 || 0.72;
     var sw = t.stroke ? (t.strokeWidth || 0) : 0;
-    var size = t.size || t.box.h / (cap + sw);
+    // The design's letter size; else from the marked box's height; else (a box with only a baseline) a sensible default
+    var size = t.size || (t.box.h ? t.box.h / (cap + sw) : Math.round((t.box.maxW || (t.w || W) * 0.7) * 0.24));
     var measure = function (sz) {
       ctx.font = face(sz);
       var chars = Array.from(text), sp = (t.spacing || 0) * sz, adv = [], total = 0;

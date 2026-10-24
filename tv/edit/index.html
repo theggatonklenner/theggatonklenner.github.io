@@ -1374,7 +1374,7 @@ function openTemplate(existing, ver) {
   const t = tab ? { title: existing.title, image_path: existing.tablet_image_path || null,
       settings: existing.tablet_settings ? copy(existing.tablet_settings) : { ...copy(existing.settings), size: undefined, box: { cx: 620, cy: 780, h: 150, maxW: 900 }, w: 1240, h: 1754 } }
     : existing ? { ...existing, settings: copy(existing.settings) } : { title: '', settings: base, image_path: null };
-  if (tab) delete t.settings.size;
+  if (tab && t.settings.box && t.settings.box.h) delete t.settings.size;   // a new tablet version: sized from its name box (keep the size of one with just a baseline)
   let blob = null, pages = null, sample = (existing && existing.settings.sample) || 'Kian';
   const S = () => t.settings;
   const view = () => {

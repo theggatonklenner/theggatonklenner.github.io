@@ -698,6 +698,16 @@ try {
     ok(tt.tablet_settings && tt.tablet_settings.h > tt.tablet_settings.w, 'importing the tablet versions adds an upright design to the matching template');
     await page.waitForFunction(() => document.querySelector('#dlg').textContent.includes('TV and tablet versions'), null, { timeout: 15000 }).catch(() => {});
     ok((await page.textContent('#dlg')).includes('TV and tablet versions'), 'Manage templates shows which have a tablet version');
+    // A tablet version saved with just a baseline (no letter size) still gets the name drawn
+    const drewName = await page.evaluate(async () => {
+      const t = state.templates.find(x => x.title === 'Turtles'), st = { ...t.tablet_settings }; delete st.size;
+      const im = await loadImg(MEDIA + t.tablet_image_path), a = document.createElement('canvas'), b = document.createElement('canvas');
+      await AMAPoster.render(a, im, st, ''); await AMAPoster.render(b, im, st, 'Kian');
+      const da = a.getContext('2d').getImageData(0, 0, a.width, a.height).data, db = b.getContext('2d').getImageData(0, 0, b.width, b.height).data;
+      let diff = 0; for (let i = 0; i < da.length; i += 4) if (Math.abs(da[i] - db[i]) > 40) diff++;
+      return diff;
+    });
+    ok(drewName > 2000, `a tablet design saved without a letter size still gets the name (${drewName} pixels changed)`);
     await page.click('#tBack'); await page.waitForSelector('#pForm');
     await page.click('#pForm [data-m="poster"]'); await page.waitForSelector('#pForm [data-tpl]');
     await page.click(`#pForm [data-tpl="${(await db.query(`select id from tv_poster_templates where title = 'Turtles'`)).rows[0].id}"]`);
