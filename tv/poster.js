@@ -93,6 +93,20 @@
     });
   }
 
+  // A bigger, sharper QR code over the one in the design: q = { data, cx, cy, size } in poster pixels.
+  // White square with the blank border phones need, then whole-pixel black squares (crisp edges).
+  function drawQrCode(ctx, q) {
+    var qr = window.qrcode(0, 'M'); qr.addData(q.data); qr.make();
+    var n = qr.getModuleCount(), total = n + 8, cell = Math.max(1, Math.floor(q.size / total)), size = cell * total;
+    var x0 = Math.round(q.cx - size / 2), y0 = Math.round(q.cy - size / 2), r = cell * 2;
+    ctx.save(); ctx.fillStyle = '#ffffff'; ctx.beginPath();
+    ctx.moveTo(x0 + r, y0); ctx.arcTo(x0 + size, y0, x0 + size, y0 + size, r); ctx.arcTo(x0 + size, y0 + size, x0, y0 + size, r);
+    ctx.arcTo(x0, y0 + size, x0, y0, r); ctx.arcTo(x0, y0, x0 + size, y0, r); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#000000';
+    for (var row = 0; row < n; row++) for (var col = 0; col < n; col++) if (qr.isDark(row, col)) ctx.fillRect(x0 + (col + 4) * cell, y0 + (row + 4) * cell, cell, cell);
+    ctx.restore();
+  }
+
   // Draw the poster: the template image with the name on it. Returns a promise once fonts are ready.
   function renderPoster(canvas, img, t, name) {
     var w = t.w || W, h = t.h || H;
@@ -101,6 +115,7 @@
     return loadFont(t.font, t.weight).then(function () {
       ctx.clearRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
+      if (t.qr && t.qr.data && window.qrcode) drawQrCode(ctx, t.qr);
       var text = String(name || '').trim();
       if (t.uppercase) text = text.toUpperCase();
       if (text) drawText(ctx, text, t);

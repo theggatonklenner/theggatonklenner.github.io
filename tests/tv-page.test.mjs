@@ -59,7 +59,7 @@ const browser = await chromium.launch();
 const errors = [];
 async function context(size, offline = false) {
   const ctx = await browser.newContext({ viewport: size, serviceWorkers: 'block', ...(size.width < 500 ? { isMobile: true, hasTouch: true } : {}) });
-  await ctx.route('https://cdn.jsdelivr.net/**', r => r.fulfill({ contentType: 'text/javascript', body: r.request().url().includes('qrcode-generator') ? read(join(QRDIR, 'qrcode-generator/qrcode.js')) : read(join(PREP_TESTS, 'node_modules/@supabase/supabase-js/dist/umd/supabase.js')) }));
+  await ctx.route('https://cdn.jsdelivr.net/**', r => r.fulfill({ contentType: 'text/javascript', body: r.request().url().includes('qrcode-generator') ? read(join(QRDIR, 'qrcode-generator/qrcode.js')) : r.request().url().includes('/jsqr@') ? read(join(QRDIR, 'jsqr/dist/jsQR.js')) : read(join(PREP_TESTS, 'node_modules/@supabase/supabase-js/dist/umd/supabase.js')) }));
   if (process.env.FONTS_DIR) {   // real poster fonts (from @fontsource) instead of none
     await ctx.route('https://fonts.googleapis.com/**', r => {
       const fam = decodeURIComponent((r.request().url().split('family=')[1] || '').split('&')[0]).split(':')[0].replace(/\+/g, ' ');
@@ -698,6 +698,16 @@ try {
     ok(tt.tablet_settings && tt.tablet_settings.h > tt.tablet_settings.w, 'importing the tablet versions adds an upright design to the matching template');
     await page.waitForFunction(() => document.querySelector('#dlg').textContent.includes('TV and tablet versions'), null, { timeout: 15000 }).catch(() => {});
     ok((await page.textContent('#dlg')).includes('TV and tablet versions'), 'Manage templates shows which have a tablet version');
+    // Bigger QR codes on the tablet designs
+    await page.click('#tQrAll'); await page.waitForFunction(() => /Bigger QR code on \d/.test(document.querySelector('#toast').textContent), null, { timeout: 30000 }).catch(() => {});
+    await page.waitForSelector('#tQrAll', { state: 'detached', timeout: 15000 }).catch(() => {}); await page.waitForTimeout(300);
+    const tq = (await db.query(`select tablet_settings->'qr' q from tv_poster_templates where title = 'Turtles'`)).rows[0].q;
+    ok(tq && /docs\.google\.com\/forms/.test(tq.data) && tq.size > tq.found * 1.3, `one tap finds the QR code on each tablet design and makes it bigger (${tq && tq.found} -> ${tq && tq.size} px)`);
+    await page.click(`#dlg [data-tab="${(await db.query(`select id from tv_poster_templates where title = 'Turtles'`)).rows[0].id}"]`); await page.waitForSelector('#tQrSize');
+    await page.$eval('#tQrSize', (el, v) => { el.value = v; el.dispatchEvent(new Event('input')); }, String(tq.size + 40)); await page.waitForTimeout(600);
+    await page.screenshot({ path: join(SHOTS, 'tablet-qr-editor.png') });
+    await page.click('#tSave'); await toastSays(page, 'Template saved');
+    ok((await db.query(`select (tablet_settings->'qr'->>'size')::int s from tv_poster_templates where title = 'Turtles'`)).rows[0].s === tq.size + 40, 'the size can be changed on the template');
     await page.click('#tBack'); await page.waitForSelector('#pForm');
     await page.click('#pForm [data-m="poster"]'); await page.waitForSelector('#pForm [data-tpl]');
     await page.click(`#pForm [data-tpl="${(await db.query(`select id from tv_poster_templates where title = 'Turtles'`)).rows[0].id}"]`);
@@ -709,6 +719,8 @@ try {
     ok(ls.length === 2 && ls[0].display === 'tv' && ls[1].display === 'tablet' && ls[0].linked === ls[1].sid && ls[1].linked === ls[0].sid && /^Ava/.test(ls[1].title), 'one tap puts it on both screens, linked');
     const dims = jpgSize(files.get(ls[1].media_path).body), dimsTv = jpgSize(files.get(ls[0].media_path).body);
     ok(dims && dims.h > dims.w && dimsTv.w > dimsTv.h, `the tablets get the upright version (${dims && dims.w}x${dims && dims.h}), the TV the wide one`);
+    const seen = await page.evaluate(p => findQr(MEDIA + p, 1240, 1754), ls[1].media_path);
+    ok(seen && /docs\.google\.com\/forms/.test(seen.data) && seen.found > tq.found * 1.3, `the tablet poster has the bigger QR code, and it scans (${tq.found} -> ${seen && seen.found} px)`);
     ok((await page.textContent('#party')).includes('The TV and the tablets are showing'), 'the party card says it is on both');
     await page.click('#partyMore'); await page.waitForTimeout(800);
     const mo = (await db.query(`select only_until from party_now order by id`)).rows;
