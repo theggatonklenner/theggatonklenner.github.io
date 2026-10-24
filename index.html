@@ -165,13 +165,7 @@ $('#siForm').onsubmit = async e => {
   if (error) { $('#siMsg').textContent = /invalid/i.test(error.message) ? 'Wrong email or password.' : error.message; $('#siMsg').hidden = false; return; }
   start();
 };
-$('#forgot').onclick = async () => {
-  const email = $('#siEmail').value.trim();
-  if (!email) { $('#siMsg').textContent = 'Type your email above first, then press "Forgot your password?" again.'; $('#siMsg').hidden = false; return; }
-  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + '/welcome/' });
-  $('#siMsg').textContent = error ? error.message : `If ${email} has a login, an email with a link to choose a new password is on its way.`;
-  $('#siMsg').className = error ? 'msg bad' : 'msg'; $('#siMsg').hidden = false;
-};
+$('#forgot').onclick = () => { $('#siMsg').textContent = 'Ask an admin for a new set-up link. It lets you choose a new password.'; $('#siMsg').className = 'msg'; $('#siMsg').hidden = false; };
 $('#signOut').onclick = async () => { await sb.auth.signOut(); start(); };
 start();
 </script>

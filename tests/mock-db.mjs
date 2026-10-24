@@ -45,7 +45,6 @@ export function makeDb() {
   const db = {
     from: query,
     auth: {
-      async resetPasswordForEmail(email, o) { mail.push({ kind: 'recovery', email, redirectTo: o && o.redirectTo }); return { data: {}, error: opts.mailFails ? { message: 'Error sending recovery email' } : null }; },
       async getUser(token) { const u = users.find(x => x.id === tokens.get(token)); return { data: { user: u || null } }; },
       admin: {
         async listUsers({ page, perPage }) { return { data: { users: users.slice((page - 1) * perPage, page * perPage) }, error: null }; },
@@ -54,12 +53,16 @@ export function makeDb() {
           const u = { id: 'u' + nextId++, email, password, created_at: new Date().toISOString() }; users.push(u);
           return { data: { user: u }, error: null };
         },
-        async inviteUserByEmail(email, o = {}) {
-          if (opts.mailFails) return { data: null, error: { message: 'Error sending invite email' } };
-          if (users.some(u => u.email === email)) return { error: { message: 'A user with this email address has already been registered' } };
-          const u = { id: 'u' + nextId++, email, password: null, created_at: new Date().toISOString(), user_metadata: o.data || {} }; users.push(u);
-          mail.push({ kind: 'invite', email, redirectTo: o.redirectTo, data: o.data });
-          return { data: { user: u }, error: null };
+        async generateLink({ type, email, options = {} }) {
+          if (opts.linkFails) return { data: null, error: { message: 'Link service unavailable' } };
+          let u = users.find(x => x.email === email);
+          if (type === 'invite') {
+            if (u) return { data: null, error: { message: 'A user with this email address has already been registered' } };
+            u = { id: 'u' + nextId++, email, password: null, created_at: new Date().toISOString(), user_metadata: options.data || {} }; users.push(u);
+          } else if (!u) return { data: null, error: { message: 'User not found' } };
+          const hashed_token = 'hash-' + type + '-' + u.id + '-' + nextId++;
+          mail.push({ kind: type, email, data: options.data, hashed_token });
+          return { data: { user: u, properties: { hashed_token, action_link: 'https://x.test/verify' } }, error: null };
         },
         async updateUserById(id, { password }) { const u = users.find(x => x.id === id); if (!u) return { error: { message: 'User not found' } }; u.password = password; return { data: { user: u }, error: null }; },
         async deleteUser(id) { const i = users.findIndex(x => x.id === id); users.splice(i, 1); return { error: null }; }

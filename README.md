@@ -3,11 +3,10 @@
 The home page at https://theggatonklenner.github.io. People sign in and see only the apps their login can use.
 
 - `index.html` the home page. The apps and who sees them are listed in `draw()` near the bottom (put a new tool's icon in `icons/`). It reads each person's permissions from AMA ID Cards (`my_permissions`), Black Belt Prep (`prep_my_roles`) and the TV (`tv_can`). Each app still checks permissions itself.
-- `welcome/` where the onboarding email (and "Forgot your password?") lands: the person chooses their password.
+- `welcome/` where a set-up link lands: the person chooses their password.
 - `tv/` **TV display** for the dojang TV (open on the TV), and `tv/edit/` the editor. Setup below.
 - `staff/` **Staff logins**: add logins, set passwords and set roles for AMA ID Cards and Black Belt Prep in one place.
 - `supabase/functions/staff/index.ts` the Supabase function behind Staff logins.
-- `supabase/email-templates/` the welcome and reset-password emails (pasted into Supabase, below).
 - `tests/` checks for the staff function and page, the home page and the welcome page.
 
 ## Setting up Staff logins (once, about 3 minutes)
@@ -23,20 +22,11 @@ Only people who are an admin in **both** AMA ID Cards and Black Belt Prep can us
 
 Signing in or out here also signs you in or out of the two apps on that device, because they share the same web address.
 
-## Onboarding emails (once, about 10 minutes)
+## Set-up links for new logins
 
-When you add a login on Staff logins, **Email them a link to choose their own password** (the default) sends a welcome email listing their apps, with a button to choose a password. It is sent from a Gmail account through Supabase:
+When you add a login on Staff logins, **Give me a link to send them** (the default) makes the login and shows a message with a set-up link to copy or share (text, WhatsApp, email). The link opens `welcome/`, where they choose their password and then see their apps. Nothing is emailed. Their login shows **Not set up yet** until they've chosen a password, then **Set up** with the date. **Make a set-up link** on a login gives a fresh link (if the first one ran out, or they've forgotten their password).
 
-1. **Gmail app password.** Sign in to the Gmail account the emails should come from. It needs 2-Step Verification on (Google Account > Security). Then go to https://myaccount.google.com/apppasswords, make one called "AMA Supabase", and copy the 16 letters.
-2. **Supabase SMTP.** Authentication > Emails > **SMTP Settings**: turn on custom SMTP. Sender email: the Gmail address. Sender name: AMA Marrickville. Host `smtp.gmail.com`, port `465`, username: the Gmail address, password: the app password. Save.
-3. **Templates.** Authentication > Emails > Templates:
-   - **Invite user**: subject `Welcome to AMA: set up your login`, body: the whole of `supabase/email-templates/invite.html`.
-   - **Reset password**: subject `AMA: choose a new password`, body: the whole of `supabase/email-templates/reset.html`.
-4. **Allow the welcome page.** Authentication > URL Configuration > Redirect URLs: add `https://theggatonklenner.github.io/welcome/`.
-5. **Link time.** Authentication > Providers > Email (or Auth settings): set **Email OTP Expiration** to `86400` (24 hours), so the button still works the next day.
-6. Re-deploy the `staff` function with the latest `supabase/functions/staff/index.ts`.
-
-A login's details on Staff logins also have **Email a set-password link** (to send a new link, or for a forgotten password), and the home page's sign-in has **Forgot your password?**. Gmail allows about 500 emails a day, which is plenty.
+Links work once. How long they last is Supabase's **Email OTP Expiration** (Authentication > Providers > Email; 1 hour unless changed, up to 86400 = 24 hours). Re-deploy the `staff` function after updating `supabase/functions/staff/index.ts`.
 
 ## Tests
 

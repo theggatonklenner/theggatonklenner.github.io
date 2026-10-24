@@ -101,14 +101,15 @@
   </section>
   <section id="problem" class="card" hidden>
     <h2 style="margin:0">This link has run out</h2>
-    <p class="msg" id="probText">Links in these emails only work for a limited time, and only once. Ask the person who added you to send a new one, or use "Forgot your password?" on the sign-in page.</p>
+    <p class="msg" id="probText">Set-up links only work once, and for a limited time. Ask the person who added you to make a new one.</p>
     <a class="btn" href="../" style="text-align:center;text-decoration:none">Go to the sign-in page</a>
   </section>
   <p class="hint" id="loading">Checking your link...</p>
   <footer>AMA Marrickville</footer>
 </main>
 <script>
-// The welcome email's link (or a "Forgot your password?" email) lands here signed in, to choose a password.
+// A set-up link from Staff logins opens here: #token_hash=...&type=invite (new login) or type=recovery (new link
+// for an existing login). The one-time code signs them in, then they choose a password.
 const CFG = window.TOOLKIT_CONFIG;
 const sb = supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY);
 const $ = s => document.querySelector(s);
@@ -116,6 +117,13 @@ const hash = new URLSearchParams(location.hash.replace(/^#/, '')), query = new U
 const linkError = hash.get('error_description') || query.get('error_description');
 const show = id => { ['#setPw', '#done', '#problem'].forEach(x => $(x).hidden = x !== id); $('#loading').hidden = true; };
 let shown = false;
+async function useCode() {
+  const th = hash.get('token_hash'), type = hash.get('type');
+  if (!th) return;
+  try { history.replaceState(null, '', location.pathname); } catch (e) { /* ignore */ }   // the code out of the address bar
+  const { error } = await sb.auth.verifyOtp({ token_hash: th, type: type === 'recovery' ? 'recovery' : 'invite' });
+  if (error) { shown = true; show('#problem'); }
+}
 async function check() {
   if (shown) return;
   if (linkError) { shown = true; show('#problem'); return; }
@@ -128,16 +136,17 @@ async function check() {
   show('#setPw'); $('#spPass').focus();
   try { history.replaceState(null, '', location.pathname); } catch (e) { /* ignore */ }   // the link's tokens out of the address bar
 }
+const hadLink = !!location.hash;
 sb.auth.onAuthStateChange(() => setTimeout(check, 0));
-check();
-setTimeout(() => { if (!shown) { show('#problem'); if (!location.hash) $('#probText').textContent = 'Open this page from the link in your welcome or password email.'; } }, 4000);
+useCode().then(check);
+setTimeout(() => { if (!shown) { show('#problem'); if (!hadLink) $('#probText').textContent = 'Open this page from the set-up link you were sent.'; } }, 6000);
 $('#spForm').onsubmit = async e => {
   e.preventDefault(); $('#spMsg').hidden = true;
   const a = $('#spPass').value, b = $('#spPass2').value;
   if (a.length < 8) { $('#spMsg').textContent = 'The password needs at least 8 characters.'; $('#spMsg').hidden = false; return; }
   if (a !== b) { $('#spMsg').textContent = "The two passwords don't match."; $('#spMsg').hidden = false; return; }
   $('#spGo').disabled = true;
-  const { error } = await sb.auth.updateUser({ password: a });
+  const { error } = await sb.auth.updateUser({ password: a, data: { setup_pending: false, setup_at: new Date().toISOString() } });   // Staff logins then shows "Set up"
   $('#spGo').disabled = false;
   if (error) { $('#spMsg').textContent = /different from the old/i.test(error.message) ? 'Choose a password different from your old one.' : error.message; $('#spMsg').hidden = false; return; }
   $('#doneText').textContent = `Your password is saved. Sign in with ${$('#spEmail').value} and this password on any AMA app.`;

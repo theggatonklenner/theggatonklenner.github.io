@@ -7,13 +7,12 @@
 //
 // Only people who are an admin in BOTH apps can use it. It can:
 //   list      every login, with its AMA ID Cards, Black Belt Prep and TV permissions
-//   create    add a login with permissions, and either a starting password or an onboarding email with a link
-//             to choose their own password (or update an existing login)
-//   invite    email an existing login a link to choose a new password
+//   create    add a login with permissions, and either a starting password or a set-up link for them to choose
+//             their own password (or update an existing login)
+//   link      a new set-up link for an existing login (first sign-in, or a forgotten password)
 //   password  set a new password for a login
-// Onboarding emails go through Supabase Auth's email (Authentication > Emails: SMTP settings and the
-// "Invite user" template), and the link opens the welcome page below. Add it under
-// Authentication > URL Configuration > Redirect URLs.
+// Set-up links open the welcome page below and work once. Nothing is emailed: you send the link yourself.
+// How long they work is Supabase's "Email OTP Expiration" (Authentication > Providers > Email).
 //   roles     change a login's permissions in either app
 //   remove    delete a login and its permissions in both apps
 // AMA ID Cards needs supabase/permissions.sql (tick-box permissions) from the ama-id-cards repository.
@@ -23,7 +22,9 @@ export const CARD_PERMS = ['admin', 'edit', 'delete', 'send', 'approve', 'viewer
 export const PREP_ROLES = ['admin', 'instructor', 'attendance', 'payments', 'grading', 'certificates', 'idcards', 'viewer'];
 export const TV_PERMS = ['edit', 'party', 'remote'];
 export const WELCOME_URL = 'https://theggatonklenner.github.io/welcome/';
-// "AMA ID Cards, Black Belt Prep and the dojang TV" (for the email)
+// "AMA ID Cards, Black Belt Prep and the dojang TV" (shown on the welcome page)
+// The welcome page signs them in with this one-time code, then they choose a password
+const setupLink = (data, type) => `${WELCOME_URL}#token_hash=${encodeURIComponent(data.properties.hashed_token)}&type=${type}`;
 const appNames = (card, prep, tv) => { const l = [card && card.length && 'AMA ID Cards', prep && prep.length && 'Black Belt Prep', tv && tv.length && 'the dojang TV'].filter(Boolean);
   return l.length <= 1 ? (l[0] || 'the AMA Grading Toolkit') : l.slice(0, -1).join(', ') + ' and ' + l[l.length - 1]; };
 const APPS = {
@@ -111,7 +112,10 @@ export async function handle(req, db) {
       (prepRes.data || []).forEach(r => prep.set(r.email, [...(prep.get(r.email) || []), r.role]));
       (tvRes.data || []).forEach(r => tv.set(r.email, [...(tv.get(r.email) || []), r.permission]));
       const order = (list, all) => (list || []).sort((a, b) => all.indexOf(a) - all.indexOf(b));
+      // setup_pending: made with a set-up link that hasn't been used yet (the welcome page clears it)
+      const meta = u => (u && u.user_metadata) || {};
       const row = (email, u) => ({ email, has_login: !!u, created_at: u ? u.created_at : null, last_sign_in_at: u && u.last_sign_in_at || null,
+        setup_pending: meta(u).setup_pending === true, setup_at: meta(u).setup_at || null,
         card_perms: order(card.get(email), CARD_PERMS), prep_roles: order(prep.get(email), PREP_ROLES), tv_perms: order(tv.get(email), TV_PERMS) });
       const rows = users.filter(u => u.email).map(u => row(u.email.toLowerCase(), u));
       const seen = new Set(rows.map(r => r.email));
@@ -136,9 +140,9 @@ export async function handle(req, db) {
         await setPerms(db, 'card', email, cardWant || []);
         await setPerms(db, 'prep', email, prepWant || []);
         if (tvReady) await setPerms(db, 'tv', email, tvWant || []);
-        const { error } = await db.auth.admin.inviteUserByEmail(email, { redirectTo: WELCOME_URL, data: { apps: appNames(cardWant, prepWant, tvWant), invited_by: me } });
-        if (error) return fail(`The permissions are saved, but the email didn't send: ${error.message}. Check the email (SMTP) settings in Supabase, then use "Email a set-password link" on their login.`);
-        return json({ ok: true, existed: false, emailed: true });
+        const { data, error } = await db.auth.admin.generateLink({ type: 'invite', email, options: { data: { apps: appNames(cardWant, prepWant, tvWant), invited_by: me, setup_pending: true } } });
+        if (error) return fail(`The permissions are saved, but the login wasn't made: ${error.message}`);
+        return json({ ok: true, existed: false, link: setupLink(data, 'invite') });
       }
       if (!existing) {
         if (password.length < 8) return fail('The password needs at least 8 characters.');
@@ -155,12 +159,12 @@ export async function handle(req, db) {
       return json({ ok: true, existed: !!existing });
     }
 
-    if (action === 'invite') {
+    if (action === 'link') {
       const user = await findUser(db, email);
       if (!user) return fail('That email has no login yet. Use Add login.');
-      const { error } = await db.auth.resetPasswordForEmail(email, { redirectTo: WELCOME_URL });
-      if (error) return fail(`The email didn't send: ${error.message}`);
-      return json({ ok: true, emailed: true });
+      const { data, error } = await db.auth.admin.generateLink({ type: 'recovery', email });
+      if (error) return fail(`Couldn't make a link: ${error.message}`);
+      return json({ ok: true, link: setupLink(data, 'recovery') });
     }
 
     if (action === 'password') {

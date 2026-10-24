@@ -84,22 +84,27 @@ try {
   ok((await page.textContent('#list [data-email="coach@ama.test"]')).includes('Never signed in'), 'new login shows it has never signed in');
   await page.screenshot({ path: process.env.SHOT_DIR ? join(process.env.SHOT_DIR, 'staff-list.png') : join(tmpdir(), 'staff-list.png') });
 
-  // Onboarding email
+  // Set-up link instead of a password
   await page.click('#addBtn'); await page.fill('#addEmail', 'newbie@ama.test');
+  ok((await page.textContent('#addForm')).includes('Give me a link'), 'adding a login offers a set-up link to send them');
   await page.check('#prepChecks input[value="instructor"]'); await page.check('#tvChecks input[value="party"]');
-  await page.click('#addGo');
-  ok((await toastSays('welcome email')).includes('newbie@ama.test'), 'adding with the email option says a welcome email is on its way');
-  const inv = db._mail.find(m => m.kind === 'invite' && m.email === 'newbie@ama.test');
-  ok(inv && inv.redirectTo === 'https://theggatonklenner.github.io/welcome/' && inv.data.apps === 'Black Belt Prep and the dojang TV' && inv.data.invited_by === 'tate@ama.test', 'the invite goes to the welcome page and lists their apps');
-  ok(db._t.prep_roles.some(r => r.email === 'newbie@ama.test' && r.role === 'instructor') && db._users.some(u => u.email === 'newbie@ama.test'), 'their login and permissions are made');
-  await page.waitForSelector('#list [data-email="newbie@ama.test"]');
-  await page.click('#list [data-email="newbie@ama.test"]'); await page.waitForSelector('#mailPw');
-  await page.click('#mailPw');
-  ok((await toastSays('Email sent')).includes('newbie@ama.test') && db._mail.some(m => m.kind === 'recovery' && m.email === 'newbie@ama.test' && m.redirectTo.endsWith('/welcome/')), 'a set-password link can be emailed again from their login');
-  db._opts.mailFails = true; await page.click('#mailPw');
-  ok((await toastSays("didn't send")).includes("didn't send"), 'if the email fails, it says so');
-  db._opts.mailFails = false;
+  await page.click('#addGo'); await page.waitForSelector('#linkText');
+  const msg = await page.inputValue('#linkText');
+  const made = db._mail.find(m => m.kind === 'invite' && m.email === 'newbie@ama.test');
+  ok(made && msg.includes('https://theggatonklenner.github.io/welcome/#token_hash=' + encodeURIComponent(made.hashed_token) + '&type=invite') && msg.includes('newbie@ama.test'), 'it shows a message with their set-up link, ready to copy or share');
+  ok(made.data.apps === 'Black Belt Prep and the dojang TV' && made.data.setup_pending === true && db._t.prep_roles.some(r => r.email === 'newbie@ama.test' && r.role === 'instructor'), 'their login and permissions are made, waiting for set-up');
   await page.click('#dlg [data-close]');
+  await page.waitForSelector('#list [data-email="newbie@ama.test"]');
+  ok((await page.textContent('#list [data-email="newbie@ama.test"]')).includes('Not set up yet'), 'the list shows they are not set up yet');
+  await page.click('#list [data-email="newbie@ama.test"]'); await page.waitForSelector('#mailPw');
+  ok((await page.textContent('#dlg .dlg-head')).includes('not set up yet'), 'and so does their login');
+  await page.click('#mailPw'); await page.waitForSelector('#linkText');
+  ok((await page.inputValue('#linkText')).includes('&type=recovery'), 'a new set-up link can be made from their login');
+  await page.click('#dlg [data-close]');
+  // They use the link: the welcome page marks them set up
+  const nb = db._users.find(u => u.email === 'newbie@ama.test'); nb.user_metadata = { ...nb.user_metadata, setup_pending: false, setup_at: new Date().toISOString() };
+  await page.click('#search'); await page.evaluate(() => load()); await page.waitForTimeout(400);
+  ok((await page.textContent('#list [data-email="newbie@ama.test"]')).includes('Set up') && !(await page.textContent('#list [data-email="newbie@ama.test"]')).includes('Not set up'), 'once they have chosen a password, it shows Set up');
 
   // Change roles
   await page.click('#list [data-email="jo@ama.test"]'); await page.waitForSelector('#rolesForm');

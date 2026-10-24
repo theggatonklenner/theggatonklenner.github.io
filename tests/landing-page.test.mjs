@@ -21,7 +21,7 @@ const people = {
 };
 const tokenFor = e => 'tok-' + e;
 const emailOf = req => { const t = (req.headers()['authorization'] || '').replace(/^Bearer\s+/i, ''); return t.startsWith('tok-') ? t.slice(4) : null; };
-const mail = [];
+const mail = [], used = new Set();
 const userJson = e => ({ id: 'id-' + e, email: e, aud: 'authenticated', role: 'authenticated', user_metadata: people[e].meta || {} });
 
 const browser = await chromium.launch();
@@ -38,8 +38,14 @@ async function context() {
     }
     if (url.pathname === '/auth/v1/user') {
       const e = emailOf(req); if (!e) return json({ msg: 'no user' }, 401);
-      if (req.method() === 'PUT') { people[e].pw = JSON.parse(req.postData()).password; }
+      if (req.method() === 'PUT') { const b = JSON.parse(req.postData()); if (b.password) people[e].pw = b.password; if (b.data) people[e].meta = { ...(people[e].meta || {}), ...b.data }; }
       return json(userJson(e));
+    }
+    if (url.pathname === '/auth/v1/verify') {
+      const { token_hash, type } = JSON.parse(req.postData() || '{}'), m = /^hash-(\w+)-(.+)$/.exec(token_hash || '');
+      if (!m || m[1] !== type || used.has(token_hash)) return json({ code: 403, error_code: 'otp_expired', msg: 'Email link is invalid or has expired' }, 403);
+      used.add(token_hash);
+      return json({ access_token: tokenFor(m[2]), token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r', user: userJson(m[2]) });
     }
     if (url.pathname === '/auth/v1/recover') { mail.push({ email: JSON.parse(req.postData()).email, redirect: url.searchParams.get('redirect_to') }); return json({}); }
     if (url.pathname === '/auth/v1/logout') return r.fulfill({ status: 204, body: '' });
@@ -89,30 +95,28 @@ try {
   ok((await page.textContent('#apps')).includes("doesn't have access to any apps"), 'a login with no permissions is told to ask an admin');
   await page.click('#signOut'); await page.waitForSelector('#signIn:not([hidden])');
 
-  await page.fill('#siEmail', ''); await page.click('#forgot');
-  ok((await page.textContent('#siMsg')).includes('Type your email'), '"Forgot your password?" asks for the email first');
-  await page.fill('#siEmail', 'coach@ama.test'); await page.click('#forgot'); await page.waitForTimeout(500);
-  ok(mail.some(m => m.email === 'coach@ama.test' && /\/welcome\/$/.test(m.redirect || '')) && (await page.textContent('#siMsg')).includes('on its way'), 'then emails a link to the welcome page to choose a new password');
+  await page.click('#forgot');
+  ok((await page.textContent('#siMsg')).includes('Ask an admin for a new set-up link'), '"Forgot your password?" says to ask an admin for a set-up link');
   ok(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await ctx.close();
 
   console.log('\nWelcome page');
   ctx = await context(); page = await ctx.newPage(); page.on('pageerror', e => errors.push(e.message));
   const W = pathToFileURL(join(here, '../welcome/index.html')).href;
-  await page.goto(W + '#access_token=' + tokenFor('new@ama.test') + '&expires_in=3600&expires_at=' + (Math.floor(Date.now() / 1000) + 3600) + '&refresh_token=r&token_type=bearer&type=invite');
+  await page.goto(W + '#token_hash=hash-invite-new@ama.test&type=invite');
   await page.waitForSelector('#setPw:not([hidden])', { timeout: 6000 }).catch(() => {});
   ok(await page.isVisible('#setPw') && (await page.textContent('#spFor')).includes('new@ama.test') && (await page.textContent('#spFor')).includes('Black Belt Prep'), 'the link from the email opens "Choose your password", with their apps');
-  ok(!page.url().includes('access_token'), 'the link details are taken out of the address bar');
+  ok(!page.url().includes('token_hash'), 'the code is taken out of the address bar');
   await page.fill('#spPass', 'newpass12'); await page.fill('#spPass2', 'newpass13'); await page.click('#spGo');
   ok((await page.textContent('#spMsg')).includes("don't match"), 'the two passwords must match');
   await page.fill('#spPass2', 'newpass12'); await page.click('#spGo'); await page.waitForSelector('#done:not([hidden])');
-  ok(people['new@ama.test'].pw === 'newpass12', 'the password is saved');
+  ok(people['new@ama.test'].pw === 'newpass12' && people['new@ama.test'].meta.setup_pending === false && !!people['new@ama.test'].meta.setup_at, 'the password is saved, and they are marked as set up');
   ok(await page.getAttribute('#done a', 'href') === '../', '"Open your apps" goes to the landing page');
   await page.goto(LANDING); await page.waitForSelector('#apps:not([hidden])');
   ok((await names(page)).join() === 'Black Belt Prep', 'where they are already signed in, and see their apps');
-  await page.goto(W + '#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired');
+  await page.goto(W + '#token_hash=hash-invite-new@ama.test&type=invite');
   await page.waitForSelector('#problem:not([hidden])');
-  ok((await page.textContent('#problem')).includes('run out'), 'an old link says it has run out and what to do');
+  ok((await page.textContent('#problem')).includes('run out'), 'a used or old link says it has run out and what to do');
   ok(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await ctx.close();
 } catch (e) { failed++; console.log('  FAIL  stopped: ' + e.message); }
