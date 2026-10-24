@@ -1,5 +1,5 @@
 // @ts-nocheck
-// AMA Grading Toolkit: staff logins for AMA ID Cards, Black Belt Prep and the dojang TV, in one place.
+// AMA Toolkit: staff logins for AMA ID Cards, Black Belt Prep and the dojang TV, in one place.
 //
 // Deploy in Supabase: Edge Functions > Deploy a new function > Via Editor, name it "staff",
 // paste this whole file, Deploy. Then turn OFF "Verify JWT with legacy secret" (or "Enforce JWT verification") for the function
@@ -26,7 +26,7 @@ export const WELCOME_URL = 'https://theggatonklenner.github.io/welcome/';
 // The welcome page signs them in with this one-time code, then they choose a password
 const setupLink = (data, type) => `${WELCOME_URL}#token_hash=${encodeURIComponent(data.properties.hashed_token)}&type=${type}`;
 const appNames = (card, prep, tv) => { const l = [card && card.length && 'AMA ID Cards', prep && prep.length && 'Black Belt Prep', tv && tv.length && 'the dojang TV'].filter(Boolean);
-  return l.length <= 1 ? (l[0] || 'the AMA Grading Toolkit') : l.slice(0, -1).join(', ') + ' and ' + l[l.length - 1]; };
+  return l.length <= 1 ? (l[0] || 'the AMA Toolkit') : l.slice(0, -1).join(', ') + ' and ' + l[l.length - 1]; };
 const APPS = {
   card: { table: 'staff_permissions', col: 'permission', allowed: CARD_PERMS, name: 'AMA ID Cards' },
   prep: { table: 'prep_roles', col: 'role', allowed: PREP_ROLES, name: 'Black Belt Prep' },

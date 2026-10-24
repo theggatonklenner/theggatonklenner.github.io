@@ -1,4 +1,4 @@
-# AMA Grading Toolkit
+# AMA Toolkit
 
 The home page at https://theggatonklenner.github.io. People sign in and see only the apps their login can use.
 

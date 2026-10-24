@@ -1,4 +1,4 @@
-// AMA Grading Toolkit: connection settings (the AMA Supabase project), used by the TV display pages.
+// AMA Toolkit: connection settings (the AMA Supabase project), used by the TV display pages.
 // The publishable key is designed to be public; data is protected by the login and the security rules
 // in supabase/tv-setup.sql.
 window.TOOLKIT_CONFIG = {
