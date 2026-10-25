@@ -18,6 +18,7 @@ create table if not exists public.cb_belts (
   sort           int not null unique,
   next_belt      text not null,                 -- what they grade to
   classes_needed int not null default 24 check (classes_needed between 0 and 500),
+  weeks_between  int not null default 13 check (weeks_between between 0 and 104),   -- usual time at this belt before grading (about 3 months)
   fee            numeric(8,2),                  -- shown in invitations; EFC charges it through the grading session
   colour         text,                          -- for the app (hex)
   updated_at     timestamptz not null default now()
@@ -29,10 +30,11 @@ insert into public.cb_belts (belt, sort, next_belt, colour) values
   ('Red Three Belt', 10, 'Cho Dan Bo', '#c0392b')
 on conflict (belt) do nothing;
 
+alter table public.cb_belts add column if not exists weeks_between int not null default 13;
+
 -- One row of settings
 create table if not exists public.cb_settings (
   id                 int primary key default 1 check (id = 1),
-  window_weeks       int not null default 13,     -- the time between gradings (about 3 months)
   booking_webhook    text,                        -- Zapier "Catch Hook" that books an EFC session (member_id, date, session, location)
   invite_text        text not null default 'Hi {parent}, {first} is invited to grade for their {next} at AMA {school} on {date}{time}. Book their spot here: {link}',
   congrats_text      text not null default 'Congratulations {first}! {first} passed their grading{distinction} and is now a {next}. Thank you for your support. AMA {school}',
@@ -112,6 +114,7 @@ select m.member_key, m.full_name, m.guardian_name, coalesce(m.phone, m.guardian_
        m.promoted_on, (current_date - m.promoted_on) / 7 as weeks_at_belt,
        coalesce(m.attended_since_promoted, 0) as classes, b.classes_needed,
        coalesce(m.attended_since_promoted, 0) >= b.classes_needed as enough_classes,
+       b.weeks_between, (current_date - m.promoted_on) / 7 >= b.weeks_between as enough_time,
        case when a.belt = m.belt then a.status end as approval, case when a.belt = m.belt then a.note end as approval_note,
        case when a.belt = m.belt then a.decided_by end as decided_by,
        m.updated_at as efc_updated_at
