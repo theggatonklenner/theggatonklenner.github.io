@@ -60,7 +60,7 @@ async function context() {
   return ctx;
 }
 const LANDING = pathToFileURL(join(here, '../index.html')).href;
-const names = async page => page.$$eval('#apps .name', ns => ns.map(n => n.firstChild.textContent.trim()));
+const names = async page => page.$$eval('#apps a.item .name', ns => ns.map(n => n.firstChild.textContent.trim()));   // real apps (not "Coming soon")
 async function signIn(page, email) {
   await page.goto(LANDING); await page.waitForSelector('#signIn:not([hidden])');
   await page.fill('#siEmail', email); await page.fill('#siPass', 'password1'); await page.click('#siGo');
@@ -114,6 +114,7 @@ try {
   ok(await page.getAttribute('#done a', 'href') === '../', '"Open your apps" goes to the landing page');
   await page.goto(LANDING); await page.waitForSelector('#apps:not([hidden])');
   ok((await names(page)).join() === 'Black Belt Prep', 'where they are already signed in, and see their apps');
+  ok((await page.$$eval('#apps h2', hs => hs.map(h => h.textContent))).join() === 'Black Belt Grading Tools,Coloured Belt Grading' && (await page.textContent('#apps')).includes('Coming soon'), 'apps are grouped: Black Belt Grading Tools, then Coloured Belt Grading (coming soon)');
   await page.goto(W + '#token_hash=hash-invite-new@ama.test&type=invite');
   await page.waitForSelector('#problem:not([hidden])');
   ok((await page.textContent('#problem')).includes('run out'), 'a used or old link says it has run out and what to do');

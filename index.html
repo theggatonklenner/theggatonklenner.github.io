@@ -120,9 +120,13 @@ const ICON = {
   remote: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 8l-1.5 2 1.5 2M14 8l1.5 2-1.5 2"/><path d="M11 18h2"/>',
   play: '<polygon points="8 5 19 12 8 19 8 5"/>',
   staff: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18.5 14.8c1.6.8 2.6 2.5 3 5.2"/>',
+  belt: '<path d="M3 10h18v4H3z"/><path d="M10 14l-2 6M14 14l2 6"/><rect x="10" y="9" width="4" height="6" rx="1"/>',
   db: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'
 };
-const item = a => `<li><a class="item" href="${a.href}"${a.ext ? ' target="_blank" rel="noopener"' : ''}>
+// soon: a placeholder for a tool still being built (not a link)
+const item = a => a.soon ? `<li><div class="item" aria-disabled="true" style="opacity:.6;cursor:default">
+  <span class="glyph" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[a.icon]}</svg></span>
+  <div class="main"><div class="name">${esc(a.name)}<span class="chip">Coming soon</span></div><div class="meta">${esc(a.meta)}</div></div></div></li>` : `<li><a class="item" href="${a.href}"${a.ext ? ' target="_blank" rel="noopener"' : ''}>
   ${a.img ? `<img src="${a.img}" alt="">` : `<span class="glyph" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[a.icon]}</svg></span>`}
   <div class="main"><div class="name">${esc(a.name)}${a.chip ? `<span class="chip">${esc(a.chip)}</span>` : ''}</div><div class="meta">${esc(a.meta)}</div></div>
   <span class="chev" aria-hidden="true">›</span></a></li>`;
@@ -136,9 +140,11 @@ function draw(a) {
   const admin = a.card.includes('admin') && a.prep.includes('admin');
   const tvAny = a.edit || a.party || a.remote;
   const groups = [
-    ['Tools', [
+    ['Black Belt Grading Tools', [
       a.prep.length && { href: 'https://theggatonklenner.github.io/Black-belt-prep-system/', img: 'icons/black-belt-prep.png', name: 'Black Belt Prep', meta: 'Preparation cycles, attendance, payments, grading and certificates' },
       a.card.length && { href: 'https://theggatonklenner.github.io/ama-id-cards/', img: 'icons/ama-id-cards.png', name: 'AMA ID Cards', meta: 'Make, approve and print member ID cards' }]],
+    ['Coloured Belt Grading', [
+      (a.prep.length || a.card.length) && { soon: true, icon: 'belt', name: 'Coloured belt grading', meta: 'Gradings for white to red belts. Being built.' }]],
     ['Dojang TV', [
       a.party && { href: 'tv/edit/', icon: 'tv', name: a.edit ? 'TV Display' : 'TV party mode', meta: a.edit ? 'Change the photos, videos and notices on the dojang TV' : 'Birthday posters and messages on the dojang TV' },
       a.party && { href: 'tv/edit/?display=tablet', icon: 'tablet', name: a.edit ? 'Tablet Display' : 'Tablet party mode', meta: a.edit ? 'Slides for the upright tablets, with a link that just works' : 'Birthday posters and messages on the tablets' },
