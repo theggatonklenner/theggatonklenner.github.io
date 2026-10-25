@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="../../config.js"></script>
+<script src="../../hub-signin.js"></script>
 <style>
   /* Same look as AMA ID Cards */
   :root {
@@ -153,6 +154,9 @@ const CFG = window.TOOLKIT_CONFIG || {};
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const sb = supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY);
+// Sign in with the AMA Admin Hub mobile and PIN (hub-signin.js)
+const HUB = { sb, url: CFG.SUPABASE_URL, key: CFG.SUPABASE_KEY, form: '#signInForm' };
+if (window.AmaHub) { AmaHub.mount(HUB); AmaHub.recheck(HUB); }
 const MEDIA = (CFG.SUPABASE_URL || '').replace(/\/$/, '') + '/storage/v1/object/public/tv/';
 const KIND = { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown', qr: 'QR code' };
 const LIVE = { next_grading: 'Next grading', events: 'Events this month', month: 'Month theme' };

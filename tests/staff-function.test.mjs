@@ -111,5 +111,28 @@ r = await call(SAM, { action: 'create', email: 'later@ama.test', password: 'long
 ok(r.status === 200 && cardOf('later@ama.test') === 'viewer', '...and logins can still be added');
 db._opts.tvMissing = false;
 
+console.log('\nHub mobile links');
+r = await call(SAM, { action: 'hub', email: 'later@ama.test', mobile: '0412 345 678' });
+ok(r.status === 200 && db._t.hub_logins.some(x => x.email === 'later@ama.test' && x.mobile9 === '412345678'), 'a login can be linked to a hub mobile (stored as its last 9 digits)');
+r = await call(SAM, { action: 'list' });
+ok(r.body.hub === true && r.body.users.find(u => u.email === 'later@ama.test').hub_mobile === '0412 345 678', 'the list shows the linked hub mobile');
+r = await call(SAM, { action: 'hub', email: 'sam@ama.test', mobile: '+61412345678' });
+ok(r.status === 400 && /already linked to later@ama\.test/.test(r.body.error), 'one mobile can only be linked to one login');
+r = await call(SAM, { action: 'hub', email: 'nobody@ama.test', mobile: '0400000000' });
+ok(r.status === 400 && /no login/.test(r.body.error), 'only existing logins can be linked');
+r = await call(SAM, { action: 'hub', email: 'later@ama.test', mobile: '123' });
+ok(r.status === 400, 'a short mobile is refused');
+r = await call(SAM, { action: 'hub', email: 'later@ama.test', mobile: '' });
+ok(r.status === 200 && !db._t.hub_logins.some(x => x.email === 'later@ama.test'), 'clearing the mobile removes the link');
+await call(SAM, { action: 'hub', email: 'later@ama.test', mobile: '0412345678' });
+r = await call(SAM, { action: 'remove', email: 'later@ama.test' });
+ok(r.status === 200 && !db._t.hub_logins.some(x => x.email === 'later@ama.test'), 'removing a login removes its hub link');
+db._opts.hubMissing = true;
+r = await call(SAM, { action: 'list' });
+ok(r.status === 200 && r.body.hub === false, 'before hub-login.sql is run, the list still works');
+r = await call(SAM, { action: 'hub', email: 'sam@ama.test', mobile: '0400000000' });
+ok(r.status === 409 && /hub-login\.sql/.test(r.body.error), '...and linking explains what to run');
+db._opts.hubMissing = false;
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

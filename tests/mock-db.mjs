@@ -1,6 +1,6 @@
 // In-memory stand-in for the parts of Supabase the staff function uses.
 export function makeDb() {
-  const t = { staff_roles: [], staff_permissions: [], prep_roles: [], push_subscriptions: [], tv_permissions: [] };
+  const t = { staff_roles: [], staff_permissions: [], prep_roles: [], push_subscriptions: [], tv_permissions: [], hub_logins: [] };
   const opts = { permissionsMissing: false, tvMissing: false };
   const users = []; let nextId = 1;
   const tokens = new Map();
@@ -17,6 +17,7 @@ export function makeDb() {
       then(res, rej) { return Promise.resolve().then(run).then(res, rej); }
     };
     function run() {
+      if (table === 'hub_logins' && opts.hubMissing) return { data: null, error: { message: 'relation "public.hub_logins" does not exist' } };
       if (table === 'tv_permissions' && opts.tvMissing) return { data: null, error: { message: 'relation "public.tv_permissions" does not exist' } };
       if (table === 'staff_permissions' && opts.permissionsMissing) return { data: null, error: { message: 'relation "public.staff_permissions" does not exist' } };
       const match = r => filters.every(f => f(r));
@@ -26,6 +27,10 @@ export function makeDb() {
           if (table === 'staff_roles') { const i = t.staff_roles.findIndex(x => x.email === r.email); i >= 0 ? (t.staff_roles[i] = { ...r }) : t.staff_roles.push({ ...r }); }
           if (table === 'prep_roles') { if (!t.prep_roles.some(x => x.email === r.email && x.role === r.role)) t.prep_roles.push({ ...r }); }
           if (table === 'tv_permissions') { if (!t.tv_permissions.some(x => x.email === r.email && x.permission === r.permission)) t.tv_permissions.push({ ...r }); }
+          if (table === 'hub_logins') {
+            if (t.hub_logins.some(x => x.mobile9 === r.mobile9 && x.email !== r.email)) return { data: null, error: { message: 'duplicate key value violates unique constraint "hub_logins_mobile9_key"' } };
+            const i = t.hub_logins.findIndex(x => x.email === r.email); i >= 0 ? (t.hub_logins[i] = { ...r }) : t.hub_logins.push({ ...r });
+          }
           if (table === 'staff_permissions') { if (!t.staff_permissions.some(x => x.email === r.email && x.permission === r.permission)) t.staff_permissions.push({ ...r }); }
         }
         return { data: null, error: null };

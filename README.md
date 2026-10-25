@@ -22,6 +22,16 @@ Only people who are an admin in **both** AMA ID Cards and Black Belt Prep can us
 
 Signing in or out here also signs you in or out of the two apps on that device, because they share the same web address.
 
+## Sign in with the AMA Admin Hub (mobile and PIN)
+
+Every sign-in page (this site, AMA ID Cards, Black Belt Prep, the TV editor and remote) has **Sign in with hub mobile and PIN** under the email form. Email and password still work.
+
+- The hub (Apps Script) keeps the mobiles, PINs, lockouts and Active switch. Each person's permissions stay on Staff logins.
+- On Staff logins, open a person and enter their hub mobile under **Hub sign-in**. Their hub mobile and PIN then sign them in as that login, with the same permissions.
+- `supabase/functions/hub/index.ts` checks the mobile and PIN with the hub, then hands back an ordinary Supabase sign-in. No JWT secret leaves Supabase. `supabase/hub-login.sql` makes the link table. `hub-signin.js` is the shared sign-in option (copies in ama-id-cards/docs and Black-belt-prep-system/docs; keep them the same).
+- Set up once: deploy the `hub` function with JWT verification off, then in **Edge Functions > Secrets** add `HUB_URL` (the hub's Apps Script web app address, ending in /exec) and `HUB_SECRET` (the hub's shared secret).
+- Hub sign-ins last as long as the hub's 12-hour session. Switching someone off in the hub signs them out of these apps the next time a page opens.
+
 ## Set-up links for new logins
 
 When you add a login on Staff logins, **Give me a link to send them** (the default) makes the login and shows a message with a set-up link to copy or share (text, WhatsApp, email). The link opens `welcome/`, where they choose their password and then see their apps. Nothing is emailed. Their login shows **Not set up yet** until they've chosen a password, then **Set up** with the date. **Make a set-up link** on a login gives a fresh link (if the first one ran out, or they've forgotten their password).

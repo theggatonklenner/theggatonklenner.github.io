@@ -15,6 +15,7 @@
 // How long they work is Supabase's "Email OTP Expiration" (Authentication > Providers > Email).
 //   roles     change a login's permissions in either app
 //   remove    delete a login and its permissions in both apps
+//   hub       link a login to an AMA Admin Hub mobile (sign in with the hub mobile and PIN), or clear the link
 // AMA ID Cards needs supabase/permissions.sql (tick-box permissions) from the ama-id-cards repository.
 // TV permissions need supabase/tv-setup.sql from this repository (until then they're left out).
 
@@ -42,6 +43,8 @@ const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const fail = (msg, status = 400) => json({ error: msg }, status);
 const validEmail = e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
+const last9 = v => String(v || '').replace(/\D/g, '').slice(-9);
+const showMobile = m => m ? '0' + m.slice(0, 3) + ' ' + m.slice(3, 6) + ' ' + m.slice(6) : null;
 const NEEDS_UPDATE = 'AMA ID Cards needs its tick-box permissions update first: run supabase/permissions.sql (from the ama-id-cards repository) in Supabase > SQL Editor.';
 
 async function allUsers(db) {
@@ -100,6 +103,9 @@ export async function handle(req, db) {
     const body = await req.json().catch(() => ({}));
     const action = body.action;
     const tvReady = !(await db.from('tv_permissions').select('email').limit(1)).error;
+    // Hub mobile links need supabase/hub-login.sql
+    const hubRes = await db.from('hub_logins').select('email, mobile9');
+    const hubReady = !hubRes.error, hubOf = new Map((hubRes.data || []).map(r => [r.email, r.mobile9]));
 
     if (action === 'list') {
       const [users, cardRes, prepRes, tvRes] = await Promise.all([allUsers(db), db.from('staff_permissions').select('email, permission'), db.from('prep_roles').select('email, role'),
@@ -116,13 +122,14 @@ export async function handle(req, db) {
       const meta = u => (u && u.user_metadata) || {};
       const row = (email, u) => ({ email, has_login: !!u, created_at: u ? u.created_at : null, last_sign_in_at: u && u.last_sign_in_at || null,
         setup_pending: meta(u).setup_pending === true, setup_at: meta(u).setup_at || null,
-        card_perms: order(card.get(email), CARD_PERMS), prep_roles: order(prep.get(email), PREP_ROLES), tv_perms: order(tv.get(email), TV_PERMS) });
+        card_perms: order(card.get(email), CARD_PERMS), prep_roles: order(prep.get(email), PREP_ROLES), tv_perms: order(tv.get(email), TV_PERMS),
+        hub_mobile: showMobile(hubOf.get(email)) });
       const rows = users.filter(u => u.email).map(u => row(u.email.toLowerCase(), u));
       const seen = new Set(rows.map(r => r.email));
       // Permissions given to an email that has no login yet
       new Set([...card.keys(), ...prep.keys(), ...tv.keys()]).forEach(email => { if (!seen.has(email)) rows.push(row(email, null)); });
       rows.sort((a, b) => a.email.localeCompare(b.email));
-      return json({ me, users: rows, card_perms: CARD_PERMS, prep_roles: PREP_ROLES, tv_perms: tvReady ? TV_PERMS : null });
+      return json({ me, users: rows, card_perms: CARD_PERMS, prep_roles: PREP_ROLES, tv_perms: tvReady ? TV_PERMS : null, hub: hubReady });
     }
 
     const email = String(body.email || '').trim().toLowerCase();
@@ -176,6 +183,23 @@ export async function handle(req, db) {
       return json({ ok: true });
     }
 
+    if (action === 'hub') {
+      if (!hubReady) return fail('Run supabase/hub-login.sql in Supabase > SQL Editor first.', 409);
+      const m = last9(body.mobile);
+      if (!m) {
+        const { error } = await db.from('hub_logins').delete().eq('email', email);
+        if (error) throw error;
+        return json({ ok: true, hub_mobile: null });
+      }
+      if (m.length !== 9) return fail('Enter the mobile number the person uses for the hub.');
+      if (!(await findUser(db, email))) return fail('That email has no login yet. Add the login first.');
+      const other = [...hubOf].find(([e, v]) => v === m && e !== email);
+      if (other) return fail(`That mobile is already linked to ${other[0]}.`);
+      const { error } = await db.from('hub_logins').upsert({ email, mobile9: m, updated_at: new Date().toISOString(), updated_by: me }, { onConflict: 'email' });
+      if (error) throw error;
+      return json({ ok: true, hub_mobile: showMobile(m) });
+    }
+
     if (action === 'roles') {
       if (email === me && ((cardWant && !cardWant.includes('admin')) || (prepWant && !prepWant.includes('admin'))))
         return fail("You can't remove your own admin access.");
@@ -197,6 +221,7 @@ export async function handle(req, db) {
       await setPerms(db, 'card', email, []);
       if (tvReady) await setPerms(db, 'tv', email, []);
       await db.from('staff_roles').delete().eq('email', email); // old single roles, if still there
+      if (hubReady) await db.from('hub_logins').delete().eq('email', email);
       const user = await findUser(db, email);
       if (user) {
         await db.from('push_subscriptions').delete().eq('user_email', email); // phone notifications, if set up

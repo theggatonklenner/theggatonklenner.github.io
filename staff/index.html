@@ -12,6 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="../hub-signin.js"></script>
 <style>
   /* Same look as AMA ID Cards */
   :root {
@@ -144,6 +145,9 @@ const PREP = { admin: 'Admin', instructor: 'Instructor', attendance: 'Attendance
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// Sign in with the AMA Admin Hub mobile and PIN (hub-signin.js)
+const HUB = { sb, url: SUPABASE_URL, key: SUPABASE_KEY, form: '#signInForm' };
+if (window.AmaHub) { AmaHub.mount(HUB); AmaHub.recheck(HUB); }
 const dlg = $('#dlg');
 let state = { me: null, users: [] }, toastTimer;
 
@@ -200,6 +204,7 @@ async function load() {
     const d = await api({ action: 'list' });
     if (!Array.isArray(d.card_perms)) { const er = new Error('The "staff" function in Supabase is an older copy. Update it with the latest supabase/functions/staff/index.ts.'); er.setup = true; er.outdated = true; throw er; }
     state.me = d.me; state.users = d.users.map(u => ({ ...u, card_perms: u.card_perms || [], prep_roles: u.prep_roles || [], tv_perms: u.tv_perms || [] }));
+    state.hub = d.hub === true;   // hub mobile links (supabase/hub-login.sql)
     state.tv = d.tv_perms === undefined ? 'outdated' : d.tv_perms === null ? 'setup' : 'ready';   // TV permissions: function and database ready?
     show('#app'); draw();
   } catch (e) {
@@ -219,7 +224,7 @@ function draw() {
   $('#list').innerHTML = rows.length ? rows.map(u => `<li><button class="person" data-email="${esc(u.email)}">
       <div class="who"><strong>${esc(u.email)}</strong>
         <span class="meta">${u.card_perms.includes('admin') && u.prep_roles.includes('admin') ? '<span class="chip">Admin</span>' : ''}
-          <span>ID Cards: ${esc(listText(u.card_perms, CARD))}</span><span>·</span><span>Prep: ${esc(listText(u.prep_roles, PREP))}</span>${state.tv === 'ready' ? `<span>·</span><span>TV: ${esc(tvText(u))}</span>` : ''}
+          <span>ID Cards: ${esc(listText(u.card_perms, CARD))}</span><span>·</span><span>Prep: ${esc(listText(u.prep_roles, PREP))}</span>${state.tv === 'ready' ? `<span>·</span><span>TV: ${esc(tvText(u))}</span>` : ''}${u.hub_mobile ? `<span>·</span><span>Hub: ${esc(u.hub_mobile)}</span>` : ''}
           ${!u.has_login ? '<span class="tag warn">No login yet</span>' : u.setup_pending ? '<span class="tag warn">Not set up yet</span>' : u.setup_at ? '<span class="tag ok">Set up</span>' : !u.last_sign_in_at ? '<span class="tag muted">Never signed in</span>' : ''}
           ${u.email === state.me ? '<span class="tag muted">You</span>' : ''}</span></div>
       <span class="chev" aria-hidden="true">›</span></button></li>`).join('')
@@ -266,6 +271,9 @@ function openPerson(email) {
       <p class="hint">Give the new password to them in person. They can keep using it.</p>
       <div class="row"><button class="btn" id="savePw" type="submit">Set password</button><button class="btn" id="mailPw" type="button">Make a set-up link</button></div>
       <p class="hint">Or make a link for them to choose their own password (for a first login, or if they've forgotten it).</p></form>` : `<div class="section"><p class="hint">To give them a login, use Add login with this email.</p></div>`}
+    ${u.has_login && state.hub ? `<form id="hubForm" class="section"><h3>Hub sign-in</h3>
+      <div class="row"><input type="tel" id="hubMobile" value="${esc(u.hub_mobile || '')}" placeholder="e.g. 0412 345 678" aria-label="Hub mobile" autocomplete="off" style="flex:1 1 180px;width:auto"><button class="btn" id="saveHub" type="submit">${u.hub_mobile ? 'Save' : 'Link'}</button>${u.hub_mobile ? '<button class="btn" id="clearHub" type="button">Unlink</button>' : ''}</div>
+      <p class="hint">The mobile they use for the AMA Admin Hub. They can then sign in to these apps with that mobile and their hub PIN, and get the permissions above. PINs, lockouts and switching access off stay in the hub.</p></form>` : ''}
     ${!self ? `<div class="section"><div class="row"><button class="btn danger" id="removeBtn">${u.has_login ? 'Remove login' : 'Remove roles'}</button></div><p class="hint">Removes their access to all the apps. Their name stays on anything they did.</p></div>` : ''}
   </div>`);
   tvLink();
@@ -291,6 +299,15 @@ function openPerson(email) {
     try { const r = await api({ action: 'link', email }); showLink(email, r.link, false); }
     catch (er) { toast(er.message, 7000); mp.disabled = false; }
   };
+  const hf = $('#hubForm');
+  const setHub = async mobile => {
+    try { const r = await api({ action: 'hub', email, mobile }); toast(r.hub_mobile ? `Hub mobile ${r.hub_mobile} linked` : 'Hub mobile unlinked'); await load(); openPerson(email); }
+    catch (er) { toast(er.message, 7000); }
+  };
+  if (hf) {
+    hf.onsubmit = e => { e.preventDefault(); const m = $('#hubMobile').value.trim(); if (!m) return toast('Enter their hub mobile, or press Unlink.'); setHub(m); };
+    const ch = $('#clearHub'); if (ch) ch.onclick = () => setHub('');
+  }
   const rm = $('#removeBtn');
   if (rm) rm.onclick = async () => {
     if (!await confirmBox(`Remove ${email}? They will no longer be able to sign in to AMA ID Cards, Black Belt Prep or the TV.`, 'Remove', true)) return openPerson(email);
