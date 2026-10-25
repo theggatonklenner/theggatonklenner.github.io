@@ -205,6 +205,9 @@ const swatch = name => `<span class="belt" style="background:${esc(beltOf(name).
 const student = key => state.students.find(s => s.member_key === key);
 const dayOf = id => state.days.find(d => d.day_id === id);
 const entriesOf = id => state.entries.filter(e => e.day_id === id);
+const dayBelts = d => (d && d.belts && d.belts.length) ? d.belts : null;   // null: every belt
+const forDay = (d, s) => s.location === d.location && (!dayBelts(d) || dayBelts(d).includes(s.belt));
+const beltsText = d => dayBelts(d) ? dayBelts(d).slice().sort((a, b) => (beltOf(a).sort || 0) - (beltOf(b).sort || 0)).map(short).join(', ') : 'All belts';
 const bookingLink = e => new URL('book/#t=' + e.token, location.href.replace(/[#?].*$/, '').replace(/index\.html$/, '')).href;
 // Messages: fill in a template
 function fill(tpl, v) {
@@ -319,8 +322,12 @@ function openStudent(key) {
 }
 
 /* ---------------- Texts (invites, congratulations, not yet) ---------------- */
-const KIND_NAME = { invite: 'Invitations', congrats: 'Congratulations', not_ready: 'Not yet messages' };
-const KIND_TPL = { invite: 'invite_text', congrats: 'congrats_text', not_ready: 'not_ready_text' };
+const KIND_NAME = { invite: 'Invitations', not_booked: 'Reminder to book', reminder: 'Grading day reminder', unpaid: 'Fee reminder', congrats: 'Congratulations', retest: 'Re-test message', not_ready: 'Not yet messages' };
+const KIND_TPL = { invite: 'invite_text', not_booked: 'not_booked_text', reminder: 'reminder_text', unpaid: 'unpaid_text', congrats: 'congrats_text', retest: 'retest_text', not_ready: 'not_ready_text' };
+// Settings: each message, in the order they're used
+const KIND_HELP = { invite: 'Sent from a grading day to students marked ready. Include {link}.', not_booked: 'For families invited but not booked yet. Include {link}.',
+  reminder: 'For booked families, a day or two before.', unpaid: 'For booked families whose fee isn\'t marked paid.', congrats: 'After results: pass or distinction.',
+  retest: 'After results: a kind message for a re-test.', not_ready: 'From Who\'s ready, for a student marked not yet. {note} is the instructor\'s note.' };
 // people: [{ member_key, entry_id, s, e, d }]
 function composeTexts(kind, people) {
   const tpl = state.settings[KIND_TPL[kind]] || '';
@@ -364,7 +371,7 @@ function renderDays() {
   const up = state.days.filter(d => !d.closed && d.grading_date >= today()).sort((a, b) => a.grading_date.localeCompare(b.grading_date));
   const past = state.days.filter(d => !up.includes(d));
   const row = d => { const es = entriesOf(d.day_id), n = k => es.filter(k).length;
-    return `<li><button class="item" data-day="${d.day_id}"><div class="who"><strong>${esc(fmtDate(d.grading_date))}${d.start_time ? ' · ' + fmtTime(d.start_time) : ''}</strong><span class="meta"><span>${esc(d.location)}</span>${d.efc_session ? `<span>·</span><span>${esc(d.efc_session)}</span>` : ''}</span></div>
+    return `<li><button class="item" data-day="${d.day_id}"><div class="who"><strong>${esc(fmtDate(d.grading_date))}${d.start_time ? ' · ' + fmtTime(d.start_time) : ''}</strong><span class="meta"><span>${esc(d.location)}</span><span>·</span><span>${esc(beltsText(d))}</span>${d.efc_session ? `<span>·</span><span>${esc(d.efc_session)}</span>` : ''}</span></div>
       <span class="tags"><span class="tag">${es.length} students</span>${es.length ? `<span class="tag info">${n(e => e.invited_at)} invited</span><span class="tag ok">${n(e => e.booked_at)} booked</span>` : ''}${n(e => e.result) ? `<span class="tag ok">${n(e => e.result)} results</span>` : ''}${d.closed ? '<span class="tag">Finished</span>' : ''}</span></button></li>`; };
   v.innerHTML = `<div class="view-head"><h2>Grading days</h2>${canGrade() ? '<button class="btn primary sm" id="newDay">New grading day</button>' : ''}</div>
     <h3>Coming up</h3><ul class="list">${up.length ? up.map(row).join('') : '<li class="empty">No grading days coming up.</li>'}</ul>
@@ -378,15 +385,23 @@ function openDayForm(d = null) {
     <div class="grid2"><div class="field"><label for="dSchool">School</label><select id="dSchool">${SCHOOLS.map(s => `<option${d && d.location === s ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
       <div class="field"><label for="dDate">Date</label><input type="date" id="dDate" required value="${esc(d ? d.grading_date : '')}"></div>
       <div class="field"><label for="dTime">Start time</label><input type="time" id="dTime" value="${esc(d && d.start_time ? String(d.start_time).slice(0, 5) : '')}"></div></div>
+    <div class="field"><span class="label">Belts this day is for (their belt now)</span>
+      <div class="row" id="dBelts" style="gap:6px 14px">${state.belts.map(b => `<label class="row" style="gap:6px;font-weight:400;color:var(--fg);font-size:15px;min-height:36px"><input type="checkbox" value="${esc(b.belt)}" ${!d || !dayBelts(d) || dayBelts(d).includes(b.belt) ? 'checked' : ''}> ${swatch(b.belt)} ${esc(short(b.belt))}</label>`).join('')}</div>
+      <div class="row"><button type="button" class="btn sm" id="dAll">All</button><button type="button" class="btn sm" id="dNone">None</button></div>
+      <p class="hint">Only students on these belts are added and offered for this day. Leave them all ticked for every belt.</p></div>
     <div class="grid2"><div class="field"><label for="dSess">EFC grading session (name)</label><input type="text" id="dSess" value="${esc(d ? d.efc_session || '' : '')}" placeholder="e.g. Coloured Belt Grading"></div>
       <div class="field"><label for="dSessId">EFC session ID (optional)</label><input type="text" id="dSessId" value="${esc(d ? d.efc_session_id || '' : '')}" autocomplete="off"></div></div>
     <p class="hint">Families who press Book are booked into this EFC session through your Zap, which is how the fee is charged. If your Zap already picks the session for each school, leave the ID blank.</p>
     <div class="field"><label for="dNotes">Notes</label><textarea id="dNotes" rows="2">${esc(d ? d.notes || '' : '')}</textarea></div>
     <div class="row" style="justify-content:flex-end">${d ? '<button type="button" class="btn danger" id="dDel">Delete</button>' : ''}<button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="dGo">${d ? 'Save' : 'Add'}</button></div>
   </form>`);
+  $('#dAll').onclick = () => $$('#dBelts input').forEach(c => c.checked = true);
+  $('#dNone').onclick = () => $$('#dBelts input').forEach(c => c.checked = false);
   $('#dayForm').onsubmit = async e => {
     e.preventDefault();
-    const rec = { location: $('#dSchool').value, grading_date: $('#dDate').value, start_time: $('#dTime').value || null, efc_session: $('#dSess').value.trim() || null, efc_session_id: $('#dSessId').value.trim() || null, notes: $('#dNotes').value.trim() || null };
+    const picked = $$('#dBelts input:checked').map(c => c.value);
+    if (!picked.length) return toast('Tick at least one belt.');
+    const rec = { belts: picked.length === state.belts.length ? null : picked, location: $('#dSchool').value, grading_date: $('#dDate').value, start_time: $('#dTime').value || null, efc_session: $('#dSess').value.trim() || null, efc_session_id: $('#dSessId').value.trim() || null, notes: $('#dNotes').value.trim() || null };
     try {
       let id = d && d.day_id;
       if (d) await run(sb.from('cb_days').update(rec).eq('day_id', id), 'Saved');
@@ -410,18 +425,26 @@ function renderDay() {
   const notInvited = es.filter(e => !e.invited_at && !e.result);
   const passed = es.filter(e => e.result === 'pass' || e.result === 'distinction');
   const toCongrats = passed.filter(e => !sentTo('congrats', e.entry_id));
+  const toRetest = es.filter(e => e.result === 'retest' && !sentTo('retest', e.entry_id));
+  const notBooked = es.filter(e => e.invited_at && !e.booked_at && !e.result);
+  const booked = es.filter(e => e.booked_at && !e.result);
+  const unpaid = es.filter(e => e.booked_at && !e.paid && !e.result);
+  const people = list => list.map(e => ({ member_key: e.member_key, entry_id: e.entry_id, e, s: student(e.member_key), d }));
   const needs = {}; es.filter(e => e.result !== 'retest').forEach(e => { needs[e.belt_to] = (needs[e.belt_to] || 0) + 1; });
   v.innerHTML = `<div class="view-head"><div><button class="x" id="backDays" style="padding:0">‹ Grading days</button><h2>${esc(d.location)} · ${esc(fmtDate(d.grading_date))}</h2>
-      <p class="hint">${d.start_time ? fmtTime(d.start_time) + ' · ' : ''}${esc(d.efc_session || 'No EFC session named')}${d.notes ? ' · ' + esc(d.notes) : ''}</p></div>
+      <p class="hint">${d.start_time ? fmtTime(d.start_time) + ' · ' : ''}${esc(beltsText(d))} · ${esc(d.efc_session || 'No EFC session named')}${d.notes ? ' · ' + esc(d.notes) : ''}</p></div>
       ${canGrade() ? '<button class="btn sm" id="editDay">Edit</button>' : ''}</div>
     <div class="stats">
       <div class="stat"><b>${es.length}</b><span>students</span></div><div class="stat"><b>${n(e => e.invited_at)}</b><span>invited</span></div>
       <div class="stat"><b>${n(e => e.booked_at)}</b><span>booked in EFC</span></div><div class="stat"><b>${n(e => e.paid)}</b><span>paid</span></div>
       <div class="stat"><b>${passed.length}</b><span>passed</span></div></div>
     ${canGrade() && !d.closed ? `<div class="card"><h3>Students</h3><div class="row">
-        <button class="btn" id="addReady">Add everyone marked ready (${d.location})</button><button class="btn" id="addOne">Add a student</button>
+        <button class="btn" id="addReady">Add everyone marked ready (${esc(d.location)}, ${esc(beltsText(d))})</button><button class="btn" id="addOne">Add a student</button>
         <button class="btn primary" id="sendInv" ${notInvited.length ? '' : 'disabled'}>Invite ${notInvited.length || ''}</button></div>
-        <p class="hint">Only students marked ready are added automatically. Invitations include each family's booking link; you check the wording before anything is sent.</p></div>` : ''}
+        <p class="hint">Only students marked ready are added automatically. Invitations include each family's booking link; you check the wording before anything is sent.</p>
+        <div class="row"><button class="btn sm" id="sendNotBooked" ${notBooked.length ? '' : 'disabled'}>Remind to book${notBooked.length ? ' (' + notBooked.length + ')' : ''}</button>
+          <button class="btn sm" id="sendReminder" ${booked.length ? '' : 'disabled'}>Grading day reminder${booked.length ? ' (' + booked.length + ')' : ''}</button>
+          <button class="btn sm" id="sendUnpaid" ${unpaid.length ? '' : 'disabled'}>Fee reminder${unpaid.length ? ' (' + unpaid.length + ')' : ''}</button></div></div>` : ''}
     <ul class="list" id="entryList">${es.length ? es.map(e => `<li><button class="item" data-entry="${e.entry_id}">${swatch(e.belt_from)}
         <div class="who"><strong>${esc(e.full_name)}</strong><span class="meta">${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}${e.booking_error ? ' · <span style="color:var(--danger)">Booking failed</span>' : ''}</span></div>
         <span class="tags">${e.result ? `<span class="tag ${e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[e.result]}</span>` : ''}${e.booked_at ? '<span class="tag ok">Booked</span>' : e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Not invited</span>'}${e.paid ? '<span class="tag ok">Paid</span>' : e.booked_at ? '<span class="tag warn">Unpaid</span>' : ''}</span></button></li>`).join('') : '<li class="empty">No students on this day yet.</li>'}</ul>
@@ -433,19 +456,24 @@ function renderDay() {
       <button class="btn primary" id="resultsBtn">Enter results</button>
       <button class="btn" id="csvPassed" ${passed.length ? '' : 'disabled'}>Certificates CSV (passed)</button>
       <button class="btn" id="sendCongrats" ${toCongrats.length ? '' : 'disabled'}>Text congratulations${toCongrats.length ? ' (' + toCongrats.length + ')' : ''}</button>
+      <button class="btn" id="sendRetest" ${toRetest.length ? '' : 'disabled'}>Text re-tests${toRetest.length ? ' (' + toRetest.length + ')' : ''}</button>
       <button class="btn" id="closeDay">${d.closed ? 'Reopen' : 'Mark finished'}</button></div>
       <p class="hint">Results don't change EFC: each pass goes on the Update EFC list for the front desk to promote.</p></div>` : ''}`;
   $('#backDays').onclick = () => go('days');
   const on = (id, f) => { const b = $(id); if (b) b.onclick = f; };
   on('#editDay', () => openDayForm(d));
-  on('#addReady', () => addStudents(d, state.students.filter(s => s.location === d.location && s.approval === 'ready')));
+  on('#addReady', () => addStudents(d, state.students.filter(s => forDay(d, s) && s.approval === 'ready')));
   on('#addOne', () => pickStudent(d));
-  on('#sendInv', () => composeTexts('invite', notInvited.map(e => ({ member_key: e.member_key, entry_id: e.entry_id, e, s: student(e.member_key), d }))));
+  on('#sendInv', () => composeTexts('invite', people(notInvited)));
+  on('#sendNotBooked', () => composeTexts('not_booked', people(notBooked)));
+  on('#sendReminder', () => composeTexts('reminder', people(booked)));
+  on('#sendUnpaid', () => composeTexts('unpaid', people(unpaid)));
+  on('#sendRetest', () => composeTexts('retest', people(toRetest)));
   on('#resultsBtn', () => { state.resultsMode = true; render(); window.scrollTo(0, 0); });
   on('#csvPassed', () => certCsv(d, passed));
   on('#csvAll', () => certCsv(d, es.filter(e => e.result !== 'retest')));
   on('#printList', () => printDay(d, es));
-  on('#sendCongrats', () => composeTexts('congrats', toCongrats.map(e => ({ member_key: e.member_key, entry_id: e.entry_id, e, s: student(e.member_key), d }))));
+  on('#sendCongrats', () => composeTexts('congrats', people(toCongrats)));
   on('#closeDay', async () => { try { await run(sb.from('cb_days').update({ closed: !d.closed }).eq('day_id', d.day_id), d.closed ? 'Reopened' : 'Marked finished'); await loadAll(); render(); } catch (e) { toast(errMsg(e), 6000); } });
   $$('#entryList [data-entry]').forEach(b => b.onclick = () => openEntry(b.dataset.entry));
 }
@@ -453,17 +481,17 @@ async function addStudents(d, list) {
   const have = new Set(entriesOf(d.day_id).map(e => e.member_key));
   const add = list.filter(s => !have.has(s.member_key) && !openDayFor(s.member_key));
   const skipped = list.length - add.length;
-  if (!add.length) return toast(list.length ? 'They are all on this or another open grading day already.' : `No one at ${d.location} is marked ready yet. Mark students ready on Who's ready.`, 6000);
+  if (!add.length) return toast(list.length ? 'They are all on this or another open grading day already.' : `No one at ${d.location} on ${beltsText(d).toLowerCase()} is marked ready yet. Mark students ready on Who's ready.`, 6000);
   try {
     await run(sb.from('cb_entries').insert(add.map(s => ({ day_id: d.day_id, member_key: s.member_key, full_name: s.full_name, belt_from: s.belt, belt_to: s.next_belt }))));
     toast(`Added ${add.length}${skipped ? `; ${skipped} already on a grading day` : ''}`, 5000); dlg.close(); await loadAll(); render();
   } catch (e) { toast(errMsg(e), 6000); }
 }
 function pickStudent(d) {
-  openDlg(`<div class="dlg"><div class="dlg-head"><h3>Add a student</h3><button class="x" data-close>Close</button></div>
+  openDlg(`<div class="dlg"><div class="dlg-head"><div><h3>Add a student</h3><p class="hint">${esc(d.location)} · ${esc(beltsText(d))}</p></div><button class="x" data-close>Close</button></div>
     <input type="search" id="psQ" placeholder="Search name" aria-label="Search name"><ul class="list" id="psList" style="max-height:50vh;overflow:auto"></ul></div>`);
   const draw = () => { const q = $('#psQ').value.trim().toLowerCase();
-    const l = state.students.filter(s => s.location === d.location && (!q || s.full_name.toLowerCase().includes(q))).slice(0, 60);
+    const l = state.students.filter(s => forDay(d, s) && (!q || s.full_name.toLowerCase().includes(q))).slice(0, 60);
     $('#psList').innerHTML = l.map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}<div class="who"><strong>${esc(s.full_name)}</strong><span class="meta">${esc(short(s.belt))} to ${esc(short(s.next_belt))}</span></div><span class="tags">${readyTags(s)}</span></button></li>`).join('') || '<li class="empty">No one matches.</li>';
     $$('#psList [data-key]').forEach(b => b.onclick = () => addStudents(d, [student(b.dataset.key)])); };
   $('#psQ').oninput = draw; draw(); $('#psQ').focus();
@@ -590,9 +618,7 @@ function renderSettings() {
       <div class="row"><button class="btn primary" type="submit" id="saveBelts">Save belts</button></div></form>
     <form id="msgForm" class="card"><h3>Messages</h3>
       <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {distinction} {note}. You can still change the wording before each send.</p>
-      <div class="field"><label for="sInvite">Invitation</label><textarea id="sInvite" rows="3">${esc(st.invite_text || '')}</textarea></div>
-      <div class="field"><label for="sCongrats">Congratulations</label><textarea id="sCongrats" rows="3">${esc(st.congrats_text || '')}</textarea></div>
-      <div class="field"><label for="sNot">Not yet</label><textarea id="sNot" rows="3">${esc(st.not_ready_text || '')}</textarea></div>
+      ${Object.keys(KIND_TPL).map(k => `<div class="field"><label for="tpl_${k}">${esc(KIND_NAME[k].replace(/ messages$/, ''))}</label><textarea id="tpl_${k}" data-col="${KIND_TPL[k]}" rows="3">${esc(st[KIND_TPL[k]] || '')}</textarea><p class="hint">${esc(KIND_HELP[k])}</p></div>`).join('')}
       <div class="field"><label for="sHook">Booking Zap (Zapier Catch Hook address)</label><input type="url" id="sHook" value="${esc(st.booking_webhook || '')}" placeholder="https://hooks.zapier.com/hooks/catch/...">
         <p class="hint">When a family presses Book, this Zap gets member_id, efc_ref, date, session_id, location_id, location, student and belt_to, and books the EFC session.</p></div>
       <div class="row"><button class="btn primary" type="submit" id="saveMsgs">Save</button><button class="btn" type="button" id="checkTexts">Check texting</button></div></form>`;
@@ -610,7 +636,8 @@ function renderSettings() {
     e.preventDefault();
     const hook = $('#sHook').value.trim();
     if (hook && !/^https:\/\/hooks\.zapier\.com\//.test(hook)) return toast('The booking Zap address should start with https://hooks.zapier.com/', 6000);
-    try { await run(sb.from('cb_settings').update({ invite_text: $('#sInvite').value.trim(), congrats_text: $('#sCongrats').value.trim(), not_ready_text: $('#sNot').value.trim(), booking_webhook: hook || null, updated_at: new Date().toISOString() }).eq('id', 1), 'Saved'); await loadAll(); }
+    const tpl = {}; $$('#msgForm textarea[data-col]').forEach(t => { if (t.value.trim()) tpl[t.dataset.col] = t.value.trim(); });
+    try { await run(sb.from('cb_settings').update({ ...tpl, booking_webhook: hook || null, updated_at: new Date().toISOString() }).eq('id', 1), 'Saved'); await loadAll(); }
     catch (er) { toast(errMsg(er), 6000); }
   };
   $('#checkTexts').onclick = async () => { try { const r = await fnCall({ action: 'check' }); toast(r.ready ? (r.testing ? 'Texting is in test mode (logged, not sent).' : 'Texting is set up.') : 'Texting is not set up: add GHL_TOKEN and GHL_LOCATION_ID in Supabase.', 6000); } catch (e) { toast(errMsg(e), 6000); } };

@@ -41,6 +41,11 @@ create table if not exists public.cb_settings (
   not_ready_text     text not null default 'Hi {parent}, {first} is working hard but isn''t quite ready to grade this time. {note} We''ll keep helping them get there for the next grading. AMA {school}',
   updated_at         timestamptz not null default now()
 );
+-- More texts: a reminder before the day, a nudge for invited families who haven't booked, unpaid fees, and re-tests
+alter table public.cb_settings add column if not exists reminder_text text not null default 'Hi {parent}, a reminder that {first}''s grading for their {next} is on {date}{time} at AMA {school}. Please arrive 15 minutes early in a clean uniform. See you there!';
+alter table public.cb_settings add column if not exists not_booked_text text not null default 'Hi {parent}, {first} is invited to grade for their {next} on {date}{time} at AMA {school}, but we don''t have a booking yet. Book their spot here: {link}';
+alter table public.cb_settings add column if not exists unpaid_text text not null default 'Hi {parent}, thanks for booking {first}''s grading on {date}. The grading fee is still to be paid in your EFC account. Please contact the front desk if you have any questions. AMA {school}';
+alter table public.cb_settings add column if not exists retest_text text not null default 'Hi {parent}, {first} worked hard at their grading today. They need a little more practice before their {next}, so they''ll re-test soon. We''re proud of their effort. AMA {school}';
 insert into public.cb_settings (id) values (1) on conflict (id) do nothing;
 
 -- Grading days, per school, each linked to its EFC grading session (booking it is how the fee is charged)
@@ -52,11 +57,13 @@ create table if not exists public.cb_days (
   efc_session_id text,                          -- the EFC session families are booked into
   efc_session    text,                          -- its name, for showing
   notes          text,
+  belts          text[],                        -- the belts this day is for (their current belt); empty = every belt
   closed         boolean not null default false, -- finished: results in
   created_by     text default public.prep_email(),
   created_at     timestamptz not null default now()
 );
 create index if not exists cb_days_date_idx on public.cb_days (grading_date);
+alter table public.cb_days add column if not exists belts text[];
 
 -- Instructor's ready / not yet, for the belt the student is on now (a new belt in EFC starts fresh)
 create table if not exists public.cb_approvals (
@@ -98,7 +105,7 @@ create table if not exists public.cb_messages (
   message_id  uuid primary key default gen_random_uuid(),
   entry_id    uuid references public.cb_entries on delete set null,
   member_key  text,
-  kind        text not null check (kind in ('invite', 'congrats', 'not_ready')),
+  kind        text not null,
   phone       text,
   body        text,
   status      text not null,                     -- sent, failed, test
@@ -106,6 +113,9 @@ create table if not exists public.cb_messages (
   sent_by     text,
   sent_at     timestamptz not null default now()
 );
+
+alter table public.cb_messages drop constraint if exists cb_messages_kind_check;
+alter table public.cb_messages add constraint cb_messages_kind_check check (kind in ('invite', 'not_booked', 'reminder', 'unpaid', 'congrats', 'retest', 'not_ready'));
 
 -- Students on a coloured belt at the five schools, from EFC, with what this app adds
 create or replace view public.cb_students with (security_invoker = true) as

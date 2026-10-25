@@ -14,14 +14,15 @@
 //   { action: 'book', token }               book it (no sign-in)
 //   { action: 'check' }                     staff: is texting set up?
 //   { action: 'send', kind, items: [{ entry_id?, member_key, body }] }   staff: text families
-//        kind: invite (grading staff), congrats (grading staff), not_ready (instructors or grading staff)
+//        kind: invite, not_booked, reminder, unpaid, congrats, retest (grading staff); not_ready (instructors or grading staff)
 
 const API = 'https://services.leadconnectorhq.com';
 export const EFC_LOCATIONS = {
   Marrickville: 'f39cf2f5-a3e0-47bc-97cc-bc05c9b2bc58', Sydenham: '5af07764-95bc-4caf-b889-ba846e409dc5', West: 'eafda575-a10e-4656-a045-8e20201aad40',
   Concord: '7ca1c142-be41-4d02-b5eb-13534b23043b', Sylvania: 'a5a5ab24-e85d-4e14-ac16-1d9c189ff0dd'
 };
-const KINDS = { invite: ['grading'], congrats: ['grading'], not_ready: ['instructor', 'grading'] };
+// Who may send each kind (admins always can): invitations and day reminders by grading staff, "not yet" by instructors too
+const KINDS = { invite: ['grading'], not_booked: ['grading'], reminder: ['grading'], unpaid: ['grading'], congrats: ['grading'], retest: ['grading'], not_ready: ['instructor', 'grading'] };
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',

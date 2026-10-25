@@ -97,6 +97,10 @@ ok(r.body.sent === 1 && r.body.testing && r.body.results[1].error === 'No mobile
 ok(t.cb_messages.some(m => m.kind === 'not_ready' && m.status === 'test' && m.phone === '+61412345678' && m.sent_by === 'coach@ama.test'), 'each text is logged with who sent it');
 r = await call({ action: 'send', kind: 'invite', items: [{ member_key: 'efc:m1', entry_id: 'e1', body: 'You are invited' }] }, 'tok-grader', { GHL_TEST: '1' });
 ok(r.body.sent === 1 && t.cb_entries[0].invited_at, 'an invitation marks the student invited');
+r = await call({ action: 'send', kind: 'reminder', items: [{ member_key: 'efc:m1', entry_id: 'e1', body: 'See you Saturday' }] }, 'tok-grader', { GHL_TEST: '1' });
+ok(r.body.sent === 1 && t.cb_messages.some(m => m.kind === 'reminder'), 'grading staff can send the newer texts (reminders, fee, re-test)');
+r = await call({ action: 'send', kind: 'unpaid', items: [{ member_key: 'efc:m1', body: 'Fee' }] }, 'tok-coach', { GHL_TEST: '1' });
+ok(r.status === 403, '...instructors cannot send fee reminders');
 r = await call({ action: 'send', kind: 'party', items: [] }, 'tok-grader', { GHL_TEST: '1' });
 ok(r.status === 400, 'unknown kinds are refused');
 ok(phoneE164('0412 345 678') === '+61412345678' && phoneE164('+61 412 345 678') === '+61412345678' && phoneE164('12') === null, 'mobiles are turned into +61 form');

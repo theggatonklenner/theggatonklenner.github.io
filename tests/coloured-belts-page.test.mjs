@@ -104,12 +104,19 @@ try {
   await page.click('.tab[data-view="days"]');
   await page.click('#newDay'); await page.waitForSelector('#dayForm');
   await page.selectOption('#dSchool', 'Marrickville'); await page.fill('#dDate', '2030-11-14'); await page.fill('#dTime', '10:00'); await page.fill('#dSess', 'Coloured Belt Grading');
+  ok((await page.$$('#dBelts input:checked')).length === 10, 'a new grading day starts with every belt ticked');
+  await page.click('#dNone'); await page.check('#dBelts input[value="White Belt"]'); await page.check('#dBelts input[value="Yellow Belt"]');
   await page.click('#dGo'); await page.waitForSelector('#addReady');
   ok((await page.textContent('#view-day')).includes('Marrickville') && (await page.textContent('#view-day')).includes('10:00am'), 'a grading day is added for a school, date and time');
+  ok((await q(`select belts from cb_days`))[0].belts.join() === 'White Belt,Yellow Belt' && (await page.textContent('#view-day')).includes('White, Yellow'), 'and for the belts chosen (White and Yellow)');
+  await q(`insert into cb_approvals (member_key, belt, status) values ('efc:m3', 'Green Belt', 'ready')`);   // Alex: Green, ready, but not a belt for this day
+  await page.evaluate(() => loadAll().then(render)); await page.waitForSelector('#addReady');
   await page.click('#addReady'); await toastSays(page, 'Added');
   let entries = await q(`select full_name, belt_from, belt_to from cb_entries order by full_name`);
-  ok(entries.length === 1 && entries[0].full_name === 'Sam Lee' && entries[0].belt_to === 'Orange Belt', '"Add everyone marked ready" adds only ready students at that school (Sam; Kim is "not yet")');
-  await page.click('#addOne'); await page.fill('#psQ', 'Kim'); await page.click('#psList [data-key="efc:m2"]');
+  ok(entries.length === 1 && entries[0].full_name === 'Sam Lee' && entries[0].belt_to === 'Orange Belt', '"Add everyone marked ready" adds only ready students at that school on the day\'s belts (Sam; Kim is "not yet", Alex is Green)');
+  await page.click('#addOne'); await page.fill('#psQ', 'Alex'); await page.waitForTimeout(200);
+  ok((await page.textContent('#psList')).includes('No one matches'), 'adding by hand only offers students on the day\'s belts');
+  await page.fill('#psQ', 'Kim'); await page.click('#psList [data-key="efc:m2"]');
   ok(await until(async () => (await q(`select count(*)::int n from cb_entries`))[0].n === 2), 'a student can also be added by hand');
   await page.waitForSelector('#entryList [data-entry]:has-text("Kim Ng")');
   await page.click('#sendInv'); await page.waitForSelector('#txPrev');
@@ -122,6 +129,14 @@ try {
   await q(`update cb_entries set booked_at = now() where member_key = 'efc:m1'`);
   await page.evaluate(() => loadAll().then(render)); await settle(page);
   ok((await page.textContent('#entryList [data-entry]:has-text("Sam Lee")')).includes('Booked'), 'booked students show Booked (from the family\'s booking link)');
+  ok((await page.textContent('#sendNotBooked')).includes('(1)') && (await page.textContent('#sendReminder')).includes('(1)') && (await page.textContent('#sendUnpaid')).includes('(1)'), 'reminders: to book (Kim, invited), grading day (Sam, booked), fee (Sam, unpaid)');
+  await page.click('#sendReminder'); await page.waitForSelector('#txPrev');
+  ok((await page.textContent('#txPrev')).includes('15 minutes early') && (await page.textContent('#txPrev')).includes('Thursday 14 November'), 'the grading day reminder has its own wording');
+  await page.click('#txGo');
+  ok(await until(() => fnCalls.some(c => c.kind === 'reminder' && c.items.length === 1 && c.items[0].member_key === 'efc:m1')), 'and goes to booked families');
+  await page.waitForSelector('#sendNotBooked'); await page.click('#sendNotBooked'); await page.waitForSelector('#txPrev');
+  ok((await page.textContent('#txPrev')).includes('/grading/coloured-belts/book/#t=' + kim.token), 'the reminder to book includes their booking link');
+  await page.click('#dlg [data-close]');
   const gr = await page.textContent('#view-day');
   ok(gr.includes('Getting ready') && /Orange Belt\s*1\s*1/.test(await page.textContent('#view-day table')), 'Getting ready counts the belts and certificates needed');
 
@@ -143,6 +158,10 @@ try {
   ok((await page.textContent('#txPrev')).includes('with distinction') && (await page.textContent('#txPrev')).includes('Orange Belt'), 'congratulations texts mention a distinction');
   await page.click('#txGo');
   ok(await until(() => page.isDisabled('#sendCongrats').catch(() => false)), 'once sent, congratulations are not offered again');
+  await page.click('#sendRetest'); await page.waitForSelector('#txPrev');
+  ok((await page.textContent('#txPrev')).includes('re-test') && (await page.textContent('#txPrev')).includes('Hi Jo'), 'a kind re-test message goes to re-test families');
+  await page.click('#txGo');
+  ok(await until(() => page.isDisabled('#sendRetest').catch(() => false)), 'and is not offered again once sent');
 
   console.log('\nUpdate EFC, dashboard, settings');
   await page.click('.tab[data-view="efc"]');
@@ -156,10 +175,12 @@ try {
   await until(async () => (await q(`select classes_needed from cb_belts where belt = 'White Belt'`))[0].classes_needed === 30); await page.waitForSelector('#saveBelts:not([disabled])'); await settle(page);
   ok((await q(`select fee, classes_needed from cb_belts where belt = 'Yellow Belt'`))[0].fee == 55 && (await q(`select classes_needed from cb_belts where belt = 'White Belt'`))[0].classes_needed === 30, 'each belt has its own classes needed, weeks between and fee');
   ok((await q(`select enough_classes from cb_students where member_key = 'efc:m2'`))[0].enough_classes === false, 'changing classes needed changes who is eligible (Kim has 26 of 30)');
+  ok((await page.$$('#msgForm textarea[data-col]')).length === 7, 'Settings has all seven texts: invitation, reminder to book, day reminder, fee reminder, congratulations, re-test, not yet');
+  await page.fill('#tpl_reminder', 'See you at {school} on {date}!');
   await page.fill('#sHook', 'https://example.com/x'); await page.click('#saveMsgs');
   ok((await toastSays(page, 'hooks.zapier.com')).includes('hooks.zapier.com'), 'the booking Zap must be a Zapier hook address');
   await page.fill('#sHook', 'https://hooks.zapier.com/hooks/catch/1/abc/'); await page.click('#saveMsgs'); await toastSays(page, 'Saved');
-  ok((await q(`select booking_webhook from cb_settings`))[0].booking_webhook.startsWith('https://hooks.zapier.com/'), 'and is saved');
+  ok((await q(`select booking_webhook from cb_settings`))[0].booking_webhook.startsWith('https://hooks.zapier.com/') && (await q(`select reminder_text from cb_settings`))[0].reminder_text === 'See you at {school} on {date}!', 'the booking Zap and wording are saved');
   await page.click('.tab[data-view="dash"]');
   const dash = await page.textContent('#view-dash');
   ok(dash.includes('50%') && dash.includes('1 of 2') && dash.includes('$55') && dash.includes('Alex Kim'), 'the dashboard shows the pass rate (a re-test is not a pass), grading fees paid and overdue students');
