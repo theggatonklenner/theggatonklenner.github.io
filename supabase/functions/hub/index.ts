@@ -59,11 +59,13 @@ export async function handle(req, deps) {
       const r = await deps.hub({ kind: 'login', mobile: String(body.mobile), pin: String(body.pin) });
       if (!r || !r.ok) return json({ ok: false, error: (r && r.error) || 'Mobile or PIN not right.' });
       token = r.token; name = r.name; role = r.role;
+    } else {
+      // A token from earlier: confirm with the hub (signature, expiry, still Active). A token the hub has just
+      // issued above needs no second trip to the hub (that made sign-in slow).
+      const who = await deps.hub({ kind: 'whoami', token });
+      if (!who || !who.ok) return json({ ok: false, error: 'Your hub sign-in has run out. Sign in again.' });
+      name = who.name || name; role = who.role || role;
     }
-    // Always confirm with the hub (signature, expiry, still Active)
-    const who = await deps.hub({ kind: 'whoami', token });
-    if (!who || !who.ok) return json({ ok: false, error: 'Your hub sign-in has run out. Sign in again.' });
-    name = who.name || name; role = who.role || role;
     const mobile9 = tokenMobile(token);
     if (mobile9.length !== 9) return json({ ok: false, error: 'Your hub sign-in has run out. Sign in again.' });
 

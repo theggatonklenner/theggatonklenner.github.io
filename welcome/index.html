@@ -137,8 +137,10 @@ async function check() {
   try { history.replaceState(null, '', location.pathname); } catch (e) { /* ignore */ }   // the link's tokens out of the address bar
 }
 const hadLink = !!location.hash;
-sb.auth.onAuthStateChange(() => setTimeout(check, 0));
-useCode().then(check);
+// Use the link's code first, so an already signed-in person opening a used link is told it has run out
+const codeDone = useCode().catch(() => {});
+sb.auth.onAuthStateChange(() => { codeDone.then(() => setTimeout(check, 0)); });   // not returned: supabase-js waits for it
+codeDone.then(check);
 setTimeout(() => { if (!shown) { show('#problem'); if (!hadLink) $('#probText').textContent = 'Open this page from the set-up link you were sent.'; } }, 6000);
 $('#spForm').onsubmit = async e => {
   e.preventDefault(); $('#spMsg').hidden = true;

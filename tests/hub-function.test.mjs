@@ -55,7 +55,7 @@ console.log('\nSign in with mobile and PIN');
 let r = await call({ mobile: '0412 345 678', pin: '123456' });
 ok(r.body.ok && r.body.session.access_token === 'access-u1' && r.body.session.refresh_token === 'refresh-u1', 'right mobile and PIN gives a Supabase session for the linked login');
 ok(r.body.name === 'Mark' && r.body.role === 'admin' && r.body.email === 'mark@ama.test', 'reply names the person, hub role and linked login');
-ok(hubCalls.join() === 'login,whoami', 'the hub checks the PIN, then confirms the token');
+ok(hubCalls.join() === 'login', 'signing in is one trip to the hub (no second check of a token it just gave)');
 const hubToken = r.body.hub_token;
 ok(tokenMobile(hubToken) === '412345678', 'the mobile is read from the hub token');
 r = await call({ mobile: '0412345678', pin: '000000' });
