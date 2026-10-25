@@ -5,6 +5,8 @@ The home page at https://theggatonklenner.github.io. People sign in and see only
 - `index.html` the home page. The apps and who sees them are listed in `draw()` near the bottom (put a new tool's icon in `icons/`). It reads each person's permissions from AMA ID Cards (`my_permissions`), Black Belt Prep (`prep_my_roles`) and the TV (`tv_can`). Each app still checks permissions itself.
 - `welcome/` where a set-up link lands: the person chooses their password.
 - `tv/` **TV display** for the dojang TV (open on the TV), and `tv/edit/` the editor. Setup below.
+- `grading/` the **grading hub**: Coloured belts, Black belts (Black Belt Prep) and ID cards.
+- `grading/coloured-belts/` **Coloured belt grading** (White to Red Three, grading to Cho Dan Bo); setup below. `grading/coloured-belts/book/` is the page families open from their invitation to book.
 - `staff/` **Staff logins**: add logins, set passwords and set roles for AMA ID Cards and Black Belt Prep in one place.
 - `supabase/functions/staff/index.ts` the Supabase function behind Staff logins.
 - `tests/` checks for the staff function and page, the home page and the welcome page.
@@ -87,3 +89,16 @@ The TV picks up changes within 20 seconds, keeps playing its last slides if the 
 - Each slide can be turned off, given its own time on screen, or set to show only between two dates.
 - **Who can use the TV** is set on the Staff logins page (Dojang TV) with tick boxes: **Editor** (everything), **Party mode** (start, stop and book parties and birthday posters; their editor shows only Party mode) and **Remote** (the phone remote). Someone with only TV access can't open AMA ID Cards or Black Belt Prep. Admins in either app can always use the TV. When this was added, everyone who could already edit the TV kept it. **New code** under Settings stops any TV using the old code until the new one is typed in.
 - Photos and videos are public to anyone with their exact link (the TV shows them without signing in), so only add what you'd put on the dojang wall.
+
+## Coloured belt grading (once, about 3 minutes)
+
+1. In Supabase, open **SQL Editor > New query**, paste the whole of `supabase/coloured-belts.sql`, and click **Run**. It uses Black Belt Prep's roles and the EFC copy (`efc_members`), so Black Belt Prep's updates come first.
+2. Deploy `supabase/functions/cb/index.ts` as an Edge Function named `cb`, with JWT verification off. It uses the same `GHL_TOKEN` and `GHL_LOCATION_ID` secrets as Black Belt Prep's texts.
+3. Open https://theggatonklenner.github.io/grading/coloured-belts/ as an admin. In **Settings**, set each belt's classes needed, weeks between gradings and fee, and paste the booking Zap's address.
+
+- **EFC is the master** for belts, last grading date and classes since then (loaded into `efc_members` from EFC's Assessment Query). Results never change EFC: passes go on **Update EFC** for the front desk to promote, then tick off.
+- **Who's ready**: eligible once they have the classes their belt needs; an instructor marks ready or not yet (with a note used in a kind "not yet" text). A new belt in EFC starts the decision fresh. "Overdue" is twice the usual weeks on a belt.
+- **Grading days** per school: add everyone marked ready, invite (wording checked first, each family gets their own booking link), see booked and paid, the belts and certificates needed, enter results on a tablet (Pass, Distinction, Re-test), download the certificates CSV (full name, belt going for, date) and text congratulations.
+- **Booking**: pressing Book on the family's page sends the booking Zap `member_id, efc_ref, date, session_id, location_id, location, student, belt_to`; the Zap books the EFC session, which charges the fee.
+- Roles (Black Belt Prep roles on Staff logins): Instructor sees and decides ready / not yet; Grading runs grading days, invites and results; Payments ticks paid; Admin also has Settings.
+- Tests: `node tests/cb-function.test.mjs` and `node tests/coloured-belts-page.test.mjs` (uses Black Belt Prep's test stand-in for Supabase).

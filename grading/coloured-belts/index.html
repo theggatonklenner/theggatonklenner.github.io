@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#04794b">
+<title>Coloured Belt Grading</title>
+<link rel="icon" href="../../icons/black-belt-prep.png">
+<link rel="apple-touch-icon" href="../../icons/black-belt-prep.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="../../config.js"></script>
+<script src="../../hub-signin.js"></script>
+<style>
+  /* Same look as the other AMA Toolkit apps */
+  :root {
+    --bg: #f3f6f4; --surface: #ffffff; --fg: #16211b; --muted: #5a6b61; --line: #dfe7e2;
+    --accent: #04794b; --on-accent: #ffffff; --accent-soft: #e3f2ea; --gold: #f2d500; --on-gold: #1d1d1d;
+    --danger: #b3261e; --danger-soft: #fbe9e7; --warn: #8a4f00; --warn-soft: #fdf1df; --info: #1f5fa8; --info-soft: #e6eefa; --hover: #eef5f1;
+    --shadow: 0 1px 2px rgba(16,33,27,.06), 0 4px 14px rgba(16,33,27,.06);
+    --font-display: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
+    --font-body: "Source Sans 3", "Segoe UI", Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1612; --surface: #16211b; --fg: #e6efe9; --muted: #93a79b; --line: #26352c;
+      --accent: #3fbf7f; --on-accent: #06150d; --accent-soft: #1b3326; --gold: #e8d23a; --on-gold: #1d1d1d;
+      --danger: #f2867d; --danger-soft: #3a1d1b; --warn: #f0b45a; --warn-soft: #3a2a12; --info: #8db8f0; --info-soft: #18263a; --hover: #1c2b23;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.25);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.45; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type=checkbox] { accent-color: var(--accent); width: 20px; height: 20px; flex: none; }
+
+  .appbar { position: sticky; top: 0; z-index: 20; background: var(--surface); border-bottom: 1px solid var(--line); padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 0; }
+  .appbar-inner { max-width: 980px; margin: 0 auto; display: flex; align-items: center; gap: 10px; padding-bottom: 8px; }
+  .home-btn { flex: none; width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line); display: inline-flex; align-items: center; justify-content: center; color: var(--muted); text-decoration: none; }
+  .home-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .home-btn svg { width: 20px; height: 20px; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; min-width: 0; }
+  .brand h1 { font-family: var(--font-display); font-weight: 700; font-size: 22px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tabs { max-width: 980px; margin: 0 auto; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  .tab { border: 0; background: none; padding: 10px 12px; font-weight: 600; color: var(--muted); border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
+  .tab[aria-selected=true] { color: var(--accent); border-bottom-color: var(--accent); }
+
+  main { max-width: 980px; margin: 0 auto; padding: 16px 16px 48px; display: flex; flex-direction: column; gap: 14px; }
+  h2 { font-family: var(--font-display); font-weight: 700; font-size: 24px; margin: 0; }
+  h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 0; }
+  .view-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .muted { color: var(--muted); } .small { font-size: 14px; }
+  .hint { font-size: 14px; color: var(--muted); margin: 0; }
+  .card { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  label, .label { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  input[type=text], input[type=email], input[type=password], input[type=search], input[type=date], input[type=time], input[type=number], input[type=url], select, textarea { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  textarea { resize: vertical; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 8px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font-weight: 600; cursor: pointer; text-decoration: none; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .btn.danger { color: var(--danger); }
+  .btn.sm { min-height: 36px; padding: 4px 12px; font-size: 14px; white-space: nowrap; }
+  .btn:disabled { opacity: .55; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+
+  .list { list-style: none; margin: 0; padding: 0; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+  .list li + li { border-top: 1px solid var(--line); }
+  .item { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: none; border: 0; text-align: left; cursor: pointer; min-height: 60px; }
+  button.item:hover { background: var(--hover); }
+  .who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .who strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { font-size: 13px; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .tags { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); white-space: nowrap; }
+  .tag.ok { background: var(--accent-soft); color: var(--accent); } .tag.warn { background: var(--warn-soft); color: var(--warn); }
+  .tag.bad { background: var(--danger-soft); color: var(--danger); } .tag.info { background: var(--info-soft); color: var(--info); }
+  .belt { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0,0,0,.25); vertical-align: -1px; flex: none; }
+  .empty { text-align: center; color: var(--muted); padding: 30px 16px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .stat { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); padding: 14px; }
+  .stat b { display: block; font-family: var(--font-display); font-size: 30px; line-height: 1.1; }
+  .stat span { font-size: 13px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: 13px; color: var(--muted); font-weight: 600; }
+  td input[type=number] { min-height: 38px; width: 90px; }
+  .auth { max-width: 380px; margin: 10vh auto 0; }
+  .banner { background: var(--warn-soft); color: var(--warn); border-radius: 12px; padding: 10px 14px; font-size: 14px; }
+
+  /* Results on a tablet: big buttons */
+  .res { display: flex; gap: 8px; flex-wrap: wrap; }
+  .res button { min-height: 54px; min-width: 110px; flex: 1; border-radius: 12px; border: 2px solid var(--line); background: var(--surface); font-weight: 700; font-size: 17px; cursor: pointer; }
+  .res button[aria-pressed=true][data-r=pass] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .res button[aria-pressed=true][data-r=distinction] { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
+  .res button[aria-pressed=true][data-r=retest] { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .rescard { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+
+  dialog { border: 0; padding: 0; background: var(--surface); color: var(--fg); border-radius: 16px; width: min(640px, calc(100% - 24px)); max-height: calc(100dvh - 24px); box-shadow: var(--shadow); }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  @media (max-width: 600px) { dialog { margin: auto 0 0; width: 100%; max-width: 100%; border-radius: 16px 16px 0 0; } }
+  .dlg { padding: 16px; display: flex; flex-direction: column; gap: 14px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .dlg-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .section { border-top: 1px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .x { border: 0; background: none; color: var(--accent); font-weight: 600; cursor: pointer; padding: 6px; }
+  dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 15px; }
+  dl.kv dt { color: var(--muted); }
+  dl.kv dd { margin: 0; }
+  #toast { inset: auto; position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); margin: 0; border: 0; width: max-content;
+    background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 15px; max-width: calc(100% - 32px); box-shadow: var(--shadow); z-index: 50; }
+  #toast[hidden] { display: none; }
+</style>
+</head>
+<body>
+<header class="appbar">
+  <div class="appbar-inner">
+    <a class="home-btn" href="../" aria-label="Back to Grading" title="Grading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h5v-6h4v6h5V9.5"/></svg></a>
+    <div class="brand"><h1>Coloured Belt Grading</h1></div>
+    <button class="btn sm" id="signOut" hidden>Sign out</button>
+  </div>
+  <nav class="tabs" id="tabs" role="tablist" hidden>
+    <button class="tab" role="tab" data-view="ready" aria-selected="true">Who's ready</button>
+    <button class="tab" role="tab" data-view="days">Grading days</button>
+    <button class="tab" role="tab" data-view="efc">Update EFC</button>
+    <button class="tab" role="tab" data-view="dash">Dashboard</button>
+    <button class="tab" role="tab" data-view="settings" data-admin>Settings</button>
+  </nav>
+</header>
+
+<main>
+  <section id="signIn" class="card auth" hidden>
+    <h2>Sign in</h2>
+    <p class="hint">Use your AMA login, or your hub mobile and PIN.</p>
+    <form id="siForm" style="display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label for="siEmail">Email</label><input type="email" id="siEmail" autocomplete="username" required></div>
+      <div class="field"><label for="siPass">Password</label><input type="password" id="siPass" autocomplete="current-password" required></div>
+      <button class="btn primary" id="siGo" type="submit">Sign in</button>
+    </form>
+  </section>
+  <section id="noAccess" class="card" hidden><h2>No access yet</h2><p class="hint" id="noAccessText"></p></section>
+  <p id="loading" class="hint">Loading…</p>
+
+  <section id="view-ready" class="view" hidden></section>
+  <section id="view-days" class="view" hidden></section>
+  <section id="view-day" class="view" hidden></section>
+  <section id="view-efc" class="view" hidden></section>
+  <section id="view-dash" class="view" hidden></section>
+  <section id="view-settings" class="view" hidden></section>
+</main>
+
+<dialog id="dlg"></dialog>
+<div id="toast" role="status" popover="manual" hidden></div>
+
+<script>
+const CFG = window.TOOLKIT_CONFIG || {};
+const sb = supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY);
+const FN = CFG.SUPABASE_URL + '/functions/v1/cb';
+// Sign in with the AMA Admin Hub mobile and PIN (hub-signin.js)
+const HUB = { sb, url: CFG.SUPABASE_URL, key: CFG.SUPABASE_KEY, form: '#siForm' };
+if (window.AmaHub) { AmaHub.mount(HUB); AmaHub.recheck(HUB); }
+
+const SCHOOLS = ['Marrickville', 'Sydenham', 'Concord', 'West', 'Sylvania'];
+const RESULT = { pass: 'Pass', distinction: 'Distinction', retest: 'Re-test' };
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const dlg = $('#dlg');
+const state = { roles: [], me: '', students: [], belts: [], settings: {}, days: [], entries: [], messages: [], view: 'ready', day: null, resultsMode: false };
+const has = (...r) => state.roles.includes('admin') || r.some(x => state.roles.includes(x));
+const canApprove = () => has('instructor', 'grading'), canGrade = () => has('grading'), canPay = () => has('grading', 'payments'), isAdmin = () => state.roles.includes('admin');
+
+let toastTimer;
+function toast(msg, ms = 4000) {
+  const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer);
+  try { if (t.matches(':popover-open')) t.hidePopover(); t.showPopover(); } catch (e) { /* older browsers */ }
+  toastTimer = setTimeout(() => { t.hidden = true; try { t.hidePopover(); } catch (e) { /* ignore */ } }, ms);
+}
+function openDlg(html) {
+  dlg.innerHTML = html;
+  dlg.querySelectorAll('[data-close]').forEach(b => { b.type = 'button'; b.onclick = e => { e.preventDefault(); dlg.close(); }; });
+  if (!dlg.open) dlg.showModal();
+}
+const errMsg = e => (e && (e.message || e.error_description || e.details)) || String(e);
+async function run(q, okMsg) { const { data, error } = await q; if (error) throw error; if (okMsg) toast(okMsg); return data; }
+
+// Dates and words
+const fmtDate = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '';
+const longDate = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
+const fmtTime = t => { if (!t) return ''; const [h, m] = String(t).split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`; };
+const firstName = n => String(n || '').trim().split(/\s+/)[0] || '';
+const short = b => String(b || '').replace(/ Belt$/, '');
+const money = n => n == null ? '' : '$' + Number(n).toFixed(Number(n) % 1 ? 2 : 0);
+const today = () => new Date().toISOString().slice(0, 10);
+const beltOf = name => state.belts.find(b => b.belt === name) || {};
+const swatch = name => `<span class="belt" style="background:${esc(beltOf(name).colour || '#999')}"></span>`;
+const student = key => state.students.find(s => s.member_key === key);
+const dayOf = id => state.days.find(d => d.day_id === id);
+const entriesOf = id => state.entries.filter(e => e.day_id === id);
+const bookingLink = e => new URL('book/#t=' + e.token, location.href.replace(/[#?].*$/, '').replace(/index\.html$/, '')).href;
+// Messages: fill in a template
+function fill(tpl, v) {
+  return String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => v[k] != null ? v[k] : '').replace(/\s+([.,!])/g, '$1').replace(/ {2,}/g, ' ').trim();
+}
+function vars(e, s, d, extra = {}) {
+  return { parent: firstName(s && s.guardian_name) || 'there', first: firstName((s && s.full_name) || (e && e.full_name)), next: (e && e.belt_to) || (s && s.next_belt) || '',
+    school: (d && d.location) || (s && s.location) || '', date: d ? longDate(d.grading_date) : '', time: d && d.start_time ? ' at ' + fmtTime(d.start_time) : '',
+    link: e ? bookingLink(e) : '', distinction: e && e.result === 'distinction' ? ' with distinction' : '', note: (s && s.approval_note) || '', ...extra };
+}
+const sentTo = (kind, entryId) => state.messages.some(m => m.kind === kind && m.entry_id === entryId && (m.status === 'sent' || m.status === 'test'));
+
+// Readiness
+const overdue = s => s.weeks_at_belt != null && s.weeks_at_belt >= 2 * (s.weeks_between || 13);
+const eligible = s => s.enough_classes;
+const openDayFor = key => state.entries.find(e => e.member_key === key && !e.result && dayOf(e.day_id) && !dayOf(e.day_id).closed);
+function readyTags(s) {
+  const t = [];
+  t.push(s.enough_classes ? `<span class="tag ok">${s.classes}/${s.classes_needed} classes</span>` : `<span class="tag warn">${s.classes}/${s.classes_needed} classes</span>`);
+  if (s.approval === 'ready') t.push('<span class="tag ok">Ready</span>');
+  else if (s.approval === 'not_yet') t.push('<span class="tag bad">Not yet</span>');
+  if (overdue(s)) t.push('<span class="tag bad" title="A long time on this belt: they may be about to drop off">Overdue</span>');
+  const od = openDayFor(s.member_key); if (od) { const d = dayOf(od.day_id); t.push(`<span class="tag info">${esc(fmtDate(d.grading_date).replace(/ \d{4}$/, ''))}</span>`); }
+  return t.join('');
+}
+
+/* ---------------- Loading ---------------- */
+async function loadAll() {
+  const q = (t, order) => { let x = sb.from(t).select('*'); if (order) x = x.order(order[0], { ascending: order[1] !== false }); return x; };
+  const [st, be, se, da, en, me] = await Promise.all([
+    q('cb_students', ['full_name']).range(0, 9999), q('cb_belts', ['sort']), q('cb_settings'), q('cb_days', ['grading_date', false]), q('cb_entries', ['full_name']).range(0, 19999),
+    sb.from('cb_messages').select('entry_id, member_key, kind, status, sent_at').order('sent_at', { ascending: false }).limit(5000)]);
+  for (const r of [st, be, se, da, en]) if (r.error) throw r.error;
+  state.students = st.data || []; state.belts = be.data || []; state.settings = (se.data || [])[0] || {};
+  state.days = da.data || []; state.entries = en.data || []; state.messages = me.data || [];
+}
+function render() {
+  $$('#tabs .tab').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.view === (state.view === 'day' ? 'days' : state.view))); b.hidden = b.dataset.admin !== undefined && !isAdmin(); });
+  $$('.view').forEach(v => v.hidden = v.id !== 'view-' + state.view);
+  ({ ready: renderReady, days: renderDays, day: renderDay, efc: renderEfc, dash: renderDash, settings: renderSettings })[state.view]();
+}
+function go(view, day) { state.view = view; if (day) state.day = day; state.resultsMode = false; render(); window.scrollTo(0, 0); }
+$$('#tabs .tab').forEach(b => b.onclick = () => go(b.dataset.view));
+
+/* ---------------- Who's ready ---------------- */
+const filt = { school: '', belt: '', show: 'eligible', q: '' };
+function renderReady() {
+  const v = $('#view-ready');
+  if (!v.dataset.built) {
+    v.dataset.built = '1';
+    v.innerHTML = `<div class="view-head"><h2>Who's ready</h2><span class="hint" id="efcFresh"></span></div>
+      <p class="hint">Belts and classes since each student's last grading come from EFC. A student is eligible once they have the classes their belt needs (Settings); an instructor then marks them ready or not yet.</p>
+      <div class="filters">
+        <select id="fSchool" aria-label="School"><option value="">All schools</option>${SCHOOLS.map(s => `<option>${s}</option>`).join('')}</select>
+        <select id="fBelt" aria-label="Belt"><option value="">All belts</option></select>
+        <select id="fShow" aria-label="Show"><option value="eligible">Enough classes</option><option value="ready">Marked ready</option><option value="not_yet">Marked not yet</option><option value="undecided">Enough classes, not decided</option><option value="overdue">Overdue</option><option value="all">Everyone</option></select>
+        <input type="search" id="fQ" placeholder="Search name" aria-label="Search name">
+      </div>
+      <p class="hint" id="readyCount"></p>
+      <ul class="list" id="readyList"></ul>`;
+    $('#fBelt').innerHTML += state.belts.map(b => `<option value="${esc(b.belt)}">${esc(b.belt)}</option>`).join('');
+    const sync = () => { filt.school = $('#fSchool').value; filt.belt = $('#fBelt').value; filt.show = $('#fShow').value; filt.q = $('#fQ').value.trim().toLowerCase(); drawReady(); };
+    ['#fSchool', '#fBelt', '#fShow', '#fQ'].forEach(s => $(s).oninput = sync);
+  }
+  const newest = state.students.reduce((m, s) => s.efc_updated_at > m ? s.efc_updated_at : m, '');
+  $('#efcFresh').textContent = newest ? 'EFC numbers from ' + new Date(newest).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
+  drawReady();
+}
+function drawReady() {
+  const show = filt.show;
+  const list = state.students.filter(s => (!filt.school || s.location === filt.school) && (!filt.belt || s.belt === filt.belt) && (!filt.q || s.full_name.toLowerCase().includes(filt.q)) &&
+    (show === 'all' || (show === 'eligible' && eligible(s)) || (show === 'ready' && s.approval === 'ready') || (show === 'not_yet' && s.approval === 'not_yet') ||
+     (show === 'undecided' && eligible(s) && !s.approval) || (show === 'overdue' && overdue(s))))
+    .sort((a, b) => a.location.localeCompare(b.location) || a.belt_sort - b.belt_sort || a.full_name.localeCompare(b.full_name));
+  $('#readyCount').textContent = `${list.length} student${list.length === 1 ? '' : 's'}`;
+  $('#readyList').innerHTML = list.length ? list.slice(0, 400).map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}
+      <div class="who"><strong>${esc(s.full_name)}</strong><span class="meta"><span>${esc(s.location)}</span><span>·</span><span>${esc(short(s.belt))} to ${esc(short(s.next_belt))}</span><span>·</span><span>${s.weeks_at_belt ?? '?'} weeks on this belt</span></span></div>
+      <span class="tags">${readyTags(s)}</span></button></li>`).join('') + (list.length > 400 ? `<li class="empty">Showing the first 400. Narrow it down with the filters.</li>` : '')
+    : '<li class="empty">No one matches.</li>';
+  $$('#readyList [data-key]').forEach(b => b.onclick = () => openStudent(b.dataset.key));
+}
+function openStudent(key) {
+  const s = student(key); if (!s) return;
+  const hist = state.entries.filter(e => e.member_key === key).map(e => ({ e, d: dayOf(e.day_id) })).filter(x => x.d);
+  openDlg(`<div class="dlg">
+    <div class="dlg-head"><div><h3>${esc(s.full_name)}</h3><p class="hint">${esc(s.location)} · ${esc(s.efc_reference || '')}</p></div><button class="x" data-close>Close</button></div>
+    <dl class="kv">
+      <dt>Belt</dt><dd>${swatch(s.belt)} ${esc(s.belt)}, grading to <b>${esc(s.next_belt)}</b></dd>
+      <dt>Last grading</dt><dd>${s.promoted_on ? esc(fmtDate(s.promoted_on)) + ` (${s.weeks_at_belt} weeks ago)` : 'Not in EFC'}${overdue(s) ? ' <span class="tag bad">Overdue</span>' : ''}</dd>
+      <dt>Classes since</dt><dd><b>${s.classes}</b> of ${s.classes_needed} needed ${s.enough_classes ? '<span class="tag ok">Enough</span>' : `<span class="tag warn">${s.classes_needed - s.classes} more</span>`}</dd>
+      <dt>Parent</dt><dd>${esc([s.guardian_name, s.phone].filter(Boolean).join(' · ') || '—')}</dd>
+    </dl>
+    ${canApprove() ? `<form id="apForm" class="section"><h3>Instructor</h3>
+      <div class="row"><button type="button" class="btn ${s.approval === 'ready' ? 'primary' : ''}" id="apReady">Ready to grade</button><button type="button" class="btn ${s.approval === 'not_yet' ? 'danger' : ''}" id="apNot">Not yet</button>${s.approval ? '<button type="button" class="btn sm" id="apClear">Clear</button>' : ''}</div>
+      <div class="field"><label for="apNote">What to work on (goes in the "not yet" message)</label><textarea id="apNote" rows="2" placeholder="e.g. Keep practising your pattern at home.">${esc(s.approval_note || '')}</textarea></div>
+      ${s.approval ? `<p class="hint">Marked ${s.approval === 'ready' ? 'ready' : 'not yet'} by ${esc(s.decided_by || 'staff')}.</p>` : ''}
+      ${s.approval === 'not_yet' ? '<div class="row"><button type="button" class="btn" id="apText">Text the parent a kind message</button></div>' : ''}
+    </form>` : `<p class="hint">${s.approval ? 'Marked ' + (s.approval === 'ready' ? 'ready' : 'not yet') : 'Not decided yet'}</p>`}
+    ${hist.length ? `<div class="section"><h3>Gradings</h3><ul class="list">${hist.map(x => `<li><div class="item" style="cursor:default"><div class="who"><strong>${esc(fmtDate(x.d.grading_date))}</strong><span class="meta">${esc(x.d.location)} · to ${esc(x.e.belt_to)}</span></div><span class="tags">${x.e.result ? `<span class="tag ${x.e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[x.e.result]}</span>` : x.e.booked_at ? '<span class="tag ok">Booked</span>' : x.e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Added</span>'}</span></div></li>`).join('')}</ul></div>` : ''}
+  </div>`);
+  const decide = async status => {
+    try {
+      if (status) await run(sb.from('cb_approvals').upsert({ member_key: key, belt: s.belt, status, note: $('#apNote').value.trim() || null, decided_by: state.me, decided_at: new Date().toISOString() }), status === 'ready' ? 'Marked ready' : 'Marked not yet');
+      else await run(sb.from('cb_approvals').delete().eq('member_key', key), 'Cleared');
+      await loadAll(); render(); openStudent(key);
+    } catch (e) { toast(errMsg(e), 6000); }
+  };
+  const r = $('#apReady'); if (r) r.onclick = () => decide('ready');
+  const n = $('#apNot'); if (n) n.onclick = () => decide('not_yet');
+  const c = $('#apClear'); if (c) c.onclick = () => decide(null);
+  const t = $('#apText'); if (t) t.onclick = () => composeTexts('not_ready', [{ member_key: key, entry_id: null, s, e: null, d: null }]);
+}
+
+/* ---------------- Texts (invites, congratulations, not yet) ---------------- */
+const KIND_NAME = { invite: 'Invitations', congrats: 'Congratulations', not_ready: 'Not yet messages' };
+const KIND_TPL = { invite: 'invite_text', congrats: 'congrats_text', not_ready: 'not_ready_text' };
+// people: [{ member_key, entry_id, s, e, d }]
+function composeTexts(kind, people) {
+  const tpl = state.settings[KIND_TPL[kind]] || '';
+  const preview = p => fill($('#txTpl').value, vars(p.e, p.s, p.d));
+  openDlg(`<form id="txForm" class="dlg">
+    <div class="dlg-head"><div><h3>${KIND_NAME[kind]}</h3><p class="hint">Check the wording, then send. Each family gets their own text from AMA through GoHighLevel.</p></div><button class="x" data-close>Close</button></div>
+    <div class="field"><label for="txTpl">Message</label><textarea id="txTpl" rows="4">${esc(tpl)}</textarea>
+      <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {distinction} {note}. Change the saved wording in Settings.</p></div>
+    <div class="field"><span class="label">Preview for ${esc(people[0].s ? people[0].s.full_name : people[0].e.full_name)}</span><div class="card" style="box-shadow:none;border:1px solid var(--line)" id="txPrev"></div></div>
+    <ul class="list" id="txList" style="max-height:240px;overflow:auto">${people.map((p, i) => { const ph = p.s && p.s.phone; return `<li><label class="item" style="cursor:pointer;min-height:48px"><input type="checkbox" data-i="${i}" ${ph ? 'checked' : 'disabled'}><div class="who"><strong>${esc((p.s && p.s.full_name) || p.e.full_name)}</strong><span class="meta">${ph ? esc(ph) : '<span style="color:var(--danger)">No mobile in EFC</span>'}</span></div></label></li>`; }).join('')}</ul>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" id="txGo" type="submit">Send</button></div>
+  </form>`);
+  const upd = () => { $('#txPrev').textContent = preview(people[0]); const n = $$('#txList input:checked').length; $('#txGo').textContent = `Send ${n} text${n === 1 ? '' : 's'}`; $('#txGo').disabled = !n; };
+  $('#txTpl').oninput = upd; $$('#txList input').forEach(c => c.onchange = upd); upd();
+  $('#txForm').onsubmit = async ev => {
+    ev.preventDefault();
+    const items = $$('#txList input:checked').map(c => { const p = people[+c.dataset.i]; return { member_key: p.member_key, entry_id: p.entry_id, body: preview(p) }; });
+    $('#txGo').disabled = true; $('#txGo').textContent = 'Sending…';
+    try {
+      const r = await fnCall({ action: 'send', kind, items });
+      const bad = (r.results || []).filter(x => !x.ok);
+      toast(`${r.sent} sent${r.testing ? ' (test mode: logged, not sent)' : ''}${bad.length ? `, ${bad.length} not sent: ${bad[0].error}` : ''}`, 7000);
+      dlg.close(); await loadAll(); render();
+    } catch (e) { toast(errMsg(e), 7000); upd(); }
+  };
+}
+async function fnCall(body) {
+  const { data: { session } } = await sb.auth.getSession();
+  let res;
+  try { res = await fetch(FN, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CFG.SUPABASE_KEY, ...(session ? { Authorization: 'Bearer ' + session.access_token } : {}) }, body: JSON.stringify(body) }); }
+  catch (e) { throw new Error('Could not reach the "cb" function in Supabase.'); }
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 404 && !data.error) throw new Error('The "cb" function is not set up in Supabase yet.');
+  if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+  return data;
+}
+
+/* ---------------- Grading days ---------------- */
+function renderDays() {
+  const v = $('#view-days');
+  const up = state.days.filter(d => !d.closed && d.grading_date >= today()).sort((a, b) => a.grading_date.localeCompare(b.grading_date));
+  const past = state.days.filter(d => !up.includes(d));
+  const row = d => { const es = entriesOf(d.day_id), n = k => es.filter(k).length;
+    return `<li><button class="item" data-day="${d.day_id}"><div class="who"><strong>${esc(fmtDate(d.grading_date))}${d.start_time ? ' · ' + fmtTime(d.start_time) : ''}</strong><span class="meta"><span>${esc(d.location)}</span>${d.efc_session ? `<span>·</span><span>${esc(d.efc_session)}</span>` : ''}</span></div>
+      <span class="tags"><span class="tag">${es.length} students</span>${es.length ? `<span class="tag info">${n(e => e.invited_at)} invited</span><span class="tag ok">${n(e => e.booked_at)} booked</span>` : ''}${n(e => e.result) ? `<span class="tag ok">${n(e => e.result)} results</span>` : ''}${d.closed ? '<span class="tag">Finished</span>' : ''}</span></button></li>`; };
+  v.innerHTML = `<div class="view-head"><h2>Grading days</h2>${canGrade() ? '<button class="btn primary sm" id="newDay">New grading day</button>' : ''}</div>
+    <h3>Coming up</h3><ul class="list">${up.length ? up.map(row).join('') : '<li class="empty">No grading days coming up.</li>'}</ul>
+    ${past.length ? `<h3>Earlier</h3><ul class="list">${past.map(row).join('')}</ul>` : ''}`;
+  $$('#view-days [data-day]').forEach(b => b.onclick = () => go('day', b.dataset.day));
+  const nd = $('#newDay'); if (nd) nd.onclick = () => openDayForm();
+}
+function openDayForm(d = null) {
+  openDlg(`<form id="dayForm" class="dlg">
+    <div class="dlg-head"><h3>${d ? 'Edit grading day' : 'New grading day'}</h3><button class="x" data-close>Close</button></div>
+    <div class="grid2"><div class="field"><label for="dSchool">School</label><select id="dSchool">${SCHOOLS.map(s => `<option${d && d.location === s ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
+      <div class="field"><label for="dDate">Date</label><input type="date" id="dDate" required value="${esc(d ? d.grading_date : '')}"></div>
+      <div class="field"><label for="dTime">Start time</label><input type="time" id="dTime" value="${esc(d && d.start_time ? String(d.start_time).slice(0, 5) : '')}"></div></div>
+    <div class="grid2"><div class="field"><label for="dSess">EFC grading session (name)</label><input type="text" id="dSess" value="${esc(d ? d.efc_session || '' : '')}" placeholder="e.g. Coloured Belt Grading"></div>
+      <div class="field"><label for="dSessId">EFC session ID (optional)</label><input type="text" id="dSessId" value="${esc(d ? d.efc_session_id || '' : '')}" autocomplete="off"></div></div>
+    <p class="hint">Families who press Book are booked into this EFC session through your Zap, which is how the fee is charged. If your Zap already picks the session for each school, leave the ID blank.</p>
+    <div class="field"><label for="dNotes">Notes</label><textarea id="dNotes" rows="2">${esc(d ? d.notes || '' : '')}</textarea></div>
+    <div class="row" style="justify-content:flex-end">${d ? '<button type="button" class="btn danger" id="dDel">Delete</button>' : ''}<button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="dGo">${d ? 'Save' : 'Add'}</button></div>
+  </form>`);
+  $('#dayForm').onsubmit = async e => {
+    e.preventDefault();
+    const rec = { location: $('#dSchool').value, grading_date: $('#dDate').value, start_time: $('#dTime').value || null, efc_session: $('#dSess').value.trim() || null, efc_session_id: $('#dSessId').value.trim() || null, notes: $('#dNotes').value.trim() || null };
+    try {
+      let id = d && d.day_id;
+      if (d) await run(sb.from('cb_days').update(rec).eq('day_id', id), 'Saved');
+      else { const r = await run(sb.from('cb_days').insert(rec).select()); id = r[0].day_id; toast('Grading day added'); }
+      dlg.close(); await loadAll(); go('day', id);
+    } catch (er) { toast(errMsg(er), 6000); }
+  };
+  const del = $('#dDel');
+  if (del) del.onclick = async () => {
+    if (entriesOf(d.day_id).some(x => x.booked_at || x.result) && !confirm('Students are booked or have results on this day. Delete it anyway?')) return;
+    try { await run(sb.from('cb_days').delete().eq('day_id', d.day_id), 'Grading day deleted'); dlg.close(); await loadAll(); go('days'); } catch (er) { toast(errMsg(er), 6000); }
+  };
+}
+
+function renderDay() {
+  const d = dayOf(state.day), v = $('#view-day');
+  if (!d) return go('days');
+  const es = entriesOf(d.day_id).sort((a, b) => (beltOf(a.belt_from).sort || 0) - (beltOf(b.belt_from).sort || 0) || a.full_name.localeCompare(b.full_name));
+  if (state.resultsMode) return renderResults(d, es);
+  const n = k => es.filter(k).length;
+  const notInvited = es.filter(e => !e.invited_at && !e.result);
+  const passed = es.filter(e => e.result === 'pass' || e.result === 'distinction');
+  const toCongrats = passed.filter(e => !sentTo('congrats', e.entry_id));
+  const needs = {}; es.filter(e => e.result !== 'retest').forEach(e => { needs[e.belt_to] = (needs[e.belt_to] || 0) + 1; });
+  v.innerHTML = `<div class="view-head"><div><button class="x" id="backDays" style="padding:0">‹ Grading days</button><h2>${esc(d.location)} · ${esc(fmtDate(d.grading_date))}</h2>
+      <p class="hint">${d.start_time ? fmtTime(d.start_time) + ' · ' : ''}${esc(d.efc_session || 'No EFC session named')}${d.notes ? ' · ' + esc(d.notes) : ''}</p></div>
+      ${canGrade() ? '<button class="btn sm" id="editDay">Edit</button>' : ''}</div>
+    <div class="stats">
+      <div class="stat"><b>${es.length}</b><span>students</span></div><div class="stat"><b>${n(e => e.invited_at)}</b><span>invited</span></div>
+      <div class="stat"><b>${n(e => e.booked_at)}</b><span>booked in EFC</span></div><div class="stat"><b>${n(e => e.paid)}</b><span>paid</span></div>
+      <div class="stat"><b>${passed.length}</b><span>passed</span></div></div>
+    ${canGrade() && !d.closed ? `<div class="card"><h3>Students</h3><div class="row">
+        <button class="btn" id="addReady">Add everyone marked ready (${d.location})</button><button class="btn" id="addOne">Add a student</button>
+        <button class="btn primary" id="sendInv" ${notInvited.length ? '' : 'disabled'}>Invite ${notInvited.length || ''}</button></div>
+        <p class="hint">Only students marked ready are added automatically. Invitations include each family's booking link; you check the wording before anything is sent.</p></div>` : ''}
+    <ul class="list" id="entryList">${es.length ? es.map(e => `<li><button class="item" data-entry="${e.entry_id}">${swatch(e.belt_from)}
+        <div class="who"><strong>${esc(e.full_name)}</strong><span class="meta">${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}${e.booking_error ? ' · <span style="color:var(--danger)">Booking failed</span>' : ''}</span></div>
+        <span class="tags">${e.result ? `<span class="tag ${e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[e.result]}</span>` : ''}${e.booked_at ? '<span class="tag ok">Booked</span>' : e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Not invited</span>'}${e.paid ? '<span class="tag ok">Paid</span>' : e.booked_at ? '<span class="tag warn">Unpaid</span>' : ''}</span></button></li>`).join('') : '<li class="empty">No students on this day yet.</li>'}</ul>
+    ${es.length ? `<div class="card"><h3>Getting ready</h3>
+      <p class="hint">New belts and certificates needed (everyone not marked re-test${n(e => e.result) ? '' : ', until results are in'}). EFC doesn't hold belt sizes, so check sizes against the list.</p>
+      <table><thead><tr><th>Belt</th><th>Belts</th><th>Certificates</th></tr></thead><tbody>${Object.entries(needs).sort((a, b) => (beltOf(a[0]).sort || 99) - (beltOf(b[0]).sort || 99)).map(([b, c]) => `<tr><td>${esc(b)}</td><td>${c}</td><td>${c}</td></tr>`).join('')}</tbody></table>
+      <div class="row"><button class="btn" id="printList">Print the day's list</button><button class="btn" id="csvAll">Certificates CSV (everyone)</button></div></div>` : ''}
+    ${es.length && canGrade() ? `<div class="card"><h3>On the day</h3><div class="row">
+      <button class="btn primary" id="resultsBtn">Enter results</button>
+      <button class="btn" id="csvPassed" ${passed.length ? '' : 'disabled'}>Certificates CSV (passed)</button>
+      <button class="btn" id="sendCongrats" ${toCongrats.length ? '' : 'disabled'}>Text congratulations${toCongrats.length ? ' (' + toCongrats.length + ')' : ''}</button>
+      <button class="btn" id="closeDay">${d.closed ? 'Reopen' : 'Mark finished'}</button></div>
+      <p class="hint">Results don't change EFC: each pass goes on the Update EFC list for the front desk to promote.</p></div>` : ''}`;
+  $('#backDays').onclick = () => go('days');
+  const on = (id, f) => { const b = $(id); if (b) b.onclick = f; };
+  on('#editDay', () => openDayForm(d));
+  on('#addReady', () => addStudents(d, state.students.filter(s => s.location === d.location && s.approval === 'ready')));
+  on('#addOne', () => pickStudent(d));
+  on('#sendInv', () => composeTexts('invite', notInvited.map(e => ({ member_key: e.member_key, entry_id: e.entry_id, e, s: student(e.member_key), d }))));
+  on('#resultsBtn', () => { state.resultsMode = true; render(); window.scrollTo(0, 0); });
+  on('#csvPassed', () => certCsv(d, passed));
+  on('#csvAll', () => certCsv(d, es.filter(e => e.result !== 'retest')));
+  on('#printList', () => printDay(d, es));
+  on('#sendCongrats', () => composeTexts('congrats', toCongrats.map(e => ({ member_key: e.member_key, entry_id: e.entry_id, e, s: student(e.member_key), d }))));
+  on('#closeDay', async () => { try { await run(sb.from('cb_days').update({ closed: !d.closed }).eq('day_id', d.day_id), d.closed ? 'Reopened' : 'Marked finished'); await loadAll(); render(); } catch (e) { toast(errMsg(e), 6000); } });
+  $$('#entryList [data-entry]').forEach(b => b.onclick = () => openEntry(b.dataset.entry));
+}
+async function addStudents(d, list) {
+  const have = new Set(entriesOf(d.day_id).map(e => e.member_key));
+  const add = list.filter(s => !have.has(s.member_key) && !openDayFor(s.member_key));
+  const skipped = list.length - add.length;
+  if (!add.length) return toast(list.length ? 'They are all on this or another open grading day already.' : `No one at ${d.location} is marked ready yet. Mark students ready on Who's ready.`, 6000);
+  try {
+    await run(sb.from('cb_entries').insert(add.map(s => ({ day_id: d.day_id, member_key: s.member_key, full_name: s.full_name, belt_from: s.belt, belt_to: s.next_belt }))));
+    toast(`Added ${add.length}${skipped ? `; ${skipped} already on a grading day` : ''}`, 5000); dlg.close(); await loadAll(); render();
+  } catch (e) { toast(errMsg(e), 6000); }
+}
+function pickStudent(d) {
+  openDlg(`<div class="dlg"><div class="dlg-head"><h3>Add a student</h3><button class="x" data-close>Close</button></div>
+    <input type="search" id="psQ" placeholder="Search name" aria-label="Search name"><ul class="list" id="psList" style="max-height:50vh;overflow:auto"></ul></div>`);
+  const draw = () => { const q = $('#psQ').value.trim().toLowerCase();
+    const l = state.students.filter(s => s.location === d.location && (!q || s.full_name.toLowerCase().includes(q))).slice(0, 60);
+    $('#psList').innerHTML = l.map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}<div class="who"><strong>${esc(s.full_name)}</strong><span class="meta">${esc(short(s.belt))} to ${esc(short(s.next_belt))}</span></div><span class="tags">${readyTags(s)}</span></button></li>`).join('') || '<li class="empty">No one matches.</li>';
+    $$('#psList [data-key]').forEach(b => b.onclick = () => addStudents(d, [student(b.dataset.key)])); };
+  $('#psQ').oninput = draw; draw(); $('#psQ').focus();
+}
+function openEntry(id) {
+  const e = state.entries.find(x => x.entry_id === id); if (!e) return;
+  const d = dayOf(e.day_id), s = student(e.member_key);
+  openDlg(`<div class="dlg">
+    <div class="dlg-head"><div><h3>${esc(e.full_name)}</h3><p class="hint">${esc(e.belt_from)} to ${esc(e.belt_to)}</p></div><button class="x" data-close>Close</button></div>
+    <dl class="kv">
+      <dt>Invited</dt><dd>${e.invited_at ? new Date(e.invited_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' }) : 'Not yet'}</dd>
+      <dt>Booked in EFC</dt><dd>${e.booked_at ? new Date(e.booked_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' }) : e.booking_error ? `<span style="color:var(--danger)">Failed: ${esc(e.booking_error)}</span>` : 'Not yet'}</dd>
+      <dt>Fee</dt><dd>${money(beltOf(e.belt_from).fee) || 'Not set'} ${e.paid ? '<span class="tag ok">Paid</span>' : '<span class="tag warn">Unpaid</span>'}</dd>
+      <dt>Result</dt><dd>${e.result ? RESULT[e.result] : '—'}</dd>
+      ${s ? `<dt>Parent</dt><dd>${esc([s.guardian_name, s.phone].filter(Boolean).join(' · ') || '—')}</dd>` : ''}
+    </dl>
+    <div class="section"><h3>Booking link</h3><p class="hint" style="word-break:break-all">${esc(bookingLink(e))}</p><div class="row"><button class="btn sm" id="copyLink">Copy link</button></div></div>
+    <div class="section"><div class="row">
+      ${canPay() ? `<button class="btn" id="paidBtn">${e.paid ? 'Mark unpaid' : 'Mark paid'}</button>` : ''}
+      ${canGrade() && e.booked_at ? '<button class="btn" id="unbook">Clear booking</button>' : ''}
+      ${canGrade() && !e.result ? '<button class="btn danger" id="removeEntry">Take off this day</button>' : ''}</div></div>
+  </div>`);
+  $('#copyLink').onclick = async () => { try { await navigator.clipboard.writeText(bookingLink(e)); toast('Link copied'); } catch (er) { toast('Press and hold the link to copy it.'); } };
+  const p = $('#paidBtn'); if (p) p.onclick = async () => { try { await run(sb.rpc('cb_set_paid', { p_entry: e.entry_id, p_paid: !e.paid }), e.paid ? 'Marked unpaid' : 'Marked paid'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
+  const u = $('#unbook'); if (u) u.onclick = async () => { try { await run(sb.from('cb_entries').update({ booked_at: null }).eq('entry_id', e.entry_id), 'Booking cleared (cancel it in EFC too)'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
+  const r = $('#removeEntry'); if (r) r.onclick = async () => { try { await run(sb.from('cb_entries').delete().eq('entry_id', e.entry_id), 'Taken off this day'); dlg.close(); await loadAll(); render(); } catch (er) { toast(errMsg(er), 6000); } };
+}
+// Results on a tablet: one card per student, three big buttons
+function renderResults(d, es) {
+  const v = $('#view-day');
+  v.innerHTML = `<div class="view-head"><div><button class="x" id="backDay" style="padding:0">‹ Back to the day</button><h2>Results · ${esc(d.location)} ${esc(fmtDate(d.grading_date))}</h2></div><span class="hint" id="resCount"></span></div>
+    <p class="hint">Tap a result; it saves straight away. Tap it again to clear it.</p>
+    ${es.map(e => `<div class="rescard"><div class="row" style="justify-content:space-between">${swatch(e.belt_from)}<div class="who"><strong style="font-size:18px">${esc(e.full_name)}</strong><span class="meta">${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}</span></div></div>
+      <div class="res" data-entry="${e.entry_id}">${Object.entries(RESULT).map(([k, t]) => `<button type="button" data-r="${k}" aria-pressed="${e.result === k}">${t}</button>`).join('')}</div></div>`).join('')}`;
+  const count = () => { const n = state.entries.filter(x => x.day_id === d.day_id && x.result).length; $('#resCount').textContent = `${n} of ${es.length} done`; };
+  count();
+  $('#backDay').onclick = () => { state.resultsMode = false; render(); };
+  $$('.res[data-entry] button').forEach(b => b.onclick = async () => {
+    const box = b.parentElement, id = box.dataset.entry, e = state.entries.find(x => x.entry_id === id);
+    const val = e.result === b.dataset.r ? null : b.dataset.r;
+    box.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.r === val)));
+    try {
+      await run(sb.from('cb_entries').update({ result: val, result_at: val ? new Date().toISOString() : null, result_by: val ? state.me : null }).eq('entry_id', id));
+      e.result = val; count();
+    } catch (er) { toast(errMsg(er), 6000); box.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.r === e.result))); }
+  });
+}
+// Certificates: a CSV with full name, belt going for and date
+function certCsv(d, list) {
+  const q = v => /[",\n]/.test(v) ? '"' + String(v).replace(/"/g, '""') + '"' : v;
+  const date = new Date(d.grading_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+  const csv = ['Full name,Belt going for,Date', ...list.map(e => [e.full_name, e.belt_to, date].map(q).join(','))].join('\r\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
+  a.download = `certificates-${d.location.toLowerCase()}-${d.grading_date}.csv`; document.body.append(a); a.click(); a.remove();
+  toast(`Certificates CSV: ${list.length} ${list.length === 1 ? 'person' : 'people'}`);
+}
+function printDay(d, es) {
+  const w = window.open('', '_blank'); if (!w) return toast('Allow pop-ups to print.');
+  w.document.write(`<!doctype html><title>${esc(d.location)} grading ${esc(d.grading_date)}</title><style>body{font:14px Arial,sans-serif;margin:24px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #999;padding:6px;text-align:left}</style>
+    <h2>${esc(d.location)} coloured belt grading · ${esc(fmtDate(d.grading_date))} ${esc(fmtTime(d.start_time))}</h2>
+    <table><tr><th>Name</th><th>From</th><th>To</th><th>Booked</th><th>Paid</th><th>Result</th></tr>${es.map(e => `<tr><td>${esc(e.full_name)}</td><td>${esc(e.belt_from)}</td><td>${esc(e.belt_to)}</td><td>${e.booked_at ? 'Yes' : ''}</td><td>${e.paid ? 'Yes' : ''}</td><td>${e.result ? RESULT[e.result] : ''}</td></tr>`).join('')}</table>`);
+  w.document.close(); w.focus(); w.print();
+}
+
+/* ---------------- Update EFC (checklist) ---------------- */
+function renderEfc() {
+  const v = $('#view-efc');
+  const todo = state.entries.filter(e => (e.result === 'pass' || e.result === 'distinction') && !e.efc_done).map(e => ({ e, d: dayOf(e.day_id) })).filter(x => x.d)
+    .sort((a, b) => a.d.grading_date.localeCompare(b.d.grading_date) || a.e.full_name.localeCompare(b.e.full_name));
+  const done = state.entries.filter(e => e.efc_done).sort((a, b) => String(b.efc_done_at).localeCompare(String(a.efc_done_at))).slice(0, 30);
+  v.innerHTML = `<div class="view-head"><h2>Update EFC</h2></div>
+    <p class="hint">EFC is the master for belts. Promote each of these students in EFC, then tick them off. The next EFC update brings the new belt back here.</p>
+    <ul class="list">${todo.length ? todo.map(({ e, d }) => `<li><label class="item" style="cursor:pointer"><input type="checkbox" data-efc="${e.entry_id}" ${canGrade() ? '' : 'disabled'}>
+      <div class="who"><strong>${esc(e.full_name)}</strong><span class="meta">${esc(d.location)} · ${esc(fmtDate(d.grading_date))} · ${esc(e.belt_from)} to <b>${esc(e.belt_to)}</b>${e.result === 'distinction' ? ' · distinction' : ''}</span></div></label></li>`).join('') : '<li class="empty">Nothing to update in EFC.</li>'}</ul>
+    ${done.length ? `<h3>Recently done</h3><ul class="list">${done.map(e => `<li><div class="item" style="cursor:default"><div class="who"><strong>${esc(e.full_name)}</strong><span class="meta">${esc(e.belt_to)} · ${esc(e.efc_done_by || '')}</span></div>${canGrade() ? `<button class="btn sm" data-undo="${e.entry_id}">Undo</button>` : ''}</div></li>`).join('')}</ul>` : ''}`;
+  $$('[data-efc]').forEach(c => c.onchange = async () => {
+    try { await run(sb.from('cb_entries').update({ efc_done: true, efc_done_at: new Date().toISOString(), efc_done_by: state.me }).eq('entry_id', c.dataset.efc), 'Ticked off'); await loadAll(); render(); }
+    catch (e) { c.checked = false; toast(errMsg(e), 6000); }
+  });
+  $$('[data-undo]').forEach(b => b.onclick = async () => { try { await run(sb.from('cb_entries').update({ efc_done: false, efc_done_at: null, efc_done_by: null }).eq('entry_id', b.dataset.undo)); await loadAll(); render(); } catch (e) { toast(errMsg(e), 6000); } });
+}
+
+/* ---------------- Dashboard ---------------- */
+function renderDash() {
+  const v = $('#view-dash');
+  const school = v.dataset.school || '';
+  const inSchool = s => !school || s === school;
+  const days = state.days.filter(d => inSchool(d.location)), ids = new Set(days.map(d => d.day_id));
+  const es = state.entries.filter(e => ids.has(e.day_id));
+  const results = es.filter(e => e.result), passes = results.filter(e => e.result !== 'retest');
+  const revenue = es.filter(e => e.paid).reduce((t, e) => t + Number(beltOf(e.belt_from).fee || 0), 0);
+  const st = state.students.filter(s => inSchool(s.location));
+  const od = st.filter(s => overdue(s) && !openDayFor(s.member_key));
+  const ready = st.filter(s => s.approval === 'ready' && !openDayFor(s.member_key));
+  const months = {}; results.forEach(e => { const d = dayOf(e.day_id); const k = d.grading_date.slice(0, 7); months[k] = months[k] || { n: 0, p: 0, r: 0 }; months[k].n++; if (e.result !== 'retest') months[k].p++; });
+  es.filter(e => e.paid).forEach(e => { const k = dayOf(e.day_id).grading_date.slice(0, 7); months[k] = months[k] || { n: 0, p: 0, r: 0 }; months[k].r += Number(beltOf(e.belt_from).fee || 0); });
+  const mname = k => new Date(k + '-01T00:00:00').toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
+  v.innerHTML = `<div class="view-head"><h2>Dashboard</h2><select id="dashSchool" aria-label="School" style="width:auto"><option value="">All schools</option>${SCHOOLS.map(s => `<option${s === school ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
+    <div class="stats">
+      <div class="stat"><b>${st.filter(eligible).length}</b><span>with enough classes</span></div>
+      <div class="stat"><b>${ready.length}</b><span>marked ready, not on a grading day</span></div>
+      <div class="stat"><b>${results.length ? Math.round(passes.length / results.length * 100) + '%' : '—'}</b><span>pass rate (${passes.length} of ${results.length})</span></div>
+      <div class="stat"><b>${money(revenue) || '$0'}</b><span>grading fees paid</span></div>
+      <div class="stat"><b style="color:${od.length ? 'var(--danger)' : 'inherit'}">${od.length}</b><span>overdue for a grading</span></div></div>
+    <div class="card"><h3>Each month</h3>${Object.keys(months).length ? `<table><thead><tr><th>Month</th><th>Graded</th><th>Passed</th><th>Pass rate</th><th>Fees paid</th></tr></thead><tbody>${Object.keys(months).sort().reverse().map(k => `<tr><td>${esc(mname(k))}</td><td>${months[k].n}</td><td>${months[k].p}</td><td>${months[k].n ? Math.round(months[k].p / months[k].n * 100) + '%' : '—'}</td><td>${money(months[k].r)}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No results yet.</p>'}</div>
+    <div class="card"><h3>Overdue for a grading</h3><p class="hint">On their belt at least twice as long as usual, and not on a grading day. A long gap is often a sign a student is about to drop off.</p>
+      ${od.length ? `<ul class="list">${od.sort((a, b) => b.weeks_at_belt - a.weeks_at_belt).slice(0, 50).map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}<div class="who"><strong>${esc(s.full_name)}</strong><span class="meta">${esc(s.location)} · ${esc(short(s.belt))} · ${s.weeks_at_belt} weeks · ${s.classes} classes</span></div></button></li>`).join('')}</ul>` : '<p class="hint">No one is overdue.</p>'}</div>`;
+  $('#dashSchool').onchange = () => { v.dataset.school = $('#dashSchool').value; renderDash(); };
+  $$('#view-dash [data-key]').forEach(b => b.onclick = () => openStudent(b.dataset.key));
+}
+
+/* ---------------- Settings (admins) ---------------- */
+function renderSettings() {
+  const v = $('#view-settings'), st = state.settings;
+  v.innerHTML = `<div class="view-head"><h2>Settings</h2></div>
+    <form id="beltForm" class="card"><h3>Each belt</h3>
+      <p class="hint">Classes needed since their last grading (from EFC), the usual weeks between gradings (twice this is "overdue"), and the grading fee shown in invitations. EFC charges the fee through the grading session.</p>
+      <div style="overflow-x:auto"><table><thead><tr><th>Belt</th><th>Grades to</th><th>Classes needed</th><th>Weeks between</th><th>Fee ($)</th></tr></thead><tbody>
+      ${state.belts.map(b => `<tr data-belt="${esc(b.belt)}"><td>${swatch(b.belt)} ${esc(short(b.belt))}</td><td>${esc(short(b.next_belt))}</td>
+        <td><input type="number" min="0" max="500" name="classes" value="${b.classes_needed}" aria-label="${esc(b.belt)} classes needed"></td>
+        <td><input type="number" min="0" max="104" name="weeks" value="${b.weeks_between}" aria-label="${esc(b.belt)} weeks between"></td>
+        <td><input type="number" min="0" step="0.01" name="fee" value="${b.fee ?? ''}" aria-label="${esc(b.belt)} fee"></td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="row"><button class="btn primary" type="submit" id="saveBelts">Save belts</button></div></form>
+    <form id="msgForm" class="card"><h3>Messages</h3>
+      <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {distinction} {note}. You can still change the wording before each send.</p>
+      <div class="field"><label for="sInvite">Invitation</label><textarea id="sInvite" rows="3">${esc(st.invite_text || '')}</textarea></div>
+      <div class="field"><label for="sCongrats">Congratulations</label><textarea id="sCongrats" rows="3">${esc(st.congrats_text || '')}</textarea></div>
+      <div class="field"><label for="sNot">Not yet</label><textarea id="sNot" rows="3">${esc(st.not_ready_text || '')}</textarea></div>
+      <div class="field"><label for="sHook">Booking Zap (Zapier Catch Hook address)</label><input type="url" id="sHook" value="${esc(st.booking_webhook || '')}" placeholder="https://hooks.zapier.com/hooks/catch/...">
+        <p class="hint">When a family presses Book, this Zap gets member_id, efc_ref, date, session_id, location_id, location, student and belt_to, and books the EFC session.</p></div>
+      <div class="row"><button class="btn primary" type="submit" id="saveMsgs">Save</button><button class="btn" type="button" id="checkTexts">Check texting</button></div></form>`;
+  $('#beltForm').onsubmit = async e => {
+    e.preventDefault(); $('#saveBelts').disabled = true;
+    try {
+      for (const tr of $$('#beltForm tr[data-belt]')) {
+        const val = n => tr.querySelector(`[name=${n}]`).value;
+        await run(sb.from('cb_belts').update({ classes_needed: +val('classes') || 0, weeks_between: +val('weeks') || 0, fee: val('fee') === '' ? null : +val('fee'), updated_at: new Date().toISOString() }).eq('belt', tr.dataset.belt));
+      }
+      toast('Belts saved'); await loadAll(); render();
+    } catch (er) { toast(errMsg(er), 6000); $('#saveBelts').disabled = false; }
+  };
+  $('#msgForm').onsubmit = async e => {
+    e.preventDefault();
+    const hook = $('#sHook').value.trim();
+    if (hook && !/^https:\/\/hooks\.zapier\.com\//.test(hook)) return toast('The booking Zap address should start with https://hooks.zapier.com/', 6000);
+    try { await run(sb.from('cb_settings').update({ invite_text: $('#sInvite').value.trim(), congrats_text: $('#sCongrats').value.trim(), not_ready_text: $('#sNot').value.trim(), booking_webhook: hook || null, updated_at: new Date().toISOString() }).eq('id', 1), 'Saved'); await loadAll(); }
+    catch (er) { toast(errMsg(er), 6000); }
+  };
+  $('#checkTexts').onclick = async () => { try { const r = await fnCall({ action: 'check' }); toast(r.ready ? (r.testing ? 'Texting is in test mode (logged, not sent).' : 'Texting is set up.') : 'Texting is not set up: add GHL_TOKEN and GHL_LOCATION_ID in Supabase.', 6000); } catch (e) { toast(errMsg(e), 6000); } };
+}
+
+/* ---------------- Start ---------------- */
+function showOnly(id) { ['#signIn', '#noAccess', '#loading'].forEach(s => $(s).hidden = s !== id); if (id) { $$('.view').forEach(v => v.hidden = true); $('#tabs').hidden = true; } }
+async function start() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { showOnly('#signIn'); $('#signOut').hidden = true; return; }
+  $('#signOut').hidden = false;
+  state.me = (session.user.email || '').toLowerCase();
+  const { data: roles } = await sb.rpc('prep_my_roles');
+  state.roles = roles || [];
+  if (!has('instructor', 'grading', 'payments')) {
+    showOnly('#noAccess');
+    $('#noAccessText').textContent = `${(session.user.user_metadata || {}).full_name || state.me} can't use coloured belt grading yet. An admin can give you the Instructor, Grading or Payments role on Staff logins.`;
+    return;
+  }
+  try { await loadAll(); }
+  catch (e) { showOnly('#noAccess'); $('#noAccessText').textContent = /cb_|does not exist|schema cache/i.test(errMsg(e)) ? 'Coloured belt grading isn\'t set up in Supabase yet: run supabase/coloured-belts.sql in the SQL Editor.' : errMsg(e); return; }
+  showOnly(null); $('#tabs').hidden = false;
+  if (!has('instructor', 'grading')) state.view = 'days';   // payments staff: grading days (paid)
+  render();
+}
+$('#siForm').onsubmit = async e => {
+  e.preventDefault(); $('#siGo').disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email: $('#siEmail').value.trim(), password: $('#siPass').value });
+  $('#siGo').disabled = false;
+  if (error) return toast(/invalid/i.test(error.message) ? 'Wrong email or password.' : error.message, 6000);
+  start();
+};
+$('#signOut').onclick = async () => { await sb.auth.signOut(); location.reload(); };
+start();
+</script>
+</body>
+</html>

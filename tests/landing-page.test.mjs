@@ -78,7 +78,7 @@ try {
   ok((await page.textContent('#siMsg')).includes('Wrong email or password'), 'a wrong password says so');
   await page.fill('#siPass', 'password1'); await page.click('#siGo'); await page.waitForSelector('#apps:not([hidden])');
   let n = await names(page);
-  ok(['Black Belt Prep', 'AMA ID Cards', 'TV Display', 'Tablet Display', 'TV Remote', 'Play on this screen', 'Clipboard', 'Staff logins', 'Supabase'].every(x => n.includes(x)), 'an admin sees every app (' + n.join(', ') + ')');
+  ok(['Black Belt Prep', 'AMA ID Cards', 'Coloured Belt Grading', 'TV Display', 'Tablet Display', 'TV Remote', 'Play on this screen', 'Clipboard', 'Staff logins', 'Supabase'].every(x => n.includes(x)), 'an admin sees every app (' + n.join(', ') + ')');
   ok((await page.textContent('#who')) === 'tate@ama.test', 'it shows who is signed in');
   await page.reload(); await page.waitForSelector('#apps:not([hidden])');
   ok((await names(page)).length === n.length, 'it remembers the sign-in');
@@ -86,7 +86,8 @@ try {
   ok(true, 'Sign out goes back to the sign-in');
 
   await signIn(page, 'coach@ama.test'); n = await names(page);
-  ok(n.join() === 'Black Belt Prep', 'an instructor sees only Black Belt Prep (' + n.join(', ') + ')');
+  ok(n.join() === 'Black Belt Prep,Coloured Belt Grading', 'an instructor sees Black Belt Prep and Coloured Belt Grading only (' + n.join(', ') + ')');
+  ok((await page.$$eval('#apps h2', hs => hs.map(h => h.textContent))).join() === 'Black Belt Grading Tools,Coloured Belt Grading' && (await page.getAttribute('#apps a[href="grading/coloured-belts/"]', 'href')), 'apps are grouped: Black Belt Grading Tools, then Coloured Belt Grading (linked to the app)');
   await page.click('#signOut'); await page.waitForSelector('#signIn:not([hidden])');
   await signIn(page, 'party@ama.test'); n = await names(page);
   ok(n.includes('TV party mode') && n.includes('Tablet party mode') && !n.includes('TV Remote') && !n.includes('Black Belt Prep') && !n.includes('Staff logins'), 'party mode only sees the party pages (' + n.join(', ') + ')');
@@ -114,7 +115,7 @@ try {
   ok(await page.getAttribute('#done a', 'href') === '../', '"Open your apps" goes to the landing page');
   await page.goto(LANDING); await page.waitForSelector('#apps:not([hidden])');
   ok((await names(page)).join() === 'Black Belt Prep', 'where they are already signed in, and see their apps');
-  ok((await page.$$eval('#apps h2', hs => hs.map(h => h.textContent))).join() === 'Black Belt Grading Tools,Coloured Belt Grading' && (await page.textContent('#apps')).includes('Coming soon'), 'apps are grouped: Black Belt Grading Tools, then Coloured Belt Grading (coming soon)');
+  ok((await page.$$eval('#apps h2', hs => hs.map(h => h.textContent))).join() === 'Black Belt Grading Tools', 'attendance-only staff see no Coloured Belt Grading section');
   await page.goto(W + '#token_hash=hash-invite-new@ama.test&type=invite');
   await page.waitForSelector('#problem:not([hidden])');
   ok((await page.textContent('#problem')).includes('run out'), 'a used or old link says it has run out and what to do');
