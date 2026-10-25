@@ -149,6 +149,13 @@ try {
   await page.fill('#newPw', 'brandnewpass'); await page.click('#savePw');
   ok((await toastSays('Password set')).includes('Password set') && db._users.find(u => u.email === 'jo@ama.test').password === 'brandnewpass', 'new password set');
 
+  // Hub sign-in: the page also has the shared hub sign-in box, so these must not mix up
+  ok(await page.$('.hub-signin #hubForm'), 'the hub mobile and PIN sign-in option is on the page');
+  await page.fill('#stHubMobile', '0412 345 678'); await page.click('#saveHub');
+  ok((await toastSays('Hub mobile')).includes('0412 345 678 linked') && db._t.hub_logins.some(x => x.email === 'jo@ama.test' && x.mobile9 === '412345678'), 'Link saves the hub mobile (no page reload)');
+  await page.waitForSelector('#clearHub'); await page.click('#clearHub');
+  ok((await toastSays('unlinked')).includes('unlinked') && !db._t.hub_logins.some(x => x.email === 'jo@ama.test'), 'Unlink removes it');
+
   // Own admin
   await page.click('#rolesForm ~ * .x, #dlg [data-close]').catch(() => {});
   await page.evaluate(() => document.querySelector('#dlg').close());

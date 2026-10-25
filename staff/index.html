@@ -271,8 +271,8 @@ function openPerson(email) {
       <p class="hint">Give the new password to them in person. They can keep using it.</p>
       <div class="row"><button class="btn" id="savePw" type="submit">Set password</button><button class="btn" id="mailPw" type="button">Make a set-up link</button></div>
       <p class="hint">Or make a link for them to choose their own password (for a first login, or if they've forgotten it).</p></form>` : `<div class="section"><p class="hint">To give them a login, use Add login with this email.</p></div>`}
-    ${u.has_login && state.hub ? `<form id="hubForm" class="section"><h3>Hub sign-in</h3>
-      <div class="row"><input type="tel" id="hubMobile" value="${esc(u.hub_mobile || '')}" placeholder="e.g. 0412 345 678" aria-label="Hub mobile" autocomplete="off" style="flex:1 1 180px;width:auto"><button class="btn" id="saveHub" type="submit">${u.hub_mobile ? 'Save' : 'Link'}</button>${u.hub_mobile ? '<button class="btn" id="clearHub" type="button">Unlink</button>' : ''}</div>
+    ${u.has_login && state.hub ? `<form id="stHubForm" class="section"><h3>Hub sign-in</h3>
+      <div class="row"><input type="tel" id="stHubMobile" value="${esc(u.hub_mobile || '')}" placeholder="e.g. 0412 345 678" aria-label="Hub mobile" autocomplete="off" style="flex:1 1 180px;width:auto"><button class="btn" id="saveHub" type="submit">${u.hub_mobile ? 'Save' : 'Link'}</button>${u.hub_mobile ? '<button class="btn" id="clearHub" type="button">Unlink</button>' : ''}</div>
       <p class="hint">The mobile they use for the AMA Admin Hub. They can then sign in to these apps with that mobile and their hub PIN, and get the permissions above. PINs, lockouts and switching access off stay in the hub.</p></form>` : ''}
     ${!self ? `<div class="section"><div class="row"><button class="btn danger" id="removeBtn">${u.has_login ? 'Remove login' : 'Remove roles'}</button></div><p class="hint">Removes their access to all the apps. Their name stays on anything they did.</p></div>` : ''}
   </div>`);
@@ -299,13 +299,13 @@ function openPerson(email) {
     try { const r = await api({ action: 'link', email }); showLink(email, r.link, false); }
     catch (er) { toast(er.message, 7000); mp.disabled = false; }
   };
-  const hf = $('#hubForm');
+  const hf = $('#stHubForm');
   const setHub = async mobile => {
     try { const r = await api({ action: 'hub', email, mobile }); toast(r.hub_mobile ? `Hub mobile ${r.hub_mobile} linked` : 'Hub mobile unlinked'); await load(); openPerson(email); }
     catch (er) { toast(er.message, 7000); }
   };
   if (hf) {
-    hf.onsubmit = e => { e.preventDefault(); const m = $('#hubMobile').value.trim(); if (!m) return toast('Enter their hub mobile, or press Unlink.'); setHub(m); };
+    hf.onsubmit = e => { e.preventDefault(); const m = $('#stHubMobile').value.trim(); if (!m) return toast('Enter their hub mobile, or press Unlink.'); setHub(m); };
     const ch = $('#clearHub'); if (ch) ch.onclick = () => setHub('');
   }
   const rm = $('#removeBtn');
