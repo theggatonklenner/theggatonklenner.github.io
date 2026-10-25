@@ -618,6 +618,11 @@
     return fetch('http://127.0.0.1:' + (st.kiosk_port || 8080) + path, { method: 'POST', mode: 'cors', headers: headers, body: JSON.stringify(body || {}) })
       .then(function (r) { if (!r.ok) throw new Error('reply ' + r.status); return r; });
   }
+  function kioskGet(st, path) {
+    var headers = {}; if (st.kiosk_key) headers['X-Api-Key'] = st.kiosk_key;
+    return fetch('http://127.0.0.1:' + (st.kiosk_port || 8080) + path, { method: 'GET', mode: 'cors', headers: headers }).then(function (r) { if (!r.ok) throw new Error('reply ' + r.status); return r.text(); });
+  }
+  var kioskRetries = {}, kioskStamp = null;
   function kioskSync(f) {
     var st = (f && f.settings) || {};
     var lock = !!(f && (f.only || f.blackout));
@@ -636,11 +641,24 @@
     var key = f.only ? 'party:' + ((f.slides[0] || {}).id || '') : 'blackout';
     if (kioskDone === key || Date.now() - kioskTry < 30000) return;
     kioskTry = Date.now(); kioskNote = 'sending...';
-    var main = location.protocol + '//' + location.host + location.pathname + '?code=' + encodeURIComponent(code) + (LOC ? '&loc=' + encodeURIComponent(LOC) : '') + '&kiosk=main';
+    // A new address each time (p=...), so FreeKiosk always loads it fresh, even if an old party page is still its main page
+    var stamp = String(Date.now()); kioskStamp = stamp;
+    var main = location.protocol + '//' + location.host + location.pathname + '?code=' + encodeURIComponent(code) + (LOC ? '&loc=' + encodeURIComponent(LOC) : '') + '&kiosk=main&p=' + stamp;
     var t0 = new Date(), hm = t0.getHours() + ':' + (t0.getMinutes() < 10 ? '0' : '') + t0.getMinutes();
     kioskApi(st, '/api/url', { url: main }).then(function (r) {
       kioskDone = key; store.set('kioskLocked', '1'); kioskNote = 'sent at ' + hm + (r && r.type !== 'opaque' ? ' (reply ' + r.status + ')' : '');
       setTimeout(checkIn, 500);
+      // Check a little later that FreeKiosk really is showing it; if not, send it again (up to 3 times)
+      setTimeout(function () {
+        if (kioskDone !== key || kioskStamp !== stamp) return;   // a newer one was sent since
+        kioskGet(st, '/api/status').then(function (t) {
+          if (kioskDone !== key || kioskStamp !== stamp || t.indexOf(location.host) < 0 || t.indexOf('p=' + stamp) >= 0) return;   // no address in the status, or it's ours
+          kioskRetries[key] = (kioskRetries[key] || 0) + 1;
+          if (kioskRetries[key] > 3) { kioskNote = 'FreeKiosk did not switch (restart FreeKiosk)'; return; }
+          kioskDone = null; kioskTry = 0; kioskNote = 'not on the main screen yet, sending again';
+          load(false);
+        })['catch'](function () {});
+      }, 10000);
       return kioskApi(st, '/api/wake');   // close the screensaver so the main screen (the party) shows
     })['catch'](function (e) { kioskNote = 'could not reach it at ' + hm + ' (' + (e && e.message || e) + ')'; setTimeout(checkIn, 500); });   // the screensaver still comes back after its delay
   }

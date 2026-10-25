@@ -916,10 +916,12 @@ function drawParty() {
   $$('#party [data-unbook]').forEach(b => b.onclick = async () => {
     const bk = state.bookings.find(x => x.id === b.dataset.unbook);
     if (!await confirmBox(`Cancel the party booked for ${whenText(bk.starts_at)}?`, 'Cancel booking')) return;
+    const cur = await sb.from('tv_party_bookings').select('starts_at').eq('id', bk.id).maybeSingle();   // its time now (it may have just been edited)
+    const startsAt = (cur.data && cur.data.starts_at) || bk.starts_at;
     const { error } = await sb.from('tv_party_bookings').delete().eq('id', bk.id);
     if (error) return toast('Not cancelled: ' + error.message, 5000);
     const pl = findSlide(bk.slide_id).linked;   // and the same booking on the other screen
-    if (pl) await sb.from('tv_party_bookings').delete().eq('slide_id', pl).eq('starts_at', bk.starts_at);
+    if (pl) await sb.from('tv_party_bookings').delete().eq('slide_id', pl).eq('starts_at', startsAt);
     toast('Booking cancelled'); load();
   });
 }

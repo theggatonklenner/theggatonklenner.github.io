@@ -996,7 +996,11 @@ try {
   // FreeKiosk: sign-in page as its main page, our slides as its screensaver; a party goes onto the main screen
   await db.query(`update tv_settings set signin_open = 'kiosk', kiosk_port = 8080 where id = 2`);
   const api = [];
-  await sic.route('http://127.0.0.1:8080/**', async r => { api.push({ path: new URL(r.request().url()).pathname, body: r.request().postData() || '' }); return r.fulfill({ status: 200, contentType: 'application/json', body: '{"status":"ok"}' }); });
+  let kioskStatus = '{"status":"ok"}', kioskFollows = false;   // what FreeKiosk's /api/status says (its current page, when we set one)
+  await sic.route('http://127.0.0.1:8080/**', async r => { const path = new URL(r.request().url()).pathname; api.push({ path, body: r.request().postData() || '' });
+    if (kioskFollows && path === '/api/url') kioskStatus = JSON.stringify({ webview: { url: JSON.parse(r.request().postData()).url } });
+    return r.fulfill({ status: 200, contentType: 'application/json', body: path === '/api/status' ? kioskStatus : '{"status":"ok"}' }); });
+  await sp2.close(); await sp3.close();   // one tablet page from here on (each page talks to FreeKiosk)
   const ss = await sic.newPage(); await ss.goto(BASE + `/tv/index.html?code=${TC}`); await ss.waitForSelector('.layer.on'); await ss.waitForTimeout(600);
   await ss.click('.layer.on', { force: true }); await ss.waitForTimeout(600);
   ok(ss.url().startsWith(BASE) && api.length === 0 && await ss.isHidden('#signin'), 'as FreeKiosk\'s screensaver, a tap is left to FreeKiosk and nothing is sent');
@@ -1006,6 +1010,17 @@ try {
   ok(urlCall && /kiosk=main/.test(JSON.parse(urlCall.body).url) && api.some(x => x.path === '/api/wake'), 'when a party starts, it asks FreeKiosk to put it on the main screen (and close the screensaver)');
   await ss.evaluate(() => window.__tv.reload()); await ss.waitForTimeout(800);
   ok(api.filter(x => x.path === '/api/url').length === 1, 'only once per party');
+  ok(/[?&]p=\d+/.test(JSON.parse(urlCall.body).url), 'with a new address each time, so FreeKiosk always loads it fresh');
+  // FreeKiosk still showing an old page 10 seconds later: it sends it again
+  kioskStatus = JSON.stringify({ webview: { url: 'http://' + new URL(BASE).host + '/tv/index.html?code=X&kiosk=main&p=1' } });
+  await ss.waitForTimeout(11000); await ss.evaluate(() => window.__tv.reload()); await ss.waitForTimeout(1500);
+  ok(api.filter(x => x.path === '/api/url').length >= 2 && api.some(x => x.path === '/api/status'), 'if FreeKiosk is still on an old page after 10 seconds, it sends the party again');
+  const lastUrl = JSON.parse(api.filter(x => x.path === '/api/url').pop().body).url;
+  kioskStatus = JSON.stringify({ webview: { url: lastUrl } }); kioskFollows = true;   // FreeKiosk now does what it's told
+  await ss.waitForTimeout(11000); const sentNow = api.filter(x => x.path === '/api/url').length;
+  await ss.waitForTimeout(11000); await ss.evaluate(() => window.__tv.reload()); await ss.waitForTimeout(800);
+  ok(api.filter(x => x.path === '/api/url').length === sentNow, 'once FreeKiosk shows it, nothing more is sent');
+  kioskStatus = '{"status":"ok"}'; kioskFollows = false;
   const mainUrl = JSON.parse(urlCall.body).url.replace(/^https?:\/\/[^/]+/, BASE);
   const mp = await sic.newPage(); await mp.goto(mainUrl); await mp.waitForSelector('.layer.on'); await mp.waitForTimeout(600);
   await mp.click('.layer.on', { force: true }); await mp.waitForTimeout(600);
