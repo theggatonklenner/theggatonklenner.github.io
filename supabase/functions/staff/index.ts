@@ -16,6 +16,11 @@
 //   roles     change a login's permissions in either app
 //   remove    delete a login and its permissions in both apps
 //   hub       link a login to an AMA Admin Hub mobile (sign in with the hub mobile and PIN), or clear the link
+//   details   change a login's name and mobile (the mobile is their hub mobile, for hub sign-in)
+//   bulk      add many people at once from { people: [{ name, mobile }] }: hub sign-in only, no permissions
+// Every login has a name and a mobile. The email is optional: a login made with only a name and mobile signs in with
+// the hub mobile and PIN. Supabase still needs an email for it, so it gets a stand-in one (hub-<mobile>@staff.amatoolkit.local)
+// that nobody types; the apps show the name.
 // AMA ID Cards needs supabase/permissions.sql (tick-box permissions) from the ama-id-cards repository.
 // TV permissions need supabase/tv-setup.sql from this repository (until then they're left out).
 
@@ -45,6 +50,10 @@ const fail = (msg, status = 400) => json({ error: msg }, status);
 const validEmail = e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
 const last9 = v => String(v || '').replace(/\D/g, '').slice(-9);
 const showMobile = m => m ? '0' + m.slice(0, 3) + ' ' + m.slice(3, 6) + ' ' + m.slice(6) : null;
+const HUB_DOMAIN = '@staff.amatoolkit.local';
+export const hubEmail = m => `hub-${m}${HUB_DOMAIN}`;
+const randomPassword = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), b => b.toString(16).padStart(2, '0')).join('');
+const cleanName = v => String(v || '').replace(/\s+/g, ' ').trim().slice(0, 80);
 const NEEDS_UPDATE = 'AMA ID Cards needs its tick-box permissions update first: run supabase/permissions.sql (from the ama-id-cards repository) in Supabase > SQL Editor.';
 
 async function allUsers(db) {
@@ -59,6 +68,10 @@ async function allUsers(db) {
 }
 const findUser = async (db, email) => (await allUsers(db)).find(u => (u.email || '').toLowerCase() === email) || null;
 const clean = (list, allowed) => [...new Set((list || []).filter(r => allowed.includes(r)))];
+const cardWantOf = b => b.card_perms === undefined ? undefined : clean(b.card_perms, CARD_PERMS);
+const prepWantOf = b => b.prep_roles === undefined ? undefined : clean(b.prep_roles, PREP_ROLES);
+// "TV editor" includes party mode and the remote, so it's kept on its own
+const tvWantOf = (b, ready) => b.tv_perms === undefined || !ready ? undefined : (l => l.includes('edit') ? ['edit'] : l)(clean(b.tv_perms, TV_PERMS));
 
 // Make one app's permissions for this email exactly "want" (adds first, so an admin is never lost half way)
 async function setPerms(db, app, email, want) {
@@ -121,6 +134,7 @@ export async function handle(req, db) {
       // setup_pending: made with a set-up link that hasn't been used yet (the welcome page clears it)
       const meta = u => (u && u.user_metadata) || {};
       const row = (email, u) => ({ email, has_login: !!u, created_at: u ? u.created_at : null, last_sign_in_at: u && u.last_sign_in_at || null,
+        name: meta(u).full_name || null, hub_only: email.endsWith(HUB_DOMAIN),
         setup_pending: meta(u).setup_pending === true, setup_at: meta(u).setup_at || null,
         card_perms: order(card.get(email), CARD_PERMS), prep_roles: order(prep.get(email), PREP_ROLES), tv_perms: order(tv.get(email), TV_PERMS),
         hub_mobile: showMobile(hubOf.get(email)) });
@@ -132,28 +146,83 @@ export async function handle(req, db) {
       return json({ me, users: rows, card_perms: CARD_PERMS, prep_roles: PREP_ROLES, tv_perms: tvReady ? TV_PERMS : null, hub: hubReady });
     }
 
-    const email = String(body.email || '').trim().toLowerCase();
+    // Link (or move) a mobile to a login; '' on a clash means OK. Checked before anything is made.
+    const mobileClash = (m, email) => { const other = [...hubOf].find(([e, v]) => v === m && e !== email); return other ? other[0] : null; };
+    const whoIs = e => e.endsWith(HUB_DOMAIN) ? 'someone else' : e;
+    const linkMobile = async (email, m) => {
+      const { error } = await db.from('hub_logins').upsert({ email, mobile9: m, updated_at: new Date().toISOString(), updated_by: me }, { onConflict: 'email' });
+      if (error) throw error; hubOf.set(email, m);
+    };
+    // A login with no email: hub sign-in only, stand-in email, no password anyone knows
+    const makeHubOnly = async (name, m, perms) => {
+      const email = hubEmail(m);
+      const { error } = await db.auth.admin.createUser({ email, password: randomPassword(), email_confirm: true, user_metadata: { full_name: name, hub_only: true } });
+      if (error) throw error;
+      await setPerms(db, 'card', email, perms.card || []);
+      await setPerms(db, 'prep', email, perms.prep || []);
+      if (tvReady) await setPerms(db, 'tv', email, perms.tv || []);
+      await linkMobile(email, m);
+      return email;
+    };
+    const setName = async (email, name) => {
+      const u = await findUser(db, email); if (!u) return;
+      const { error } = await db.auth.admin.updateUserById(u.id, { user_metadata: { full_name: name || null } });
+      if (error) throw error;
+    };
+
+    if (action === 'bulk') {
+      if (!hubReady) return fail('Run supabase/hub-login.sql in Supabase > SQL Editor first.', 409);
+      const people = Array.isArray(body.people) ? body.people.slice(0, 300) : [];
+      const out = { added: [], skipped: [] };
+      const seen = new Set();
+      for (const p of people) {
+        const name = cleanName(p && p.name), m = last9(p && p.mobile);
+        if (!name || m.length !== 9) { out.skipped.push({ name: name || '?', why: 'needs a name and a mobile' }); continue; }
+        if (seen.has(m)) { out.skipped.push({ name, why: 'that mobile is listed twice' }); continue; }
+        seen.add(m);
+        const clash = mobileClash(m, null);
+        if (clash) { out.skipped.push({ name, why: 'already has a login' }); continue; }
+        try { await makeHubOnly(name, m, {}); out.added.push(name); }
+        catch (e) { out.skipped.push({ name, why: String(e && e.message || e) }); }
+      }
+      return json({ ok: true, ...out });
+    }
+
+    let email = String(body.email || '').trim().toLowerCase();
+    const name = body.name === undefined ? undefined : cleanName(body.name);
+    const mobile = body.mobile === undefined ? undefined : last9(body.mobile);
+    if (action === 'create' && !email) {
+      // Name and mobile only: hub sign-in
+      if (!hubReady) return fail('Run supabase/hub-login.sql in Supabase > SQL Editor first.', 409);
+      if (!name) return fail('Enter their name.');
+      if (!mobile || mobile.length !== 9) return fail('Enter their mobile, or an email.');
+      const clash = mobileClash(mobile, null);
+      if (clash) return fail(`That mobile already belongs to ${whoIs(clash)}.`);
+      const made = await makeHubOnly(name, mobile, { card: cardWantOf(body), prep: prepWantOf(body), tv: tvWantOf(body, tvReady) });
+      return json({ ok: true, existed: false, email: made, hub_only: true });
+    }
     if (!validEmail(email)) return fail('Enter a valid email address.');
     const password = String(body.password || '');
-    const cardWant = body.card_perms === undefined ? undefined : clean(body.card_perms, CARD_PERMS);
-    const prepWant = body.prep_roles === undefined ? undefined : clean(body.prep_roles, PREP_ROLES);
-    // "TV editor" includes party mode and the remote, so it's kept on its own
-    const tvWant = body.tv_perms === undefined || !tvReady ? undefined : (l => l.includes('edit') ? ['edit'] : l)(clean(body.tv_perms, TV_PERMS));
+    const cardWant = cardWantOf(body), prepWant = prepWantOf(body), tvWant = tvWantOf(body, tvReady);
 
     if (action === 'create') {
+      if (mobile && hubReady) { const clash = mobileClash(mobile, email); if (clash) return fail(`That mobile already belongs to ${whoIs(clash)}.`); }
+      if (mobile && mobile.length !== 9) return fail('Enter a full mobile number, or leave it blank.');
       const existing = await findUser(db, email);
+      const extras = async () => { if (name) await setName(email, name); if (mobile && hubReady) await linkMobile(email, mobile); };
       if (!existing && body.invite === true) {
         // Permissions first (an email can have them before it has a login), then the onboarding email
         await setPerms(db, 'card', email, cardWant || []);
         await setPerms(db, 'prep', email, prepWant || []);
         if (tvReady) await setPerms(db, 'tv', email, tvWant || []);
-        const { data, error } = await db.auth.admin.generateLink({ type: 'invite', email, options: { data: { apps: appNames(cardWant, prepWant, tvWant), invited_by: me, setup_pending: true } } });
+        const { data, error } = await db.auth.admin.generateLink({ type: 'invite', email, options: { data: { apps: appNames(cardWant, prepWant, tvWant), invited_by: me, setup_pending: true, ...(name ? { full_name: name } : {}) } } });
         if (error) return fail(`The permissions are saved, but the login wasn't made: ${error.message}`);
+        if (mobile && hubReady) await linkMobile(email, mobile);
         return json({ ok: true, existed: false, link: setupLink(data, 'invite') });
       }
       if (!existing) {
         if (password.length < 8) return fail('The password needs at least 8 characters.');
-        const { error } = await db.auth.admin.createUser({ email, password, email_confirm: true });
+        const { error } = await db.auth.admin.createUser({ email, password, email_confirm: true, ...(name ? { user_metadata: { full_name: name } } : {}) });
         if (error) return fail(error.message);
       } else if (password) {
         if (password.length < 8) return fail('The password needs at least 8 characters.');
@@ -163,8 +232,29 @@ export async function handle(req, db) {
       await setPerms(db, 'card', email, cardWant || []);
       await setPerms(db, 'prep', email, prepWant || []);
       if (tvReady) await setPerms(db, 'tv', email, tvWant || []);
+      await extras();
       return json({ ok: true, existed: !!existing });
     }
+
+    if (action === 'details') {
+      const user = await findUser(db, email);
+      if (!user) return fail('There is no login for that email.', 404);
+      if (name !== undefined) { if (!name) return fail('Enter their name.'); await setName(email, name); }
+      if (mobile !== undefined && hubReady) {
+        if (!mobile) {
+          if (email.endsWith(HUB_DOMAIN)) return fail('This login signs in with their mobile, so it needs one.');
+          const { error } = await db.from('hub_logins').delete().eq('email', email); if (error) throw error;
+        } else {
+          if (mobile.length !== 9) return fail('Enter a full mobile number.');
+          const clash = mobileClash(mobile, email); if (clash) return fail(`That mobile already belongs to ${whoIs(clash)}.`);
+          await linkMobile(email, mobile);
+        }
+      }
+      return json({ ok: true });
+    }
+
+    if ((action === 'link' || action === 'password') && email.endsWith(HUB_DOMAIN))
+      return fail('This login signs in with their hub mobile and PIN, so it has no password. Change their PIN in the hub.');
 
     if (action === 'link') {
       const user = await findUser(db, email);
@@ -186,6 +276,7 @@ export async function handle(req, db) {
     if (action === 'hub') {
       if (!hubReady) return fail('Run supabase/hub-login.sql in Supabase > SQL Editor first.', 409);
       const m = last9(body.mobile);
+      if (email.endsWith(HUB_DOMAIN) && !m) return fail('This login signs in with their mobile, so it needs one.');
       if (!m) {
         const { error } = await db.from('hub_logins').delete().eq('email', email);
         if (error) throw error;
@@ -194,7 +285,7 @@ export async function handle(req, db) {
       if (m.length !== 9) return fail('Enter the mobile number the person uses for the hub.');
       if (!(await findUser(db, email))) return fail('That email has no login yet. Add the login first.');
       const other = [...hubOf].find(([e, v]) => v === m && e !== email);
-      if (other) return fail(`That mobile is already linked to ${other[0]}.`);
+      if (other) return fail(`That mobile is already linked to ${whoIs(other[0])}.`);
       const { error } = await db.from('hub_logins').upsert({ email, mobile9: m, updated_at: new Date().toISOString(), updated_by: me }, { onConflict: 'email' });
       if (error) throw error;
       return json({ ok: true, hub_mobile: showMobile(m) });

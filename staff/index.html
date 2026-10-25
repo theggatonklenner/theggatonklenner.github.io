@@ -97,6 +97,7 @@
   #toast { inset: auto; position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); margin: 0; border: 0; width: max-content;
     background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 15px; max-width: calc(100% - 32px); box-shadow: var(--shadow); }
   #toast[hidden] { display: none; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 12px; }
 </style>
 </head>
 <body>
@@ -121,9 +122,9 @@
   </section>
 
   <section id="app" hidden>
-    <div class="view-head"><h2>Logins</h2><button class="btn primary sm" id="addBtn">Add login</button></div>
-    <p class="hint">Logins and permissions for AMA ID Cards, Black Belt Prep and the dojang TV. Tap someone to change their permissions, set a new password or remove their login.</p>
-    <input type="search" id="search" placeholder="Search email" aria-label="Search email" style="margin:12px 0">
+    <div class="view-head"><h2>Logins</h2><div class="row" style="margin:0"><button class="btn sm" id="bulkBtn">Add several</button><button class="btn primary sm" id="addBtn">Add login</button></div></div>
+    <p class="hint">Logins and permissions for AMA ID Cards, Black Belt Prep and the dojang TV. Tap someone to change their details or permissions, or remove their login. People without an email sign in with their hub mobile and PIN.</p>
+    <input type="search" id="search" placeholder="Search name, email or mobile" aria-label="Search name, email or mobile" style="margin:12px 0">
     <ul class="people" id="list"></ul>
     <p class="hint" id="count" style="margin-top:8px"></p>
   </section>
@@ -197,6 +198,7 @@ function showLink(email, link, fresh) {
 }
 
 const fmtDate = iso => iso ? new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+const who = u => u.name || (u.hub_only ? (u.hub_mobile || 'No name') : u.email);   // what to call someone
 const listText = (roles, names) => roles.length ? (roles.includes('admin') ? 'Admin' : roles.map(r => names[r] || r).join(', ')) : 'No access';
 
 async function load() {
@@ -220,12 +222,13 @@ async function load() {
 
 function draw() {
   const q = $('#search').value.trim().toLowerCase();
-  const rows = state.users.filter(u => !q || u.email.includes(q));
+  const qd = q.replace(/\D/g, '');
+  const rows = state.users.filter(u => !q || (u.name || '').toLowerCase().includes(q) || (!u.hub_only && u.email.includes(q)) || (qd.length >= 3 && (u.hub_mobile || '').replace(/\D/g, '').includes(qd)));
   $('#list').innerHTML = rows.length ? rows.map(u => `<li><button class="person" data-email="${esc(u.email)}">
-      <div class="who"><strong>${esc(u.email)}</strong>
-        <span class="meta">${u.card_perms.includes('admin') && u.prep_roles.includes('admin') ? '<span class="chip">Admin</span>' : ''}
-          <span>ID Cards: ${esc(listText(u.card_perms, CARD))}</span><span>·</span><span>Prep: ${esc(listText(u.prep_roles, PREP))}</span>${state.tv === 'ready' ? `<span>·</span><span>TV: ${esc(tvText(u))}</span>` : ''}${u.hub_mobile ? `<span>·</span><span>Hub: ${esc(u.hub_mobile)}</span>` : ''}
-          ${!u.has_login ? '<span class="tag warn">No login yet</span>' : u.setup_pending ? '<span class="tag warn">Not set up yet</span>' : u.setup_at ? '<span class="tag ok">Set up</span>' : !u.last_sign_in_at ? '<span class="tag muted">Never signed in</span>' : ''}
+      <div class="who"><strong>${esc(who(u))}</strong>
+        <span class="meta">${[u.name || u.hub_only ? (u.hub_only ? '' : u.email) : '', u.hub_mobile || ''].filter(Boolean).map(x => `<span>${esc(x)}</span><span>·</span>`).join('')}${u.card_perms.includes('admin') && u.prep_roles.includes('admin') ? '<span class="chip">Admin</span>' : ''}
+          <span>ID Cards: ${esc(listText(u.card_perms, CARD))}</span><span>·</span><span>Prep: ${esc(listText(u.prep_roles, PREP))}</span>${state.tv === 'ready' ? `<span>·</span><span>TV: ${esc(tvText(u))}</span>` : ''}${u.hub_only ? '<span class="tag muted">Hub sign-in</span>' : ''}
+          ${!u.has_login ? '<span class="tag warn">No login yet</span>' : u.hub_only ? (u.last_sign_in_at ? '' : '<span class="tag muted">Never signed in</span>') : u.setup_pending ? '<span class="tag warn">Not set up yet</span>' : u.setup_at ? '<span class="tag ok">Set up</span>' : !u.last_sign_in_at ? '<span class="tag muted">Never signed in</span>' : ''}
           ${u.email === state.me ? '<span class="tag muted">You</span>' : ''}</span></div>
       <span class="chev" aria-hidden="true">›</span></button></li>`).join('')
     : `<li class="empty">${state.users.length ? 'No one matches.' : 'No logins yet.'}</li>`;
@@ -257,8 +260,13 @@ function openPerson(email) {
   const u = state.users.find(x => x.email === email); if (!u) return;
   const self = email === state.me;
   openDlg(`<div class="dlg">
-    <div class="dlg-head"><div><h3>${esc(u.email)}</h3><p class="hint">${u.has_login ? `Added ${fmtDate(u.created_at)} · ${u.setup_pending ? '<b>not set up yet</b> (they haven\'t used their set-up link)' : u.setup_at ? 'set up ' + fmtDate(u.setup_at) : ''}${!u.setup_pending && u.setup_at ? ' · ' : ''}${!u.setup_pending ? (u.last_sign_in_at ? 'last signed in ' + fmtDate(u.last_sign_in_at) : 'never signed in') : ''}` : 'Has roles but no login yet'}</p></div><button class="x" data-close>Close</button></div>
-    <form id="rolesForm" class="section" style="border-top:0;padding-top:0">
+    <div class="dlg-head"><div><h3>${esc(who(u))}</h3><p class="hint">${u.hub_only ? `Signs in with their hub mobile and PIN · added ${fmtDate(u.created_at)} · ${u.last_sign_in_at ? 'last signed in ' + fmtDate(u.last_sign_in_at) : 'never signed in'}` : u.has_login ? `${u.name ? esc(u.email) + ' · ' : ''}Added ${fmtDate(u.created_at)} · ${u.setup_pending ? '<b>not set up yet</b> (they haven\'t used their set-up link)' : u.setup_at ? 'set up ' + fmtDate(u.setup_at) : ''}${!u.setup_pending && u.setup_at ? ' · ' : ''}${!u.setup_pending ? (u.last_sign_in_at ? 'last signed in ' + fmtDate(u.last_sign_in_at) : 'never signed in') : ''}` : 'Has roles but no login yet'}</p></div><button class="x" data-close>Close</button></div>
+    ${u.has_login ? `<form id="detailsForm" class="section" style="border-top:0;padding-top:0"><h3>Details</h3>
+      <div class="grid2"><div class="field"><label for="stName">Name</label><input type="text" id="stName" value="${esc(u.name || '')}" autocomplete="off"></div>
+        ${state.hub ? `<div class="field"><label for="stMobile">Mobile</label><input type="tel" id="stMobile" value="${esc(u.hub_mobile || '')}" placeholder="e.g. 0412 345 678" autocomplete="off"></div>` : ''}</div>
+      ${state.hub ? `<p class="hint">${u.hub_only ? 'Their hub mobile: they sign in with it and their hub PIN.' : 'Their hub mobile (optional): with it they can also sign in with their hub mobile and PIN.'} PINs, lockouts and switching access off stay in the hub.</p>` : ''}
+      <div class="row"><button class="btn" id="saveDetails" type="submit">Save details</button></div></form>` : ''}
+    <form id="rolesForm" class="section">
       <h3>Permissions</h3>
       <div class="field"><span class="label">AMA ID Cards</span>${checks('cardChecks', CARD, u.card_perms)}</div>
       <div class="field"><span class="label">Black Belt Prep</span>${checks('prepChecks', PREP, u.prep_roles)}</div>
@@ -266,14 +274,11 @@ function openPerson(email) {
       ${self ? '<p class="hint">You can\'t remove your own admin access.</p>' : ROLE_HELP}
       <div class="row"><button class="btn primary" id="saveRoles" type="submit">Save permissions</button></div>
     </form>
-    ${u.has_login ? `<form id="pwForm" class="section"><h3>New password</h3>
+    ${u.hub_only ? '' : u.has_login ? `<form id="pwForm" class="section"><h3>New password</h3>
       <div class="row"><input type="text" id="newPw" class="grow" autocomplete="new-password" placeholder="At least 8 characters" aria-label="New password" style="flex:1 1 180px;width:auto"><button type="button" class="btn sm" id="genPw">Make one</button></div>
       <p class="hint">Give the new password to them in person. They can keep using it.</p>
       <div class="row"><button class="btn" id="savePw" type="submit">Set password</button><button class="btn" id="mailPw" type="button">Make a set-up link</button></div>
       <p class="hint">Or make a link for them to choose their own password (for a first login, or if they've forgotten it).</p></form>` : `<div class="section"><p class="hint">To give them a login, use Add login with this email.</p></div>`}
-    ${u.has_login && state.hub ? `<form id="stHubForm" class="section"><h3>Hub sign-in</h3>
-      <div class="row"><input type="tel" id="stHubMobile" value="${esc(u.hub_mobile || '')}" placeholder="e.g. 0412 345 678" aria-label="Hub mobile" autocomplete="off" style="flex:1 1 180px;width:auto"><button class="btn" id="saveHub" type="submit">${u.hub_mobile ? 'Save' : 'Link'}</button>${u.hub_mobile ? '<button class="btn" id="clearHub" type="button">Unlink</button>' : ''}</div>
-      <p class="hint">The mobile they use for the AMA Admin Hub. They can then sign in to these apps with that mobile and their hub PIN, and get the permissions above. PINs, lockouts and switching access off stay in the hub.</p></form>` : ''}
     ${!self ? `<div class="section"><div class="row"><button class="btn danger" id="removeBtn">${u.has_login ? 'Remove login' : 'Remove roles'}</button></div><p class="hint">Removes their access to all the apps. Their name stays on anything they did.</p></div>` : ''}
   </div>`);
   tvLink();
@@ -299,19 +304,20 @@ function openPerson(email) {
     try { const r = await api({ action: 'link', email }); showLink(email, r.link, false); }
     catch (er) { toast(er.message, 7000); mp.disabled = false; }
   };
-  const hf = $('#stHubForm');
-  const setHub = async mobile => {
-    try { const r = await api({ action: 'hub', email, mobile }); toast(r.hub_mobile ? `Hub mobile ${r.hub_mobile} linked` : 'Hub mobile unlinked'); await load(); openPerson(email); }
-    catch (er) { toast(er.message, 7000); }
+  const df = $('#detailsForm');
+  if (df) df.onsubmit = async e => {
+    e.preventDefault();
+    const body = { action: 'details', email, name: $('#stName').value.trim() };
+    if ($('#stMobile')) body.mobile = $('#stMobile').value.trim();
+    if (!body.name) return toast('Enter their name.');
+    $('#saveDetails').disabled = true;
+    try { await api(body); toast('Details saved'); await load(); openPerson(email); }
+    catch (er) { toast(er.message, 7000); $('#saveDetails').disabled = false; }
   };
-  if (hf) {
-    hf.onsubmit = e => { e.preventDefault(); const m = $('#stHubMobile').value.trim(); if (!m) return toast('Enter their hub mobile, or press Unlink.'); setHub(m); };
-    const ch = $('#clearHub'); if (ch) ch.onclick = () => setHub('');
-  }
   const rm = $('#removeBtn');
   if (rm) rm.onclick = async () => {
-    if (!await confirmBox(`Remove ${email}? They will no longer be able to sign in to AMA ID Cards, Black Belt Prep or the TV.`, 'Remove', true)) return openPerson(email);
-    try { await api({ action: 'remove', email }); toast(`${email} removed`); await load(); }
+    if (!await confirmBox(`Remove ${who(u)}? They will no longer be able to sign in to AMA ID Cards, Black Belt Prep or the TV.`, 'Remove', true)) return openPerson(email);
+    try { await api({ action: 'remove', email }); toast(`${who(u)} removed`); await load(); }
     catch (er) { toast(er.message, 7000); openPerson(email); }
   };
 }
@@ -319,12 +325,15 @@ function openPerson(email) {
 function openAdd() {
   openDlg(`<form id="addForm" class="dlg">
     <div class="dlg-head"><h3>Add login</h3><button class="x" data-close>Close</button></div>
-    <div class="field"><label for="addEmail">Email</label><input type="email" id="addEmail" required autocomplete="off"></div>
-    <div class="field"><span class="label">How they sign in</span>
+    <div class="field"><label for="addName">Name</label><input type="text" id="addName" required autocomplete="off"></div>
+    <div class="grid2">${state.hub ? '<div class="field"><label for="addMobile">Mobile</label><input type="tel" id="addMobile" autocomplete="off" placeholder="e.g. 0412 345 678"></div>' : ''}
+      <div class="field"><label for="addEmail">Email${state.hub ? ' (optional)' : ''}</label><input type="email" id="addEmail" ${state.hub ? '' : 'required '}autocomplete="off"></div></div>
+    ${state.hub ? '<p class="hint" id="addHubHint">No email? They sign in with their hub mobile and PIN. With an email they can also use a password.</p>' : ''}
+    <div id="addEmailBits"><div class="field"><span class="label">How they sign in</span>
       <label class="check"><input type="radio" name="addHow" value="email" checked> Give me a link to send them, to choose their own password</label>
       <label class="check"><input type="radio" name="addHow" value="password" id="addHowPw"> Set a starting password</label></div>
     <div class="field" id="addPwRow" hidden><label for="addPw">Starting password</label><div class="row"><input type="text" id="addPw" autocomplete="new-password" placeholder="At least 8 characters" style="flex:1 1 180px;width:auto"><button type="button" class="btn sm" id="addGen">Make one</button></div></div>
-    <p class="hint" id="addMailHint">After adding, you get a link to copy or share (text, WhatsApp, email). It opens a page where they choose a password.</p>
+    <p class="hint" id="addMailHint">After adding, you get a link to copy or share (text, WhatsApp, email). It opens a page where they choose a password.</p></div>
     <div class="field"><span class="label">AMA ID Cards</span>${checks('cardChecks', CARD, [])}</div>
     <div class="field"><span class="label">Black Belt Prep</span>${checks('prepChecks', PREP, [])}</div>
     ${tvField([])}
@@ -336,20 +345,62 @@ function openAdd() {
   const how = () => (document.querySelector('input[name=addHow]:checked') || {}).value || 'email';
   document.querySelectorAll('input[name=addHow]').forEach(r => r.onchange = () => { $('#addPwRow').hidden = how() !== 'password'; $('#addMailHint').hidden = how() !== 'email'; });
   tvLink();
+  const emailBits = () => { $('#addEmailBits').hidden = state.hub && !$('#addEmail').value.trim(); };
+  $('#addEmail').oninput = emailBits; emailBits();
   $('#addForm').onsubmit = async e => {
     e.preventDefault();
-    const email = $('#addEmail').value.trim().toLowerCase(), invite = how() === 'email', password = invite ? '' : $('#addPw').value;
+    const name = $('#addName').value.trim(), mobile = $('#addMobile') ? $('#addMobile').value.trim() : '';
+    const email = $('#addEmail').value.trim().toLowerCase(), invite = !!email && how() === 'email', password = !email || invite ? '' : $('#addPw').value;
+    if (!name) return toast('Enter their name.');
+    if (!email && !mobile) return toast('Enter their mobile or email.');
     if (password && password.length < 8) return toast('The password needs at least 8 characters.');
     $('#addGo').disabled = true;
     try {
-      const r = await api({ action: 'create', email, password, invite, card_perms: picked('cardChecks'), prep_roles: picked('prepChecks'), tv_perms: tvPicked() });
+      const r = await api({ action: 'create', email, name, ...(mobile ? { mobile } : {}), password, invite, card_perms: picked('cardChecks'), prep_roles: picked('prepChecks'), tv_perms: tvPicked() });
       if (r.link) { await load(); showLink(email, r.link, true); return; }
-      dlg.close(); toast(r.existed ? `${email} already had a login; permissions updated` : `Login added for ${email}${password ? '. Give them the starting password.' : ''}`, 6000); await load();
+      dlg.close(); toast(r.hub_only ? `Login added for ${name}. They sign in with their hub mobile and PIN.` : r.existed ? `${email} already had a login; permissions updated` : `Login added for ${name}${password ? '. Give them the starting password.' : ''}`, 6000); await load();
     } catch (er) { toast(er.message, 7000); $('#addGo').disabled = false; }
   };
 }
 
+// Add several: paste names and mobiles (e.g. copied from the hub's "Hub staff" sheet). No permissions; set them after.
+function parsePeople(text) {
+  return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => {
+    const cells = l.split(/\t|,|;/).map(c => c.trim()).filter(Boolean);
+    const mobile = cells.find(c => c.replace(/\D/g, '').length >= 9) || '';
+    const name = cells.filter(c => c !== mobile && !/^\d|^(true|false)$/i.test(c))[0] || '';
+    return { name, mobile };
+  }).filter(p => !/^name$/i.test(p.name));   // header row
+}
+function openBulk() {
+  if (!state.hub) return toast('Run supabase/hub-login.sql in Supabase first.', 6000);
+  openDlg(`<form id="bulkForm" class="dlg">
+    <div class="dlg-head"><div><h3>Add several</h3><p class="hint">One person per line: name and mobile. You can copy the Name and Mobile columns straight from the hub's Hub staff sheet.</p></div><button class="x" data-close>Close</button></div>
+    <textarea id="bulkText" rows="8" placeholder="Alex Kim	0412 345 678" style="width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--fg)"></textarea>
+    <p class="hint" id="bulkCount">Nobody yet.</p>
+    <p class="hint">They sign in with their hub mobile and PIN, and start with no permissions. Tap each person afterwards to give them what they need. Anyone whose mobile already has a login is skipped.</p>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" id="bulkGo" type="submit" disabled>Add</button></div>
+  </form>`);
+  const count = () => { const ppl = parsePeople($('#bulkText').value), good = ppl.filter(p => p.name && p.mobile.replace(/\D/g, '').length >= 9);
+    $('#bulkCount').textContent = ppl.length ? `${good.length} ${good.length === 1 ? 'person' : 'people'} to add${ppl.length > good.length ? `, ${ppl.length - good.length} line${ppl.length - good.length === 1 ? '' : 's'} without a name and mobile` : ''}.` : 'Nobody yet.';
+    $('#bulkGo').disabled = !good.length; $('#bulkGo').textContent = good.length ? `Add ${good.length}` : 'Add'; };
+  $('#bulkText').oninput = count;
+  $('#bulkForm').onsubmit = async e => {
+    e.preventDefault(); $('#bulkGo').disabled = true; $('#bulkGo').textContent = 'Adding…';
+    try {
+      const r = await api({ action: 'bulk', people: parsePeople($('#bulkText').value) });
+      await load();
+      openDlg(`<div class="dlg"><div class="dlg-head"><h3>Added ${r.added.length}</h3><button class="x" data-close>Close</button></div>
+        ${r.added.length ? `<p class="hint">${esc(r.added.join(', '))}</p>` : ''}
+        ${r.skipped.length ? `<h3>Skipped ${r.skipped.length}</h3><ul class="hint" style="margin:0;padding-left:18px">${r.skipped.map(x => `<li>${esc(x.name)}: ${esc(x.why)}</li>`).join('')}</ul>` : ''}
+        <p class="hint">They have no permissions yet. Tap each person to give them what they need.</p>
+        <div class="row" style="justify-content:flex-end"><button class="btn primary" data-close>Done</button></div></div>`);
+    } catch (er) { toast(er.message, 7000); count(); }
+  };
+}
+
 $('#search').oninput = draw;
+$('#bulkBtn').onclick = openBulk;
 $('#addBtn').onclick = openAdd;
 $('#signOut').onclick = async () => { await sb.auth.signOut(); state = { me: null, users: [] }; show('#signIn'); };
 $('#signInForm').onsubmit = async e => {

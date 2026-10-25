@@ -32,6 +32,10 @@ Every sign-in page (this site, AMA ID Cards, Black Belt Prep, the TV editor and 
 - Set up once: deploy the `hub` function with JWT verification off, then in **Edge Functions > Secrets** add `HUB_URL` (the hub's Apps Script web app address, ending in /exec) and `HUB_SECRET` (the hub's shared secret).
 - Hub sign-ins last as long as the hub's 12-hour session. Switching someone off in the hub signs them out of these apps the next time a page opens.
 
+## Names, mobiles and logins without an email
+
+Every login has a name and a mobile (their hub mobile). The email is optional: someone added with only a name and mobile signs in with their hub mobile and PIN, and has no password. Supabase still needs an email, so they get a stand-in one (`hub-<mobile>@staff.amatoolkit.local`) that nobody types; the apps show their name. **Add several** takes a pasted list (name and mobile per line, e.g. copied from the hub's Hub staff sheet), adds everyone with no permissions, and skips anyone whose mobile already has a login.
+
 ## Set-up links for new logins
 
 When you add a login on Staff logins, **Give me a link to send them** (the default) makes the login and shows a message with a set-up link to copy or share (text, WhatsApp, email). The link opens `welcome/`, where they choose their password and then see their apps. Nothing is emailed. Their login shows **Not set up yet** until they've chosen a password, then **Set up** with the date. **Make a set-up link** on a login gives a fresh link (if the first one ran out, or they've forgotten their password).

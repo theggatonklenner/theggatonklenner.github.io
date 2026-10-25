@@ -158,7 +158,7 @@ async function start() {
   $('#loading').hidden = true;
   if (!session) { $('#signIn').hidden = false; $('#apps').hidden = true; $('#who').hidden = $('#signOut').hidden = true; $('#intro').textContent = 'Apps for AMA Marrickville.'; return; }
   $('#signIn').hidden = true;
-  $('#who').textContent = session.user.email; $('#who').hidden = $('#signOut').hidden = false;
+  $('#who').textContent = (session.user.user_metadata || {}).full_name || session.user.email; $('#who').hidden = $('#signOut').hidden = false;
   $('#intro').textContent = 'Apps for AMA Marrickville. Showing the ones your login can use.';
   draw(await access()); $('#apps').hidden = false;
 }

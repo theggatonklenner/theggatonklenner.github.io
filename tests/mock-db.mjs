@@ -53,9 +53,9 @@ export function makeDb() {
       async getUser(token) { const u = users.find(x => x.id === tokens.get(token)); return { data: { user: u || null } }; },
       admin: {
         async listUsers({ page, perPage }) { return { data: { users: users.slice((page - 1) * perPage, page * perPage) }, error: null }; },
-        async createUser({ email, password }) {
+        async createUser({ email, password, user_metadata }) {
           if (users.some(u => u.email === email)) return { error: { message: 'A user with this email address has already been registered' } };
-          const u = { id: 'u' + nextId++, email, password, created_at: new Date().toISOString() }; users.push(u);
+          const u = { id: 'u' + nextId++, email, password, created_at: new Date().toISOString(), user_metadata: { ...(user_metadata || {}) } }; users.push(u);
           return { data: { user: u }, error: null };
         },
         async generateLink({ type, email, options = {} }) {
@@ -69,7 +69,8 @@ export function makeDb() {
           mail.push({ kind: type, email, data: options.data, hashed_token });
           return { data: { user: u, properties: { hashed_token, action_link: 'https://x.test/verify' } }, error: null };
         },
-        async updateUserById(id, { password }) { const u = users.find(x => x.id === id); if (!u) return { error: { message: 'User not found' } }; u.password = password; return { data: { user: u }, error: null }; },
+        async updateUserById(id, { password, user_metadata }) { const u = users.find(x => x.id === id); if (!u) return { error: { message: 'User not found' } };
+          if (password !== undefined) u.password = password; if (user_metadata) u.user_metadata = { ...(u.user_metadata || {}), ...user_metadata }; return { data: { user: u }, error: null }; },
         async deleteUser(id) { const i = users.findIndex(x => x.id === id); users.splice(i, 1); return { error: null }; }
       }
     },

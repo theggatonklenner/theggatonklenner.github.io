@@ -68,7 +68,7 @@ try {
   ok(list.includes('You') && (await page.textContent('#list [data-email="tate@ama.test"]')).includes('Admin'), 'you are marked, and admins get the gold Admin chip');
 
   // Add a login
-  await page.click('#addBtn'); await page.fill('#addEmail', 'Coach@AMA.test');
+  await page.click('#addBtn'); await page.fill('#addName', 'Coach Carter'); await page.fill('#addEmail', 'Coach@AMA.test');
   ok(await page.isChecked('input[name=addHow][value=email]') && await page.isHidden('#addPwRow'), 'a new login gets a welcome email by default (no password to type)');
   await page.check('#addHowPw'); await page.fill('#addPw', 'short'); await page.click('#addGo');
   ok((await toastText()).includes('8 characters'), 'short starting password is refused');
@@ -82,10 +82,11 @@ try {
   ok(db._users.some(u => u.email === 'coach@ama.test' && u.password === pw), 'login created with the starting password');
   ok((await page.textContent('#list [data-email="coach@ama.test"]')).includes('ID Cards: Edit people, Send to print') && (await page.textContent('#list [data-email="coach@ama.test"]')).includes('Attendance, Payments'), 'new login shows its roles');
   ok((await page.textContent('#list [data-email="coach@ama.test"]')).includes('Never signed in'), 'new login shows it has never signed in');
+  ok((await page.textContent('#list [data-email="coach@ama.test"] strong')) === 'Coach Carter' && (await page.textContent('#list [data-email="coach@ama.test"]')).includes('coach@ama.test'), 'the list shows their name, with their email underneath');
   await page.screenshot({ path: process.env.SHOT_DIR ? join(process.env.SHOT_DIR, 'staff-list.png') : join(tmpdir(), 'staff-list.png') });
 
   // Set-up link instead of a password
-  await page.click('#addBtn'); await page.fill('#addEmail', 'newbie@ama.test');
+  await page.click('#addBtn'); await page.fill('#addName', 'New Bee'); await page.fill('#addEmail', 'newbie@ama.test');
   ok((await page.textContent('#addForm')).includes('Give me a link'), 'adding a login offers a set-up link to send them');
   await page.check('#prepChecks input[value="instructor"]'); await page.check('#tvChecks input[value="party"]');
   await page.click('#addGo'); await page.waitForSelector('#linkText');
@@ -118,7 +119,7 @@ try {
 
   // Dojang TV
   ok((await page.textContent('#list [data-email="tate@ama.test"]')).includes('TV: Admin'), 'the list shows TV access (admins always have it)');
-  await page.click('#addBtn'); await page.fill('#addEmail', 'tvonly@ama.test'); await page.check('#addHowPw'); await page.click('#addGen');
+  await page.click('#addBtn'); await page.fill('#addName', 'Tv Only'); await page.fill('#addEmail', 'tvonly@ama.test'); await page.check('#addHowPw'); await page.click('#addGen');
   ok((await page.$$('#tvChecks input[type=checkbox]')).length === 3 && (await page.$$('#tvChecks input:checked')).length === 0, 'adding a login has Dojang TV tick boxes (Editor, Party mode, Remote), none ticked to start with');
   await page.check('#tvChecks input[value="remote"]'); await page.click('#addGo');
   await page.waitForSelector('#list [data-email="tvonly@ama.test"]');
@@ -149,12 +150,39 @@ try {
   await page.fill('#newPw', 'brandnewpass'); await page.click('#savePw');
   ok((await toastSays('Password set')).includes('Password set') && db._users.find(u => u.email === 'jo@ama.test').password === 'brandnewpass', 'new password set');
 
-  // Hub sign-in: the page also has the shared hub sign-in box, so these must not mix up
+  // Details: name and mobile (the page also has the shared hub sign-in box, so these must not mix up)
   ok(await page.$('.hub-signin #hubForm'), 'the hub mobile and PIN sign-in option is on the page');
-  await page.fill('#stHubMobile', '0412 345 678'); await page.click('#saveHub');
-  ok((await toastSays('Hub mobile')).includes('0412 345 678 linked') && db._t.hub_logins.some(x => x.email === 'jo@ama.test' && x.mobile9 === '412345678'), 'Link saves the hub mobile (no page reload)');
-  await page.waitForSelector('#clearHub'); await page.click('#clearHub');
-  ok((await toastSays('unlinked')).includes('unlinked') && !db._t.hub_logins.some(x => x.email === 'jo@ama.test'), 'Unlink removes it');
+  await page.fill('#stName', 'Jo Bloggs'); await page.fill('#stMobile', '0412 345 678'); await page.click('#saveDetails');
+  ok((await toastSays('Details saved')).includes('Details saved') && db._t.hub_logins.some(x => x.email === 'jo@ama.test' && x.mobile9 === '412345678') && db._users.find(u => u.email === 'jo@ama.test').user_metadata.full_name === 'Jo Bloggs', 'name and mobile are saved (no page reload)');
+  await page.waitForSelector('#stName'); await page.fill('#stMobile', ''); await page.click('#saveDetails');
+  for (let i = 0; i < 50 && db._t.hub_logins.some(x => x.email === 'jo@ama.test'); i++) await new Promise(r => setTimeout(r, 100));
+  ok(!db._t.hub_logins.some(x => x.email === 'jo@ama.test'), 'clearing the mobile removes their hub sign-in');
+  await page.waitForSelector('#stName');
+  await page.evaluate(() => document.querySelector('#dlg').close());
+
+  // A login with no email: name and mobile only
+  await page.click('#addBtn'); await page.fill('#addName', 'Hub Person'); await page.fill('#addMobile', '0455 666 777');
+  ok(await page.isHidden('#addEmailBits'), 'without an email, the password and set-up link choices are hidden');
+  await page.check('#prepChecks input[value="viewer"]'); await page.click('#addGo');
+  await page.waitForSelector('#list [data-email="hub-455666777@staff.amatoolkit.local"]');
+  const hubRow = await page.textContent('#list [data-email="hub-455666777@staff.amatoolkit.local"]');
+  ok(hubRow.includes('Hub Person') && hubRow.includes('0455 666 777') && hubRow.includes('Hub sign-in') && !hubRow.includes('staff.amatoolkit.local'), 'they show by name and mobile, marked as hub sign-in (no stand-in email shown)');
+  await page.click('#list [data-email="hub-455666777@staff.amatoolkit.local"]'); await page.waitForSelector('#detailsForm');
+  ok(!(await page.$('#pwForm')) && (await page.textContent('#dlg')).includes('hub mobile and PIN'), 'their login has no password section');
+  await page.evaluate(() => document.querySelector('#dlg').close());
+
+  // Add several
+  await page.click('#bulkBtn'); await page.waitForSelector('#bulkText');
+  await page.fill('#bulkText', 'Name\tMobile\tRole\nSam Lee\t0466 000 111\tstaff\nKim Ng, 0466000222\nHub Person\t0455 666 777\nnobody here');
+  ok((await page.textContent('#bulkCount')).includes('3 people to add') && (await page.textContent('#bulkCount')).includes('1 line'), 'pasted lines are counted (header skipped, a line without a mobile flagged)');
+  await page.click('#bulkGo'); await page.waitForSelector('#dlg h3:has-text("Added")');
+  const res = await page.textContent('#dlg');
+  ok(res.includes('Added 2') && res.includes('Sam Lee') && res.includes('Kim Ng') && res.includes('Skipped') && res.includes('already has a login'), 'Add several adds new people and skips anyone already set up');
+  ok(db._users.some(u => u.email === 'hub-466000111@staff.amatoolkit.local' && u.user_metadata.full_name === 'Sam Lee') && !db._t.prep_roles.some(r => r.email === 'hub-466000111@staff.amatoolkit.local'), 'they are added with no permissions');
+  await page.evaluate(() => document.querySelector('#dlg').close());
+  await page.fill('#search', 'kim'); ok((await page.$$('#list [data-email]')).length === 1, 'search finds people by name');
+  await page.fill('#search', '0466 000 1'); ok((await page.$$('#list [data-email]')).length === 1, '...and by mobile');
+  await page.fill('#search', '');
 
   // Own admin
   await page.click('#rolesForm ~ * .x, #dlg [data-close]').catch(() => {});

@@ -134,5 +134,45 @@ r = await call(SAM, { action: 'hub', email: 'sam@ama.test', mobile: '0400000000'
 ok(r.status === 409 && /hub-login\.sql/.test(r.body.error), '...and linking explains what to run');
 db._opts.hubMissing = false;
 
+
+console.log('\nNames, mobiles and logins without an email');
+const userOf = e => db._users.find(u => u.email === e);
+r = await call(SAM, { action: 'create', name: '  Alex   Kim ', mobile: '0433 111 222', prep_roles: ['attendance'] });
+const alexEmail = 'hub-433111222@staff.amatoolkit.local';
+ok(r.status === 200 && r.body.hub_only && userOf(alexEmail) && userOf(alexEmail).user_metadata.full_name === 'Alex Kim', 'a login can be made with just a name and mobile');
+ok(db._t.hub_logins.some(x => x.email === alexEmail && x.mobile9 === '433111222') && prepOf(alexEmail) === 'attendance', '...linked to their hub mobile, with the permissions given');
+r = await call(SAM, { action: 'list' });
+const alexRow = r.body.users.find(u => u.email === alexEmail);
+ok(alexRow.name === 'Alex Kim' && alexRow.hub_only === true && alexRow.hub_mobile === '0433 111 222', 'the list shows their name, mobile and that they sign in with the hub');
+r = await call(SAM, { action: 'create', name: 'Copy Cat', mobile: '+61 433 111 222' });
+ok(r.status === 400 && /already belongs to someone else/.test(r.body.error), 'the same mobile cannot make a second login');
+r = await call(SAM, { action: 'create', mobile: '0433 999 888' });
+ok(r.status === 400 && /name/.test(r.body.error), 'a name is needed');
+r = await call(SAM, { action: 'create', name: 'No Contact' });
+ok(r.status === 400 && /mobile, or an email/.test(r.body.error), 'without an email, a mobile is needed');
+r = await call(SAM, { action: 'password', email: alexEmail, password: 'longenough' });
+ok(r.status === 400 && /PIN/.test(r.body.error), 'no password for a hub-only login (their PIN is in the hub)');
+r = await call(SAM, { action: 'link', email: alexEmail });
+ok(r.status === 400, '...and no set-up link');
+r = await call(SAM, { action: 'details', email: alexEmail, name: 'Alex Kimura', mobile: '0433 111 333' });
+ok(r.status === 200 && userOf(alexEmail).user_metadata.full_name === 'Alex Kimura' && db._t.hub_logins.find(x => x.email === alexEmail).mobile9 === '433111333', 'name and mobile can be changed');
+r = await call(SAM, { action: 'details', email: alexEmail, mobile: '' });
+ok(r.status === 400 && db._t.hub_logins.some(x => x.email === alexEmail), 'a hub-only login keeps its mobile (it is how they sign in)');
+r = await call(SAM, { action: 'hub', email: alexEmail, mobile: '' });
+ok(r.status === 400, '...including through Unlink');
+r = await call(SAM, { action: 'create', email: 'emailed@ama.test', password: 'longenough', name: 'Em Ailed', mobile: '0433 222 333' });
+ok(r.status === 200 && userOf('emailed@ama.test').user_metadata.full_name === 'Em Ailed' && db._t.hub_logins.some(x => x.email === 'emailed@ama.test' && x.mobile9 === '433222333'), 'a login with an email can have a name and mobile too');
+r = await call(SAM, { action: 'details', email: 'emailed@ama.test', mobile: '' });
+ok(r.status === 200 && !db._t.hub_logins.some(x => x.email === 'emailed@ama.test'), 'a login with an email can have its mobile cleared');
+
+console.log('\nAdd several');
+r = await call(SAM, { action: 'bulk', people: [{ name: 'Pat One', mobile: '0444 000 001' }, { name: 'Pat Two', mobile: '0444000002' }, { name: 'Alex Again', mobile: '0433111333' },
+  { name: 'Pat Dup', mobile: '0444000001' }, { name: '', mobile: '0444000003' }, { name: 'No Number', mobile: '' }] });
+ok(r.status === 200 && r.body.added.join() === 'Pat One,Pat Two', 'several people are added at once');
+ok(r.body.skipped.length === 4 && r.body.skipped.some(x => x.name === 'Alex Again' && /already/.test(x.why)) && r.body.skipped.some(x => x.name === 'Pat Dup' && /twice/.test(x.why)), 'people who already have a login, repeats and incomplete rows are skipped, with the reason');
+const pat = 'hub-444000001@staff.amatoolkit.local';
+ok(userOf(pat) && cardOf(pat) === '' && prepOf(pat) === '' && db._t.hub_logins.some(x => x.email === pat), 'they get no permissions, and sign in with their hub mobile');
+r = await call(JO, { action: 'bulk', people: [{ name: 'Sneaky', mobile: '0444000009' }] });
+ok(r.status === 403, 'only admins can add several');
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
