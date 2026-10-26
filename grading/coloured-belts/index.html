@@ -454,7 +454,9 @@ const student = key => state.students.find(s => s.member_key === key);
 const dayOf = id => state.days.find(d => d.day_id === id);
 const entriesOf = id => state.entries.filter(e => e.day_id === id);
 const dayBelts = d => (d && d.belts && d.belts.length) ? d.belts : null;   // null: every belt
-const forDay = (d, s) => s.location === d.location && (!dayBelts(d) || dayBelts(d).includes(s.belt));
+const daySchools = d => (d && d.schools && d.schools.length) ? d.schools : [d.location];   // whose students can grade on this day
+const forDay = (d, s) => daySchools(d).includes(s.location) && (!dayBelts(d) || dayBelts(d).includes(s.belt));
+const fromText = d => daySchools(d).length > 1 || daySchools(d)[0] !== d.location ? 'students from ' + daySchools(d).join(', ') : '';
 const beltsText = d => dayBelts(d) ? dayBelts(d).slice().sort((a, b) => (beltOf(a).sort || 0) - (beltOf(b).sort || 0)).map(short).join(', ') : 'All belts';
 const bookingLink = e => location.origin + APP_BASE + 'book/#t=' + e.token;
 // Messages: fill in a template
@@ -662,7 +664,7 @@ function renderDays() {
   const up = state.days.filter(d => !d.closed && d.grading_date >= today()).sort((a, b) => a.grading_date.localeCompare(b.grading_date));
   const past = state.days.filter(d => !up.includes(d));
   const row = d => { const es = entriesOf(d.day_id), n = k => es.filter(k).length;
-    return `<li><button class="item" data-day="${d.day_id}"><div class="main"><div class="name">${esc(fmtDate(d.grading_date))}${d.start_time ? ' · ' + fmtTime(d.start_time) : ''}</div><div class="meta"><span>${esc(d.location)}</span><span>·</span><span>${esc(beltsText(d))}</span>${d.efc_session ? `<span>·</span><span>${esc(d.efc_session)}</span>` : ''}</div></div>
+    return `<li><button class="item" data-day="${d.day_id}"><div class="main"><div class="name">${esc(fmtDate(d.grading_date))}${d.start_time ? ' · ' + fmtTime(d.start_time) : ''}</div><div class="meta"><span>${esc(d.location)}</span><span>·</span><span>${esc(beltsText(d))}</span>${fromText(d) ? `<span>·</span><span>${esc(fromText(d))}</span>` : ''}${d.efc_session ? `<span>·</span><span>${esc(d.efc_session)}</span>` : ''}</div></div>
       <span class="tags"><span class="tag">${es.length} students</span>${es.length ? `<span class="tag info">${n(e => e.invited_at)} invited</span><span class="tag ok">${n(e => e.booked_at)} booked</span>` : ''}${n(e => e.result) ? `<span class="tag ok">${n(e => e.result)} results</span>` : ''}${d.closed ? '<span class="tag">Finished</span>' : ''}</span></button></li>`; };
   v.innerHTML = `<div class="view-head"><h2>Grading days</h2>${canGrade() ? '<button class="btn primary sm" id="newDay">New grading day</button>' : ''}</div>
     <h3>Coming up</h3><ul class="list">${up.length ? up.map(row).join('') : '<li class="empty">No grading days coming up.</li>'}</ul>
@@ -676,6 +678,9 @@ function openDayForm(d = null) {
     <div class="grid2"><div class="field"><label for="dSchool">School</label><select id="dSchool">${SCHOOLS.map(s => `<option${d && d.location === s ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
       <div class="field"><label for="dDate">Date</label><input type="date" id="dDate" required value="${esc(d ? d.grading_date : '')}"></div>
       <div class="field"><label for="dTime">Start time</label><input type="time" id="dTime" value="${esc(d && d.start_time ? String(d.start_time).slice(0, 5) : '')}"></div></div>
+    <div class="field"><span class="label">Students from</span>
+      <div class="row" id="dFrom" style="gap:6px 14px">${SCHOOLS.map(x => `<label class="row" style="gap:6px;font-weight:400;color:var(--fg);font-size:15px;min-height:36px"><input type="checkbox" value="${x}" ${(d ? daySchools(d) : [SCHOOLS[0]]).includes(x) ? 'checked' : ''}> ${x}</label>`).join('')}</div>
+      <p class="hint">Tick other schools to let their members grade here (for example Marrickville members grading at Concord).</p></div>
     <div class="field"><span class="label">Belts this day is for (their belt now)</span>
       <div class="row" id="dBelts" style="gap:6px 14px">${state.belts.map(b => `<label class="row" style="gap:6px;font-weight:400;color:var(--fg);font-size:15px;min-height:36px"><input type="checkbox" value="${esc(b.belt)}" ${!d || !dayBelts(d) || dayBelts(d).includes(b.belt) ? 'checked' : ''}> ${swatch(b.belt)} ${esc(short(b.belt))}</label>`).join('')}</div>
       <div class="row"><button type="button" class="btn sm" id="dAll">All</button><button type="button" class="btn sm" id="dNone">None</button></div>
@@ -686,13 +691,19 @@ function openDayForm(d = null) {
     <div class="field"><label for="dNotes">Notes</label><textarea id="dNotes" rows="2">${esc(d ? d.notes || '' : '')}</textarea></div>
     <div class="row" style="justify-content:flex-end">${d ? '<button type="button" class="btn danger" id="dDel">Delete</button>' : ''}<button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="dGo">${d ? 'Save' : 'Add'}</button></div>
   </form>`);
+  // A new day: changing the school ticks that school's students
+  let lastSchool = $('#dSchool').value;
+  $('#dSchool').onchange = () => { const now = $('#dSchool').value; const old = $(`#dFrom input[value="${lastSchool}"]`), nw = $(`#dFrom input[value="${now}"]`);
+    if (old && $$('#dFrom input:checked').length === 1 && old.checked) old.checked = false; if (nw) nw.checked = true; lastSchool = now; };
   $('#dAll').onclick = () => $$('#dBelts input').forEach(c => c.checked = true);
   $('#dNone').onclick = () => $$('#dBelts input').forEach(c => c.checked = false);
   $('#dayForm').onsubmit = async e => {
     e.preventDefault();
     const picked = $$('#dBelts input:checked').map(c => c.value);
     if (!picked.length) return toast('Tick at least one belt.');
-    const rec = { belts: picked.length === state.belts.length ? null : picked, location: $('#dSchool').value, grading_date: $('#dDate').value, start_time: $('#dTime').value || null, efc_session: $('#dSess').value.trim() || null, efc_session_id: $('#dSessId').value.trim() || null, notes: $('#dNotes').value.trim() || null };
+    const from = $$('#dFrom input:checked').map(c => c.value), here = $('#dSchool').value;
+    if (!from.includes(here)) from.unshift(here);
+    const rec = { schools: from.length === 1 ? null : SCHOOLS.filter(x => from.includes(x)), belts: picked.length === state.belts.length ? null : picked, location: $('#dSchool').value, grading_date: $('#dDate').value, start_time: $('#dTime').value || null, efc_session: $('#dSess').value.trim() || null, efc_session_id: $('#dSessId').value.trim() || null, notes: $('#dNotes').value.trim() || null };
     try {
       let id = d && d.day_id;
       if (d) await run(sb.from('cb_days').update(rec).eq('day_id', id), 'Saved');
@@ -728,14 +739,14 @@ function renderDay() {
   const people = list => list.map(e => ({ member_key: e.member_key, entry_id: e.entry_id, e, s: student(e.member_key), d }));
   const needs = {}; es.filter(e => e.result !== 'retest').forEach(e => { needs[e.belt_to] = (needs[e.belt_to] || 0) + 1; });
   v.innerHTML = `<div class="view-head"><div><button class="x" id="backDays" style="padding:0">‹ Grading days</button><h2>${esc(d.location)} · ${esc(fmtDate(d.grading_date))}</h2>
-      <p class="hint">${d.start_time ? fmtTime(d.start_time) + ' · ' : ''}${esc(beltsText(d))} · ${esc(d.efc_session || 'No EFC session named')}${d.notes ? ' · ' + esc(d.notes) : ''}</p></div>
+      <p class="hint">${d.start_time ? fmtTime(d.start_time) + ' · ' : ''}${esc(beltsText(d))}${fromText(d) ? ' · ' + esc(fromText(d)) : ''} · ${esc(d.efc_session || 'No EFC session named')}${d.notes ? ' · ' + esc(d.notes) : ''}</p></div>
       ${canGrade() ? '<button class="btn sm" id="editDay">Edit</button>' : ''}</div>
     <div class="stats">
       <div class="stat"><span class="n">${es.length}</span><span class="l">students</span></div><div class="stat"><span class="n">${n(e => e.invited_at)}</span><span class="l">invited</span></div>
       <div class="stat"><span class="n">${n(e => e.booked_at)}</span><span class="l">booked in EFC</span></div><div class="stat"><span class="n">${n(e => e.paid)}</span><span class="l">paid</span></div>
       <div class="stat"><span class="n">${passed.length}</span><span class="l">passed</span></div></div>
     ${canGrade() && !d.closed ? `<div class="card"><h3>Students</h3><div class="row">
-        <button class="btn" id="addReady">Add everyone marked ready (${esc(d.location)}, ${esc(beltsText(d))})</button><button class="btn" id="addOne">Add a student</button>
+        <button class="btn" id="addReady">Add everyone marked ready (${esc(daySchools(d).join(', '))}, ${esc(beltsText(d))})</button><button class="btn" id="addOne">Add a student</button>
         <button class="btn primary" id="sendInv" ${notInvited.length ? '' : 'disabled'}>Invite ${notInvited.length || ''}</button></div>
         <p class="hint">Only students marked ready are added automatically. Invitations include each family's booking link; you check the wording before anything is sent.</p>
         <div class="row"><button class="btn sm" id="sendNotBooked" ${notBooked.length ? '' : 'disabled'}>Remind to book${notBooked.length ? ' (' + notBooked.length + ')' : ''}</button>
@@ -745,7 +756,7 @@ function renderDay() {
       <select id="dfBelt" aria-label="Belt"><option value="">All belts (${es.length})</option>${dayBeltsHere.map(b => `<option value="${esc(b)}"${b === dayFilt.belt ? ' selected' : ''}>${esc(b)} (${es.filter(e => e.belt_from === b).length})</option>`).join('')}</select>
       <select id="dfSort" aria-label="Order">${Object.entries(SORTS).map(([k, t]) => `<option value="${k}"${k === dayFilt.sort ? ' selected' : ''}>${t}</option>`).join('')}</select></div>` : ''}
     <ul class="list" id="entryList">${shown.length ? shown.map(e => `<li><button class="item" data-entry="${e.entry_id}">${swatch(e.belt_from)}
-        <div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(ageText(student(e.member_key)))} · ${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}${e.booking_error ? ' · <span style="color:var(--danger)">Booking failed</span>' : ''}</div></div>
+        <div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(ageText(student(e.member_key)))} · ${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}${student(e.member_key) && student(e.member_key).location !== d.location ? ' · from ' + esc(student(e.member_key).location) : ''}${e.booking_error ? ' · <span style="color:var(--danger)">Booking failed</span>' : ''}</div></div>
         <span class="tags">${e.result ? `<span class="tag ${e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[e.result]}</span>` : ''}${e.booked_at ? '<span class="tag ok">Booked</span>' : e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Not invited</span>'}${e.paid ? '<span class="tag ok">Paid</span>' : e.booked_at ? '<span class="tag warn">Unpaid</span>' : ''}</span></button></li>`).join('') : '<li class="empty">No students on this day yet.</li>'}</ul>
     ${es.length ? `<div class="card"><h3>Getting ready</h3>
       <p class="hint">New belts and certificates needed (everyone not marked re-test${n(e => e.result) ? '' : ', until results are in'}). EFC doesn't hold belt sizes, so check sizes against the list.</p>
@@ -781,22 +792,26 @@ function renderDay() {
 }
 async function addStudents(d, list) {
   const have = new Set(entriesOf(d.day_id).map(e => e.member_key));
-  const add = list.filter(s => !have.has(s.member_key) && !openDayFor(s.member_key));
+  // Not someone already on a grading day, or who passed and is waiting to be promoted in EFC
+  const passedWaiting = s => state.entries.some(e => e.member_key === s.member_key && (e.result === 'pass' || e.result === 'distinction') && e.belt_from === s.belt);
+  const add = list.filter(s => !have.has(s.member_key) && !openDayFor(s.member_key) && !passedWaiting(s));
   const skipped = list.length - add.length;
-  if (!add.length) return toast(list.length ? 'They are all on this or another open grading day already.' : `No one at ${d.location} on ${beltsText(d).toLowerCase()} is marked ready yet. Mark students ready on Who's ready.`, 6000);
+  if (!add.length) return toast(list.length ? 'They are all on a grading day already, or passed and waiting to be promoted in EFC.' : `No one at ${daySchools(d).join(' or ')} on ${beltsText(d).toLowerCase()} is marked ready yet. Mark students ready on Who's ready.`, 6000);
   try {
     await run(sb.from('cb_entries').insert(add.map(s => ({ day_id: d.day_id, member_key: s.member_key, full_name: s.full_name, belt_from: s.belt, belt_to: s.next_belt }))));
     toast(`Added ${add.length}${skipped ? `; ${skipped} already on a grading day` : ''}`, 5000); dlg.close(); await loadAll(); render();
   } catch (e) { toast(errMsg(e), 6000); }
 }
 function pickStudent(d) {
-  openDlg(`<div class="dlg"><div class="dlg-head"><div><h3>Add a student</h3><p class="hint">${esc(d.location)} · ${esc(beltsText(d))}</p></div><button class="x" data-close>Close</button></div>
-    <input type="search" id="psQ" placeholder="Search name" aria-label="Search name"><ul class="list" id="psList" style="max-height:50vh;overflow:auto"></ul></div>`);
-  const draw = () => { const q = $('#psQ').value.trim().toLowerCase();
-    const l = state.students.filter(s => forDay(d, s) && (!q || s.full_name.toLowerCase().includes(q))).slice(0, 60);
-    $('#psList').innerHTML = l.map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}<div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(short(s.belt))} to ${esc(short(s.next_belt))}</div></div><span class="tags">${readyTags(s)}</span></button></li>`).join('') || '<li class="empty">No one matches.</li>';
+  openDlg(`<div class="dlg"><div class="dlg-head"><div><h3>Add a student</h3><p class="hint">Grading at ${esc(d.location)} · ${esc(beltsText(d))}</p></div><button class="x" data-close>Close</button></div>
+    <input type="search" id="psQ" placeholder="Search name" aria-label="Search name">
+    <label class="check"><input type="checkbox" id="psAny"> Any school (a member from another school grading here)</label>
+    <ul class="list" id="psList" style="max-height:50vh;overflow:auto"></ul></div>`);
+  const draw = () => { const q = $('#psQ').value.trim().toLowerCase(), any = $('#psAny').checked;
+    const l = state.students.filter(s => (any ? (!dayBelts(d) || dayBelts(d).includes(s.belt)) : forDay(d, s)) && (!q || s.full_name.toLowerCase().includes(q))).slice(0, 60);
+    $('#psList').innerHTML = l.map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}<div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(s.location)} · ${esc(ageText(s))} · ${esc(short(s.belt))} to ${esc(short(s.next_belt))}</div></div><span class="tags">${readyTags(s)}</span></button></li>`).join('') || '<li class="empty">No one matches.</li>';
     $$('#psList [data-key]').forEach(b => b.onclick = () => addStudents(d, [student(b.dataset.key)])); };
-  $('#psQ').oninput = draw; draw(); $('#psQ').focus();
+  $('#psQ').oninput = draw; $('#psAny').onchange = draw; draw(); $('#psQ').focus();
 }
 function openEntry(id) {
   const e = state.entries.find(x => x.entry_id === id); if (!e) return;
@@ -854,7 +869,7 @@ function printDay(d, es) {
   const w = window.open('', '_blank'); if (!w) return toast('Allow pop-ups to print.');
   w.document.write(`<!doctype html><title>${esc(d.location)} grading ${esc(d.grading_date)}</title><style>body{font:14px Arial,sans-serif;margin:24px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #999;padding:6px;text-align:left}</style>
     <h2>${esc(d.location)} coloured belt grading · ${esc(fmtDate(d.grading_date))} ${esc(fmtTime(d.start_time))}${dayFilt.belt ? ' · ' + esc(dayFilt.belt) : ''}</h2>
-    <table class="grid"><tr><th>#</th><th>Name</th><th>Age</th><th>From</th><th>To</th><th>Booked</th><th>Paid</th><th>Result</th></tr>${es.map((e, i) => { const s = student(e.member_key); return `<tr><td>${i + 1}</td><td>${esc(e.full_name)}</td><td>${yrs(s) ?? ''}</td><td>${esc(e.belt_from)}</td><td>${esc(e.belt_to)}</td><td>${e.booked_at ? 'Yes' : ''}</td><td>${e.paid ? 'Yes' : ''}</td><td>${e.result ? RESULT[e.result] : ''}</td></tr>`; }).join('')}</table>`);
+    <table class="grid"><tr><th>#</th><th>Name</th><th>Age</th><th>School</th><th>From</th><th>To</th><th>Booked</th><th>Paid</th><th>Result</th></tr>${es.map((e, i) => { const s = student(e.member_key); return `<tr><td>${i + 1}</td><td>${esc(e.full_name)}</td><td>${yrs(s) ?? ''}</td><td>${esc(s ? s.location : '')}</td><td>${esc(e.belt_from)}</td><td>${esc(e.belt_to)}</td><td>${e.booked_at ? 'Yes' : ''}</td><td>${e.paid ? 'Yes' : ''}</td><td>${e.result ? RESULT[e.result] : ''}</td></tr>`; }).join('')}</table>`);
   w.document.close(); w.focus(); w.print();
 }
 

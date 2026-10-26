@@ -90,3 +90,7 @@ begin
 end $$;
 revoke all on function public.cb_import_efc(jsonb) from public, anon;
 grant execute on function public.cb_import_efc(jsonb) to authenticated;
+
+-- 3. Students from other schools: a grading day can take students from more than its own school
+--    (e.g. Marrickville members grading at Concord). Empty means only the day's own school.
+alter table public.cb_days add column if not exists schools text[];

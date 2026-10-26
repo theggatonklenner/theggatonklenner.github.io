@@ -195,6 +195,26 @@ try {
   await page.click('#txGo');
   ok(await until(() => page.isDisabled('#sendRetest').catch(() => false)), 'and is not offered again once sent');
 
+  console.log('\nStudents from other schools');
+  await page.click('.tab[data-view="days"]'); await page.click('#newDay'); await page.waitForSelector('#dayForm');
+  await page.selectOption('#dSchool', 'Concord'); await page.fill('#dDate', '2030-12-05');
+  ok(await page.isChecked('#dFrom input[value="Concord"]') && !(await page.isChecked('#dFrom input[value="Marrickville"]')), 'a new day takes its own school\'s students to start with');
+  await page.check('#dFrom input[value="Marrickville"]');
+  await page.click('#dGo'); await page.waitForSelector('#addReady');
+  const cDay = (await q(`select day_id, schools from cb_days where location = 'Concord'`))[0];
+  ok(cDay.schools.join() === 'Marrickville,Concord' && (await page.textContent('#view-day')).includes('students from Marrickville, Concord'), 'a Concord grading day can take Marrickville students too');
+  await page.click('#addReady'); await toastSays(page, 'Added');
+  ok((await q(`select member_key from cb_entries where day_id = '${cDay.day_id}'`)).map(r => r.member_key).join() === 'efc:m3', '"Add everyone marked ready" adds ready Marrickville students (Alex) to the Concord day');
+  ok((await page.textContent('#entryList')).includes('from Marrickville'), 'the list shows they come from Marrickville');
+  ok(!(await q(`select 1 from cb_entries where day_id = '${cDay.day_id}' and member_key = 'efc:m1'`)).length, 'Sam (passed, not yet promoted in EFC) is not added again');
+  await page.click('#addOne'); await page.fill('#psQ', 'Jo Bloggs'); await page.waitForTimeout(200);
+  ok((await page.textContent('#psList')).includes('Jo Bloggs'), 'Concord\'s own students can be added too');
+  await page.check('#psAny'); await page.fill('#psQ', 'Black'); await page.waitForTimeout(200);
+  ok((await page.textContent('#psList')).includes('No one matches'), '"Any school" still only offers coloured belts on the day\'s belts');
+  await page.click('#dlg [data-close]');
+  await q(`delete from cb_entries where day_id = '${cDay.day_id}'`); await q(`delete from cb_days where day_id = '${cDay.day_id}'`);
+  await page.evaluate(() => loadAll().then(render));
+
   console.log('\nUpdate EFC, dashboard, settings');
   await page.click('.tab[data-view="efc"]');
   ok((await page.textContent('#view-efc')).includes('Sam Lee') && !(await page.textContent('#view-efc')).includes('Kim Ng'), 'the Update EFC checklist lists passes to promote in EFC (not re-tests)');

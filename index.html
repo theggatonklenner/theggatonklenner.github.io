@@ -140,11 +140,7 @@ function draw(a) {
   const admin = a.card.includes('admin') && a.prep.includes('admin');
   const tvAny = a.edit || a.party || a.remote;
   const groups = [
-    ['Black Belt Grading Tools', [
-      a.prep.length && { href: 'https://theggatonklenner.github.io/Black-belt-prep-system/', img: 'icons/black-belt-prep.png', name: 'Black Belt Prep', meta: 'Preparation cycles, attendance, payments, grading and certificates' },
-      a.card.length && { href: 'https://theggatonklenner.github.io/ama-id-cards/', img: 'icons/ama-id-cards.png', name: 'AMA ID Cards', meta: 'Make, approve and print member ID cards' }]],
-    ['Coloured Belt Grading', [
-      ['admin', 'instructor', 'grading', 'payments'].some(r => a.prep.includes(r)) && { href: 'grading/coloured-belts/', icon: 'belt', name: 'Coloured Belt Grading', meta: "Who's ready, grading days, bookings, results and certificates (White to Red Three)" }]],
+    ['Gradings', [(a.prep.length || a.card.length) && { href: 'grading/', icon: 'belt', name: 'Gradings', meta: 'Coloured belt grading, Black Belt Prep and ID cards' }]],
     ['Dojang TV', [
       a.party && { href: 'tv/edit/', icon: 'tv', name: a.edit ? 'TV Display' : 'TV party mode', meta: a.edit ? 'Change the photos, videos and notices on the dojang TV' : 'Birthday posters and messages on the dojang TV' },
       a.party && { href: 'tv/edit/?display=tablet', icon: 'tablet', name: a.edit ? 'Tablet Display' : 'Tablet party mode', meta: a.edit ? 'Slides for the upright tablets, with a link that just works' : 'Birthday posters and messages on the tablets' },
