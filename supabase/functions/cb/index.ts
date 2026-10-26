@@ -12,9 +12,10 @@
 // Requests (POST, JSON):
 //   { action: 'info', token }               a family's booking link: who, what belt, when, where (no sign-in)
 //   { action: 'book', token }               book it (no sign-in)
+//   { action: 'photo', token }              a family's grading photo link: a short-lived address for the photo (no sign-in)
 //   { action: 'check' }                     staff: is texting set up?
 //   { action: 'send', kind, items: [{ entry_id?, member_key, body }] }   staff: text families
-//        kind: invite, not_booked, reminder, unpaid, congrats, retest (grading staff); not_ready (instructors or grading staff)
+//        kind: invite, not_booked, reminder, unpaid, congrats, retest, photo (grading staff); not_ready (instructors or grading staff)
 
 const API = 'https://services.leadconnectorhq.com';
 export const EFC_LOCATIONS = {
@@ -22,7 +23,7 @@ export const EFC_LOCATIONS = {
   Concord: '7ca1c142-be41-4d02-b5eb-13534b23043b', Sylvania: 'a5a5ab24-e85d-4e14-ac16-1d9c189ff0dd'
 };
 // Who may send each kind (admins always can): invitations and day reminders by grading staff, "not yet" by instructors too
-const KINDS = { invite: ['grading'], not_booked: ['grading'], reminder: ['grading'], unpaid: ['grading'], congrats: ['grading'], retest: ['grading'], not_ready: ['instructor', 'grading'] };
+const KINDS = { invite: ['grading'], not_booked: ['grading'], reminder: ['grading'], unpaid: ['grading'], congrats: ['grading'], retest: ['grading'], photo: ['grading'], not_ready: ['instructor', 'grading'] };
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -84,6 +85,21 @@ export async function handle(req, db, env = {}, http = fetch) {
       }
       await db.from('cb_entries').update({ booked_at: new Date().toISOString(), booking_error: null }).eq('entry_id', e.entry_id);
       return json({ ...info, booked: true });
+    }
+
+    // ---- Families (no sign-in): the grading photo link ----
+    if (body.action === 'photo') {
+      if (!tokenOk(body.token)) return json({ ok: false, error: 'This link isn\'t valid. Ask the front desk for a new one.' }, 404);
+      const { data: e } = await db.from('cb_entries').select('entry_id, day_id, full_name, belt_to, photo_path').eq('token', body.token).maybeSingle();
+      if (!e) return json({ ok: false, error: 'This link isn\'t valid. Ask the front desk for a new one.' }, 404);
+      const { data: d } = await db.from('cb_days').select('location, grading_date').eq('day_id', e.day_id).maybeSingle();
+      const info = { ok: true, first: first(e.full_name), belt_to: e.belt_to, school: d ? d.location : null, date: d ? d.grading_date : null, photo: false };
+      if (!e.photo_path) return json({ ...info, error: 'The photo isn\'t ready yet. Please check again soon.' });
+      const name = `${String(e.full_name || 'grading').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '')}-AMA-grading.${(String(e.photo_path).match(/\.(jpe?g|png|webp)$/i) || [, 'jpg'])[1].toLowerCase()}`;
+      const bucket = db.storage.from('grading-photos');
+      const [{ data: v, error: ve }, { data: dl }] = await Promise.all([bucket.createSignedUrl(e.photo_path, 3600), bucket.createSignedUrl(e.photo_path, 3600, { download: name })]);
+      if (ve || !v) return json({ ...info, error: 'The photo couldn\'t be loaded just now. Please try again soon.' }, 502);
+      return json({ ...info, photo: true, url: v.signedUrl, download: (dl && dl.signedUrl) || v.signedUrl, filename: name });
     }
 
     // ---- Staff ----

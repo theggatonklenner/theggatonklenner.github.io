@@ -27,6 +27,7 @@ for (let i = 1; i <= 14; i++) await db.exec(read(join(PREP, `supabase/prep-updat
 await db.exec(read(join(ROOT, 'supabase/coloured-belts.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-2.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-3.sql')));
+await db.exec(read(join(ROOT, 'supabase/coloured-belts-4.sql')));
 await db.exec(`insert into prep_roles (email, role) values ('tate@ama.test', 'admin') on conflict do nothing; delete from prep_roles where email <> 'tate@ama.test'; insert into prep_roles (email, role) values ('coach@ama.test', 'instructor'), ('desk@ama.test', 'attendance');`);
 // EFC students (made up): Sam and Kim have enough classes; Alex is overdue; Jo is at another school
 await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_name, phone, location, programme, belt, promoted_on, attended_since_promoted, efc_reference) values
@@ -47,6 +48,7 @@ const BASE = `http://localhost:${server.address().port}`;
 const q = server.q;
 const configJs = `window.TOOLKIT_CONFIG = { SUPABASE_URL: '${BASE}', SUPABASE_KEY: 'test' };`;
 const fnCalls = [];
+const uploads = [];   // grading photos sent to Supabase Storage
 const browser = await chromium.launch();
 async function open(email, path = '/grading/coloured-belts/index.html') {
   const ctx = await browser.newContext({ viewport: { width: 1100, height: 900 }, serviceWorkers: 'block', acceptDownloads: true });
@@ -62,8 +64,17 @@ async function open(email, path = '/grading/coloured-belts/index.html') {
       for (const it of b.items) await q(`insert into cb_messages (entry_id, member_key, kind, body, status) values (${it.entry_id ? `'${it.entry_id}'` : 'null'}, '${it.member_key}', '${b.kind}', $1, 'test')`, [it.body]);
       return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ sent: b.items.length, results: b.items.map(() => ({ ok: true })), testing: true }) });
     }
+    if (b.action === 'photo') return r.fulfill({ contentType: 'application/json', body: JSON.stringify(b.token === 'none' ? { ok: true, first: 'Kim', photo: false, error: 'The photo isn\'t ready yet. Please check again soon.' } : { ok: true, first: 'Sam', belt_to: 'Orange Belt', school: 'Marrickville', date: '2030-11-14', photo: true, url: BASE + '/icons/black-belt-prep.png', download: BASE + '/icons/black-belt-prep.png', filename: 'Sam-Lee-AMA-grading.jpg' }) });
     if (b.action === 'info' || b.action === 'book') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, first: 'Sam', belt_to: 'Orange Belt', date: '2026-11-14', time: '10:00', school: 'Marrickville', fee: 55, booked: b.action === 'book', closed: false }) });
     r.fulfill({ status: 400, contentType: 'application/json', body: '{"error":"?"}' });
+  });
+  // Supabase Storage (grading photos): uploads are recorded; signed links point at a test image
+  await ctx.route('**/storage/v1/object/**', async r => {
+    const u = new URL(r.request().url()), m = r.request().method();
+    if (u.pathname.includes('/object/sign/')) { const b = JSON.parse(r.request().postData() || '{}'); return r.fulfill({ contentType: 'application/json', body: JSON.stringify((b.paths || []).map(p => ({ path: p, signedURL: '/icons/black-belt-prep.png?p=' + p, error: null }))) }); }
+    if (m === 'POST' || m === 'PUT') { uploads.push({ path: u.pathname.replace(/^.*\/object\//, ''), type: r.request().headers()['content-type'], size: (r.request().postDataBuffer() || []).length, jpeg: String(r.request().postDataBuffer() || '').includes('image/jpeg') || /jpeg/.test(r.request().headers()['content-type'] || '') }); return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ Key: u.pathname.replace(/^.*\/object\//, '') }) }); }
+    if (m === 'DELETE') return r.fulfill({ contentType: 'application/json', body: '[]' });
+    r.fulfill({ status: 404, body: '' });
   });
   // Like GitHub Pages: an address that isn't a file gets the site's 404.html
   await ctx.route(/\/grading\/coloured-belts\/(ready|grading-days|update-efc|dashboard|settings)(\/|$)/, r => r.fulfill({ status: 404, contentType: 'text/html', body: read(join(ROOT, '404.html')) }));
@@ -125,7 +136,9 @@ try {
   console.log('\nGrading days');
   await page.click('.tab[data-view="days"]');
   await page.click('#newDay'); await page.waitForSelector('#dayForm');
-  await page.selectOption('#dSchool', 'Marrickville'); await page.fill('#dDate', '2030-11-14'); await page.fill('#dTime', '10:00'); await page.fill('#dSess', 'Coloured Belt Grading');
+  await page.selectOption('#dSchool', 'Marrickville');
+  ok(await page.isChecked('#dFrom input[value="Marrickville"]') && await page.isChecked('#dFrom input[value="Sydenham"]') && !(await page.isChecked('#dFrom input[value="Concord"]')), 'a new Marrickville grading day takes Sydenham members too');
+  await page.fill('#dDate', '2030-11-14'); await page.fill('#dTime', '10:00'); await page.fill('#dSess', 'Coloured Belt Grading');
   ok((await page.$$('#dBelts input:checked')).length === 10, 'a new grading day starts with every belt ticked');
   await page.click('#dNone'); await page.check('#dBelts input[value="White Belt"]'); await page.check('#dBelts input[value="Yellow Belt"]');
   ok(new URL(page.url()).pathname === '/grading/coloured-belts/grading-days', 'Grading days is at /grading/coloured-belts/grading-days');
@@ -196,10 +209,38 @@ try {
   await page.click('#txGo');
   ok(await until(() => page.isDisabled('#sendRetest').catch(() => false)), 'and is not offered again once sent');
 
+  console.log('\nGrading photos');
+  ok(await page.isDisabled('#sendPhotos'), 'there are no photos to text before any are taken');
+  await page.click('#photosBtn'); await page.waitForSelector('.phcard');
+  ok(new URL(page.url()).pathname.endsWith(dayId + '/photos'), 'photos have their own address (.../photos)');
+  const phNames = await page.$$eval('.phcard .name', ns => ns.map(n => n.textContent).join());
+  ok(phNames === 'Sam Lee', 'the photo list has the students who passed (Kim is a re-test)');
+  ok(await page.getAttribute('#phFile', 'capture') === 'environment' && (await page.getAttribute('#phFile', 'accept')).includes('image'), 'Take photo opens the camera on a phone or iPad');
+  ok((await page.getAttribute('.phcard:has-text("Sam Lee")', 'class')).includes('next'), 'the next student to photograph is highlighted');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const chooser = page.waitForEvent('filechooser'); await page.click('[data-shoot]'); await (await chooser).setFiles({ name: 'IMG_0001.png', mimeType: 'image/png', buffer: png });
+  await toastSays(page, "Saved Sam's photo");
+  const ph = (await q(`select photo_path, photo_by from cb_entries where member_key = 'efc:m1'`))[0];
+  ok(ph.photo_path && ph.photo_path.startsWith(dayId + '/') && ph.photo_by === 'tate@ama.test', 'the photo saves straight away against the student, with who took it');
+  ok(uploads.length === 1 && uploads[0].path.startsWith('grading-photos/' + dayId + '/') && uploads[0].jpeg, '...uploaded as a JPEG to the private grading-photos storage');
+  ok((await page.textContent('[data-shoot]')).includes('Retake') && (await page.textContent('#phSend')).includes('(1)') && (await page.$('.phcard img.thumb')), 'it shows the photo, offers a retake, and Text photos (1)');
+  if (SHOTS) { await page.setViewportSize({ width: 390, height: 844 }); await shot(page, 'cb-photos-phone'); await page.setViewportSize({ width: 1100, height: 900 }); }
+  await page.click('#phSend'); await page.waitForSelector('#txPrev');
+  const phText = await page.textContent('#txPrev');
+  ok(phText.includes('Hi Pat') && phText.includes('Grandmaster') && phText.includes('/grading/coloured-belts/photo/#t=' + sam.token), 'the photo text has the family\'s own photo link');
+  await page.click('#txGo');
+  ok(await until(() => fnCalls.some(c => c.kind === 'photo' && c.items.length === 1 && c.items[0].entry_id && c.items[0].body.includes('photo/#t=' + sam.token))), 'Text photos sends each family their link');
+  ok(await until(async () => (await page.textContent('.phcard')).includes('texted')), '...and shows who has been texted');
+  await page.click('#backDay'); await page.waitForSelector('#photosBtn');
+  ok((await page.textContent('#photosBtn')).includes('1 of 1') && await page.isDisabled('#sendPhotos'), 'the day shows photos taken, and texted photos are not offered again');
+  await page.click('#entryList [data-entry]:has-text("Sam Lee")'); await page.waitForSelector('#copyPhoto');
+  ok((await page.textContent('#dlg')).includes('photo/#t=' + sam.token) && (await page.textContent('#dlg')).includes('texted to the family'), 'a student\'s details show their photo link, to resend by hand if needed');
+  await page.click('#dlg [data-close]');
+
   console.log('\nStudents from other schools');
   await page.click('.tab[data-view="days"]'); await page.click('#newDay'); await page.waitForSelector('#dayForm');
   await page.selectOption('#dSchool', 'Concord'); await page.fill('#dDate', '2030-12-05');
-  ok(await page.isChecked('#dFrom input[value="Concord"]') && !(await page.isChecked('#dFrom input[value="Marrickville"]')), 'a new day takes its own school\'s students to start with');
+  ok(await page.isChecked('#dFrom input[value="Concord"]') && !(await page.isChecked('#dFrom input[value="Marrickville"]')) && !(await page.isChecked('#dFrom input[value="Sydenham"]')), 'a new day takes its own school\'s students to start with (Sydenham only goes with Marrickville)');
   await page.check('#dFrom input[value="Marrickville"]');
   await page.click('#dGo'); await page.waitForSelector('#addReady');
   const cDay = (await q(`select day_id, schools from cb_days where location = 'Concord'`))[0];
@@ -244,7 +285,7 @@ try {
   await until(async () => (await q(`select classes_needed from cb_belts where programme = 'Taekwondo' and belt = 'White Belt'`))[0].classes_needed === 30); await page.waitForSelector('#saveBelts:not([disabled])'); await settle(page);
   ok((await q(`select fee, classes_needed from cb_belts where programme = 'Taekwondo' and belt = 'Yellow Belt'`))[0].fee == 55 && (await q(`select classes_needed from cb_belts where programme = 'Taekwondo' and belt = 'White Belt'`))[0].classes_needed === 30, 'each belt has its own classes needed, weeks between and fee');
   ok((await q(`select enough_classes from cb_students where member_key = 'efc:m2'`))[0].enough_classes === false, 'changing classes needed changes who is eligible (Kim has 26 of 30)');
-  ok((await page.$$('#msgForm textarea[data-col]')).length === 7, 'Settings has all seven texts: invitation, reminder to book, day reminder, fee reminder, congratulations, re-test, not yet');
+  ok((await page.$$('#msgForm textarea[data-col]')).length === 8, 'Settings has all eight texts: invitation, reminder to book, day reminder, fee reminder, congratulations, grading photos, re-test, not yet');
   await page.fill('#tpl_reminder', 'See you at {school} on {date}!');
   await page.fill('#sHook', 'https://example.com/x'); await page.click('#saveMsgs');
   ok((await toastSays(page, 'hooks.zapier.com')).includes('hooks.zapier.com'), 'the booking Zap must be a Zapier hook address');
@@ -316,6 +357,13 @@ try {
   await page.goto(BASE + '/grading/coloured-belts/book/index.html');
   await page.waitForSelector('#error:not([hidden])');
   ok((await page.textContent('#error')).includes('missing its code'), 'a link without its code explains what to do');
+  await page.goto(BASE + '/grading/coloured-belts/photo/index.html#t=' + sam.token);
+  await page.waitForSelector('#img:not([hidden])');
+  ok((await page.textContent('#title')) === "Sam's grading photo" && (await page.textContent('#sub')).includes('Orange Belt') && await page.isVisible('#save'), 'the family photo page shows their child\'s photo with a Save button');
+  ok(fnCalls.some(c => c.action === 'photo' && c.token === sam.token), '...fetched through the cb function with their code');
+  await page.goto('about:blank'); await page.goto(BASE + '/grading/coloured-belts/photo/index.html#t=none');
+  await page.waitForSelector('#error:not([hidden])');
+  ok((await page.textContent('#error')).includes("isn't ready") && await page.isHidden('#save'), 'before the photo is taken, the page says it isn\'t ready yet');
   await page.goto(BASE + '/grading/index.html');
   const hub = await page.$$eval('a.pick', as => as.map(a => a.getAttribute('href')));
   ok(hub[0] === 'coloured-belts/' && hub[1].includes('Black-belt-prep-system') && hub[2].includes('ama-id-cards'), '/grading/ is a hub: coloured belts, black belts (Black Belt Gradings) and ID cards');

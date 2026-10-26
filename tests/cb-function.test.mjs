@@ -44,8 +44,10 @@ const db = {
     };
     return q;
   },
+  storage: { from(bucket) { return { async createSignedUrl(path, secs, opts) { signed.push({ bucket, path, secs, opts }); return { data: { signedUrl: `https://store.test/${bucket}/${path}?ttl=${secs}${opts && opts.download ? '&download=' + opts.download : ''}` }, error: null }; } }; } },
   auth: { async getUser(tok) { const email = { 'tok-grader': 'grader@ama.test', 'tok-coach': 'coach@ama.test', 'tok-desk': 'desk@ama.test' }[tok]; return { data: { user: email ? { email } : null } }; } }
 };
+const signed = [];
 const hooks = [];
 let hookStatus = 200;
 const http = async (url, opts) => {
@@ -104,6 +106,22 @@ ok(r.status === 403, '...instructors cannot send fee reminders');
 r = await call({ action: 'send', kind: 'party', items: [] }, 'tok-grader', { GHL_TEST: '1' });
 ok(r.status === 400, 'unknown kinds are refused');
 ok(phoneE164('0412 345 678') === '+61412345678' && phoneE164('+61 412 345 678') === '+61412345678' && phoneE164('12') === null, 'mobiles are turned into +61 form');
+
+
+console.log('\nGrading photo links (no sign-in)');
+r = await call({ action: 'photo', token: 'nope' });
+ok(r.status === 404 && /isn't valid/.test(r.body.error), 'a wrong photo link is refused');
+r = await call({ action: 'photo', token: TOKEN });
+ok(r.body.ok && r.body.first === 'Sam' && r.body.photo === false && /isn't ready/.test(r.body.error) && !signed.length, 'before the photo is taken, the link says it is not ready yet');
+t.cb_entries[0].photo_path = 'd1/e1-1.jpg';
+r = await call({ action: 'photo', token: TOKEN });
+ok(r.body.photo && r.body.url.startsWith('https://store.test/grading-photos/d1/e1-1.jpg') && /download=Sam-Lee-AMA-grading\.jpg/.test(r.body.download), 'with a photo, the family gets a short-lived link to view it and one to save it');
+ok(signed.every(x => x.bucket === 'grading-photos' && x.secs <= 3600), '...the links come from the private bucket and last an hour at most');
+ok(!JSON.stringify(r.body).includes('0412') && r.body.school === 'Marrickville', '...and nothing private comes back');
+r = await call({ action: 'send', kind: 'photo', items: [{ member_key: 'efc:m1', entry_id: 'e1', body: 'Your photo' }] }, 'tok-coach', { GHL_TEST: '1' });
+ok(r.status === 403, 'instructors cannot text photos');
+r = await call({ action: 'send', kind: 'photo', items: [{ member_key: 'efc:m1', entry_id: 'e1', body: 'Your photo' }] }, 'tok-grader', { GHL_TEST: '1' });
+ok(r.body.sent === 1 && t.cb_messages.some(m => m.kind === 'photo' && m.entry_id === 'e1'), 'grading staff can text photo links, and each is logged');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -359,6 +359,11 @@
   .res button[aria-pressed=true][data-r=pass] { background: var(--green); border-color: var(--green); color: #fff; }
   .res button[aria-pressed=true][data-r=distinction] { background: var(--gold); border-color: var(--gold); color: #070a08; }
   .res button[aria-pressed=true][data-r=retest] { background: var(--danger); border-color: var(--danger); color: #070a08; }
+  .phcard { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 12px; display: flex; gap: 12px; align-items: center; }
+  .phcard.next { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .phcard .thumb { width: 72px; height: 72px; border-radius: 10px; object-fit: cover; background: var(--surface2); flex: none; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; text-align: center; }
+  .phcard .main { flex: 1; min-width: 0; } .phcard .name { font-weight: 800; font-size: 18px; } .phcard .meta { color: var(--muted); font-size: 14px; }
+  .phcard .btn { min-height: 52px; min-width: 120px; }
   .rescard { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
   td input[type=number] { min-height: 38px; width: 90px; }
   .brand > div { min-width: 0; } .brand h1 { overflow: hidden; text-overflow: ellipsis; }
@@ -426,7 +431,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const dlg = $('#dlg');
-const state = { roles: [], me: '', students: [], belts: [], settings: {}, days: [], entries: [], messages: [], view: 'ready', day: null, resultsMode: false,
+const state = { roles: [], me: '', students: [], belts: [], settings: {}, days: [], entries: [], messages: [], view: 'ready', day: null, resultsMode: false, photosMode: false,
   all: { students: [], belts: [], days: [], entries: [] }, programmes: [], programme: (() => { try { return localStorage.getItem('cb_programme') || 'Taekwondo'; } catch (e) { return 'Taekwondo'; } })() };
 const has = (...r) => state.roles.includes('admin') || r.some(x => state.roles.includes(x));
 const canApprove = () => has('instructor', 'grading'), canGrade = () => has('grading'), canPay = () => has('grading', 'payments'), isAdmin = () => state.roles.includes('admin');
@@ -466,11 +471,15 @@ const student = key => state.students.find(s => s.member_key === key);
 const dayOf = id => state.days.find(d => d.day_id === id);
 const entriesOf = id => state.entries.filter(e => e.day_id === id);
 const dayBelts = d => (d && d.belts && d.belts.length) ? d.belts : null;   // null: every belt
+// New grading days at a school also take these schools' members (Sydenham members grade at Marrickville)
+const DEFAULT_FROM = { Marrickville: ['Marrickville', 'Sydenham'] };
+const defaultFrom = school => DEFAULT_FROM[school] || [school];
 const daySchools = d => (d && d.schools && d.schools.length) ? d.schools : [d.location];   // whose students can grade on this day
 const forDay = (d, s) => daySchools(d).includes(s.location) && (!dayBelts(d) || dayBelts(d).includes(s.belt));
 const fromText = d => daySchools(d).length > 1 || daySchools(d)[0] !== d.location ? 'students from ' + daySchools(d).join(', ') : '';
 const beltsText = d => dayBelts(d) ? dayBelts(d).slice().sort((a, b) => (beltOf(a).sort || 0) - (beltOf(b).sort || 0)).map(short).join(', ') : 'All belts';
 const bookingLink = e => location.origin + APP_BASE + 'book/#t=' + e.token;
+const photoLink = e => location.origin + APP_BASE + 'photo/#t=' + e.token;   // a family's grading photo
 // Messages: fill in a template
 function fill(tpl, v) {
   return String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => v[k] != null ? v[k] : '').replace(/\s+([.,!])/g, '$1').replace(/ {2,}/g, ' ').trim();
@@ -478,7 +487,7 @@ function fill(tpl, v) {
 function vars(e, s, d, extra = {}) {
   return { parent: firstName(s && s.guardian_name) || 'there', first: firstName((s && s.full_name) || (e && e.full_name)), next: e ? toText(e) : s ? sNext(s) : '',
     school: (d && d.location) || (s && s.location) || '', date: d ? longDate(d.grading_date) : '', time: d && d.start_time ? ' at ' + fmtTime(d.start_time) : '',
-    link: e ? bookingLink(e) : '', distinction: e && e.result === 'distinction' ? ' with distinction' : '', note: (s && s.approval_note) || '', ...extra };
+    link: e ? bookingLink(e) : '', photo: e ? photoLink(e) : '', distinction: e && e.result === 'distinction' ? ' with distinction' : '', note: (s && s.approval_note) || '', ...extra };
 }
 // Age and list order (youngest first by default, as gradings line up by age)
 const yrs = s => s && s.age != null ? s.age : null;
@@ -553,10 +562,10 @@ function render() {
 }
 /* Addresses: /grading/coloured-belts/ready, /grading-days, /grading-days/<id>, /grading-days/<id>/results, /update-efc, /dashboard, /settings */
 const PATHS = { ready: 'ready', days: 'grading-days', efc: 'update-efc', dash: 'dashboard', settings: 'settings' };
-function pathOf() { return state.view === 'day' ? `grading-days/${state.day}${state.resultsMode ? '/results' : ''}` : PATHS[state.view]; }
+function pathOf() { return state.view === 'day' ? `grading-days/${state.day}${state.resultsMode ? '/results' : state.photosMode ? '/photos' : ''}` : PATHS[state.view]; }
 function fromPath(p) {
   const seg = String(p || '').replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
-  if (seg[0] === 'grading-days' && seg[1]) return { view: 'day', day: seg[1], results: seg[2] === 'results' };
+  if (seg[0] === 'grading-days' && seg[1]) return { view: 'day', day: seg[1], results: seg[2] === 'results' || seg[2] === 'photos' ? seg[2] : '' };
   const view = Object.keys(PATHS).find(k => PATHS[k] === seg[0]);
   return { view: view || null };
 }
@@ -565,11 +574,12 @@ function setAddress(replace) {
   if (location.pathname === url && !location.search) return;
   try { history[replace ? 'replaceState' : 'pushState'](null, '', url); } catch (e) { /* ignore */ }
 }
-function go(view, day, results) { state.view = view; if (day) state.day = day; state.resultsMode = !!results; setAddress(); render(); window.scrollTo(0, 0); }
+// results: true or 'results' for the results screen, 'photos' for grading photos
+function go(view, day, results) { state.view = view; if (day) state.day = day; state.resultsMode = results === true || results === 'results'; state.photosMode = results === 'photos'; setAddress(); render(); window.scrollTo(0, 0); }
 function applyPath(p) {
   const r = fromPath(p);
   if (!r.view || (r.view === 'settings' && !isAdmin())) return false;
-  state.view = r.view; if (r.day) state.day = r.day; state.resultsMode = !!r.results;
+  state.view = r.view; if (r.day) state.day = r.day; state.resultsMode = r.results === 'results'; state.photosMode = r.results === 'photos';
   return true;
 }
 window.addEventListener('popstate', () => { if (!state.loaded) return; if (applyPath(location.pathname.slice(APP_BASE.length))) render(); });
@@ -647,11 +657,11 @@ function openStudent(key) {
 }
 
 /* ---------------- Texts (invites, congratulations, not yet) ---------------- */
-const KIND_NAME = { invite: 'Invitations', not_booked: 'Reminder to book', reminder: 'Grading day reminder', unpaid: 'Fee reminder', congrats: 'Congratulations', retest: 'Re-test message', not_ready: 'Not yet messages' };
-const KIND_TPL = { invite: 'invite_text', not_booked: 'not_booked_text', reminder: 'reminder_text', unpaid: 'unpaid_text', congrats: 'congrats_text', retest: 'retest_text', not_ready: 'not_ready_text' };
+const KIND_NAME = { invite: 'Invitations', not_booked: 'Reminder to book', reminder: 'Grading day reminder', unpaid: 'Fee reminder', congrats: 'Congratulations', photo: 'Grading photos', retest: 'Re-test message', not_ready: 'Not yet messages' };
+const KIND_TPL = { invite: 'invite_text', not_booked: 'not_booked_text', reminder: 'reminder_text', unpaid: 'unpaid_text', congrats: 'congrats_text', photo: 'photo_text', retest: 'retest_text', not_ready: 'not_ready_text' };
 // Settings: each message, in the order they're used
 const KIND_HELP = { invite: 'Sent from a grading day to students marked ready. Include {link}.', not_booked: 'For families invited but not booked yet. Include {link}.',
-  reminder: 'For booked families, a day or two before.', unpaid: 'For booked families whose fee isn\'t marked paid.', congrats: 'After results: pass or distinction.',
+  reminder: 'For booked families, a day or two before.', unpaid: 'For booked families whose fee isn\'t marked paid.', congrats: 'After results: pass or distinction.', photo: 'After photos are taken on the grading day. Include {photo}: each family\'s link to their photo.',
   retest: 'After results: a kind message for a re-test.', not_ready: 'From Who\'s ready, for a student marked not yet. {note} is the instructor\'s note.' };
 // people: [{ member_key, entry_id, s, e, d }]
 function composeTexts(kind, people) {
@@ -660,7 +670,7 @@ function composeTexts(kind, people) {
   openDlg(`<form id="txForm" class="dlg">
     <div class="dlg-head"><div><h3>${KIND_NAME[kind]}</h3><p class="hint">Check the wording, then send. Each family gets their own text from AMA through GoHighLevel.</p></div><button class="x" data-close>Close</button></div>
     <div class="field"><label for="txTpl">Message</label><textarea id="txTpl" rows="4">${esc(tpl)}</textarea>
-      <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {distinction} {note}. Change the saved wording in Settings.</p></div>
+      <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {photo} {distinction} {note}. Change the saved wording in Settings.</p></div>
     <div class="field"><span class="label">Preview for ${esc(people[0].s ? people[0].s.full_name : people[0].e.full_name)}</span><div class="card" style="box-shadow:none;border:1px solid var(--line)" id="txPrev"></div></div>
     <ul class="list" id="txList" style="max-height:240px;overflow:auto">${people.map((p, i) => { const ph = p.s && p.s.phone; return `<li><label class="item" style="cursor:pointer;min-height:48px"><input type="checkbox" data-i="${i}" ${ph ? 'checked' : 'disabled'}><div class="main"><div class="name">${esc((p.s && p.s.full_name) || p.e.full_name)}</div><div class="meta">${ph ? esc(ph) : '<span style="color:var(--danger)">No mobile in EFC</span>'}</div></div></label></li>`; }).join('')}</ul>
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" id="txGo" type="submit">Send</button></div>
@@ -711,8 +721,8 @@ function openDayForm(d = null) {
       <div class="field"><label for="dDate">Date</label><input type="date" id="dDate" required value="${esc(d ? d.grading_date : '')}"></div>
       <div class="field"><label for="dTime">Start time</label><input type="time" id="dTime" value="${esc(d && d.start_time ? String(d.start_time).slice(0, 5) : '')}"></div></div>
     <div class="field"><span class="label">Students from</span>
-      <div class="row" id="dFrom" style="gap:6px 14px">${SCHOOLS.map(x => `<label class="row" style="gap:6px;font-weight:400;color:var(--fg);font-size:15px;min-height:36px"><input type="checkbox" value="${x}" ${(d ? daySchools(d) : [SCHOOLS[0]]).includes(x) ? 'checked' : ''}> ${x}</label>`).join('')}</div>
-      <p class="hint">Tick other schools to let their members grade here (for example Marrickville members grading at Concord).</p></div>
+      <div class="row" id="dFrom" style="gap:6px 14px">${SCHOOLS.map(x => `<label class="row" style="gap:6px;font-weight:400;color:var(--fg);font-size:15px;min-height:36px"><input type="checkbox" value="${x}" ${(d ? daySchools(d) : defaultFrom(SCHOOLS[0])).includes(x) ? 'checked' : ''}> ${x}</label>`).join('')}</div>
+      <p class="hint">Tick other schools to let their members grade here (for example Marrickville members grading at Concord). Sydenham is ticked for Marrickville gradings.</p></div>
     <div class="field"><span class="label">Belts this day is for (their belt now)</span>
       <div class="row" id="dBelts" style="gap:6px 14px">${state.belts.map(b => `<label class="row" style="gap:6px;font-weight:400;color:var(--fg);font-size:15px;min-height:36px"><input type="checkbox" value="${esc(b.belt)}" ${!d || !dayBelts(d) || dayBelts(d).includes(b.belt) ? 'checked' : ''}> ${swatch(b.belt)} ${esc(short(b.belt))}</label>`).join('')}</div>
       <div class="row"><button type="button" class="btn sm" id="dAll">All</button><button type="button" class="btn sm" id="dNone">None</button></div>
@@ -724,10 +734,13 @@ function openDayForm(d = null) {
     <div class="field"><label for="dNotes">Notes</label><textarea id="dNotes" rows="2">${esc(d ? d.notes || '' : '')}</textarea></div>
     <div class="row" style="justify-content:flex-end">${d ? '<button type="button" class="btn danger" id="dDel">Delete</button>' : ''}<button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="dGo">${d ? 'Save' : 'Add'}</button></div>
   </form>`);
-  // A new day: changing the school ticks that school's students
+  // Changing the school ticks that school's students (and Sydenham for Marrickville), unless other schools were picked by hand
   let lastSchool = $('#dSchool').value;
-  $('#dSchool').onchange = () => { const now = $('#dSchool').value; const old = $(`#dFrom input[value="${lastSchool}"]`), nw = $(`#dFrom input[value="${now}"]`);
-    if (old && $$('#dFrom input:checked').length === 1 && old.checked) old.checked = false; if (nw) nw.checked = true; lastSchool = now; };
+  $('#dSchool').onchange = () => {
+    const now = $('#dSchool').value, ticked = $$('#dFrom input:checked').map(c => c.value).sort().join('|');
+    if (ticked === defaultFrom(lastSchool).slice().sort().join('|')) $$('#dFrom input').forEach(c => c.checked = defaultFrom(now).includes(c.value));
+    else { const nw = $(`#dFrom input[value="${now}"]`); if (nw) nw.checked = true; }
+    lastSchool = now; };
   $('#dAll').onclick = () => $$('#dBelts input').forEach(c => c.checked = true);
   $('#dNone').onclick = () => $$('#dBelts input').forEach(c => c.checked = false);
   $('#dayForm').onsubmit = async e => {
@@ -764,11 +777,13 @@ function renderDay() {
   if (dayFilt.belt && !dayBeltsHere.includes(dayFilt.belt)) dayFilt.belt = '';
   const shown = es.filter(e => !dayFilt.belt || e.belt_from === dayFilt.belt);   // the list, printout, CSVs and results follow the belt filter
   if (state.resultsMode) return renderResults(d, shown);
+  if (state.photosMode) return renderPhotos(d, shown);
   const n = k => es.filter(k).length;
   const notInvited = es.filter(e => !e.invited_at && !e.result);
   const passed = es.filter(e => e.result === 'pass' || e.result === 'distinction');
   const toCongrats = passed.filter(e => !sentTo('congrats', e.entry_id));
   const toRetest = es.filter(e => e.result === 'retest' && !sentTo('retest', e.entry_id));
+  const toPhoto = es.filter(e => e.photo_path && !sentTo('photo', e.entry_id));
   const notBooked = es.filter(e => e.invited_at && !e.booked_at && !e.result);
   const booked = es.filter(e => e.booked_at && !e.result);
   const unpaid = es.filter(e => e.booked_at && !e.paid && !e.result);
@@ -801,11 +816,13 @@ function renderDay() {
       <p class="hint">The printout, CSVs and results screen follow the belt and order chosen above the list.</p></div>` : ''}
     ${es.length && canGrade() ? `<div class="card"><h3>On the day</h3><div class="row">
       <button class="btn primary" id="resultsBtn">Enter results</button>
+      <button class="btn primary" id="photosBtn">Take photos${n(e => e.photo_path) ? ` (${n(e => e.photo_path)} of ${n(e => e.result !== 'retest')})` : ''}</button>
+      <button class="btn" id="sendPhotos" ${toPhoto.length ? '' : 'disabled'}>Text photos${toPhoto.length ? ' (' + toPhoto.length + ')' : ''}</button>
       <button class="btn" id="csvPassed" ${passed.length ? '' : 'disabled'}>Certificates CSV (passed)</button>
       <button class="btn" id="sendCongrats" ${toCongrats.length ? '' : 'disabled'}>Text congratulations${toCongrats.length ? ' (' + toCongrats.length + ')' : ''}</button>
       <button class="btn" id="sendRetest" ${toRetest.length ? '' : 'disabled'}>Text re-tests${toRetest.length ? ' (' + toRetest.length + ')' : ''}</button>
       <button class="btn" id="closeDay">${d.closed ? 'Reopen' : 'Mark finished'}</button></div>
-      <p class="hint">Results don't change EFC: each pass goes on the Update EFC list for the front desk to promote.</p></div>` : ''}`;
+      <p class="hint">Results don't change EFC: each pass goes on the Update EFC list for the front desk to promote. Take photos on a phone or iPad, then text each family their own link to their photo.</p></div>` : ''}`;
   $('#backDays').onclick = () => go('days');
   const on = (id, f) => { const b = $(id); if (b) b.onclick = f; };
   on('#editDay', () => openDayForm(d));
@@ -817,6 +834,8 @@ function renderDay() {
   on('#sendUnpaid', () => composeTexts('unpaid', people(unpaid)));
   on('#sendRetest', () => composeTexts('retest', people(toRetest)));
   on('#resultsBtn', () => go('day', d.day_id, true));
+  on('#photosBtn', () => go('day', d.day_id, 'photos'));
+  on('#sendPhotos', () => composeTexts('photo', people(toPhoto)));
   on('#csvPassed', () => certCsv(d, shown.filter(e => e.result === 'pass' || e.result === 'distinction')));
   on('#csvAll', () => certCsv(d, shown.filter(e => e.result !== 'retest')));
   on('#printList', () => printDay(d, shown));
@@ -860,15 +879,18 @@ function openEntry(id) {
       <dt>Booked in EFC</dt><dd>${e.booked_at ? new Date(e.booked_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' }) : e.booking_error ? `<span style="color:var(--danger)">Failed: ${esc(e.booking_error)}</span>` : 'Not yet'}</dd>
       <dt>Fee</dt><dd>${money(beltOf(e.belt_from).fee) || 'Not set'} ${e.paid ? '<span class="tag ok">Paid</span>' : '<span class="tag warn">Unpaid</span>'}</dd>
       <dt>Result</dt><dd>${e.result ? RESULT[e.result] : '—'}</dd>
+      <dt>Photo</dt><dd>${e.photo_path ? `Taken${sentTo('photo', e.entry_id) ? ', texted to the family' : ''}` : 'Not yet'}</dd>
       ${s ? `<dt>Parent</dt><dd>${esc([s.guardian_name, s.phone].filter(Boolean).join(' · ') || '—')}</dd>` : ''}
     </dl>
     <div class="section"><h3>Booking link</h3><p class="hint" style="word-break:break-all">${esc(bookingLink(e))}</p><div class="row"><button class="btn sm" id="copyLink">Copy link</button></div></div>
+    ${e.photo_path ? `<div class="section"><h3>Photo link</h3><p class="hint" style="word-break:break-all">${esc(photoLink(e))}</p><div class="row"><button class="btn sm" id="copyPhoto">Copy link</button></div></div>` : ''}
     <div class="section"><div class="row">
       ${canPay() ? `<button class="btn" id="paidBtn">${e.paid ? 'Mark unpaid' : 'Mark paid'}</button>` : ''}
       ${canGrade() && e.booked_at ? '<button class="btn" id="unbook">Clear booking</button>' : ''}
       ${canGrade() && !e.result ? '<button class="btn danger" id="removeEntry">Take off this day</button>' : ''}</div></div>
   </div>`);
   $('#copyLink').onclick = async () => { try { await navigator.clipboard.writeText(bookingLink(e)); toast('Link copied'); } catch (er) { toast('Press and hold the link to copy it.'); } };
+  const cp = $('#copyPhoto'); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(photoLink(e)); toast('Link copied'); } catch (er) { toast('Press and hold the link to copy it.'); } };
   const p = $('#paidBtn'); if (p) p.onclick = async () => { try { await run(sb.rpc('cb_set_paid', { p_entry: e.entry_id, p_paid: !e.paid }), e.paid ? 'Marked unpaid' : 'Marked paid'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
   const u = $('#unbook'); if (u) u.onclick = async () => { try { await run(sb.from('cb_entries').update({ booked_at: null }).eq('entry_id', e.entry_id), 'Booking cleared (cancel it in EFC too)'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
   const r = $('#removeEntry'); if (r) r.onclick = async () => { try { await run(sb.from('cb_entries').delete().eq('entry_id', e.entry_id), 'Taken off this day'); dlg.close(); await loadAll(); render(); } catch (er) { toast(errMsg(er), 6000); } };
@@ -892,6 +914,74 @@ function renderResults(d, es) {
       e.result = val; count();
     } catch (er) { toast(errMsg(er), 6000); box.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.r === e.result))); }
   });
+}
+// Grading photos on a phone or iPad: tap a student, take the photo with the Grandmaster, it saves straight away
+const PHOTO_BUCKET = 'grading-photos';
+// Make the photo a sensible size (phones take 10+ MB photos): a JPEG at most 2400px on its long side
+async function shrinkPhoto(file, max = 2400) {
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); bmp.close && bmp.close();
+    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.88));
+    if (blob) return blob;
+  } catch (e) { /* fall back to the file as it is */ }
+  if (/^image\/(jpeg|png|webp)$/.test(file.type) && file.size <= 15 * 1024 * 1024) return file;
+  throw new Error('This photo could not be read. Try taking it again.');
+}
+function renderPhotos(d, shown) {
+  const v = $('#view-day');
+  const es = shown.filter(e => e.result !== 'retest');
+  const thumbs = {};
+  const nextUp = () => es.find(e => !e.photo_path);
+  const draw = () => {
+    const done = es.filter(e => e.photo_path).length, nx = nextUp();
+    const unsent = es.filter(e => e.photo_path && !sentTo('photo', e.entry_id));
+    v.innerHTML = `<div class="view-head"><div><button class="x" id="backDay" style="padding:0">‹ Back to the day</button><h2>Photos · ${esc(d.location)} ${esc(fmtDate(d.grading_date))}</h2></div><span class="hint">${done} of ${es.length} taken</span></div>
+      <p class="hint">Tap Take photo, take the photo with the Grandmaster, and it saves straight away. The next student is highlighted. When you're done, text the families: each gets their own link to their photo.</p>
+      <div class="row" style="margin-bottom:12px"><button class="btn primary" id="phSend" ${unsent.length ? '' : 'disabled'}>Text photos${unsent.length ? ' (' + unsent.length + ')' : ''}</button></div>
+      <div style="display:flex;flex-direction:column;gap:10px">${es.length ? es.map(e => `<div class="phcard${nx && nx.entry_id === e.entry_id ? ' next' : ''}" id="ph-${e.entry_id}">
+        ${thumbs[e.entry_id] ? `<img class="thumb" src="${esc(thumbs[e.entry_id])}" alt="">` : `<div class="thumb">${e.photo_path ? 'Saved' : 'No photo'}</div>`}
+        <div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(short(e.belt_from))} to ${esc(short(toText(e)))}${e.photo_path && sentTo('photo', e.entry_id) ? ' · texted' : ''}</div></div>
+        <button class="btn ${e.photo_path ? '' : 'primary'}" data-shoot="${e.entry_id}">${e.photo_path ? 'Retake' : 'Take photo'}</button></div>`).join('') : '<div class="empty">No students on this day yet.</div>'}</div>
+      <input type="file" id="phFile" accept="image/*" capture="environment" hidden>`;
+    $('#backDay').onclick = () => go('day', d.day_id);
+    $('#phSend').onclick = () => composeTexts('photo', unsent.map(e => ({ member_key: e.member_key, entry_id: e.entry_id, e, s: student(e.member_key), d })));
+    let target = null;
+    $$('[data-shoot]').forEach(b => b.onclick = () => { target = b.dataset.shoot; $('#phFile').value = ''; $('#phFile').click(); });
+    $('#phFile').onchange = async ev => {
+      const file = ev.target.files && ev.target.files[0], e = es.find(x => x.entry_id === target);
+      if (!file || !e) return;
+      const btn = $(`[data-shoot="${e.entry_id}"]`); btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        const blob = await shrinkPhoto(file);
+        const type = blob.type || 'image/jpeg', ext = { 'image/png': 'png', 'image/webp': 'webp' }[type] || 'jpg';
+        const path = `${d.day_id}/${e.entry_id}-${Date.now()}.${ext}`, old = e.photo_path;
+        const up = await sb.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: type, upsert: true, cacheControl: '3600' });
+        if (up.error) throw up.error;
+        const at = new Date().toISOString();
+        await run(sb.from('cb_entries').update({ photo_path: path, photo_at: at, photo_by: state.me }).eq('entry_id', e.entry_id));
+        e.photo_path = path; e.photo_at = at; e.photo_by = state.me;
+        thumbs[e.entry_id] = URL.createObjectURL(blob);
+        if (old && old !== path) sb.storage.from(PHOTO_BUCKET).remove([old]).catch(() => {});   // the photo it replaced
+        toast(`Saved ${firstName(e.full_name)}'s photo`);
+        draw();
+        const nx = nextUp(); if (nx) { const el = $('#ph-' + nx.entry_id); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      } catch (er) {
+        const m = errMsg(er);
+        toast(/bucket|not found|row-level|policy/i.test(m) ? 'Photos aren\'t set up in Supabase yet: run supabase/coloured-belts-4.sql.' : m, 7000);
+        btn.disabled = false; btn.textContent = e.photo_path ? 'Retake' : 'Take photo';
+      }
+    };
+  };
+  draw();
+  // Thumbnails of photos already taken (private: short-lived links for grading staff)
+  const have = es.filter(e => e.photo_path && !thumbs[e.entry_id]);
+  if (have.length) sb.storage.from(PHOTO_BUCKET).createSignedUrls(have.map(e => e.photo_path), 3600).then(({ data }) => {
+    (data || []).forEach((x, i) => { if (x && x.signedUrl) thumbs[have[i].entry_id] = x.signedUrl; });
+    if (state.photosMode && state.day === d.day_id) draw();
+  }).catch(() => {});
 }
 // Certificates: a CSV with full name, belt going for and date
 function certCsv(d, list) {
@@ -1132,7 +1222,7 @@ function renderSettings() {
       </tbody></table></div>
       <div class="row"><button class="btn primary" type="submit" id="saveBelts">Save belts</button></div></form>
     <form id="msgForm" class="card"><h3>Messages</h3>
-      <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {distinction} {note}. You can still change the wording before each send.</p>
+      <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {photo} {distinction} {note}. You can still change the wording before each send.</p>
       ${Object.keys(KIND_TPL).map(k => `<div class="field"><label for="tpl_${k}">${esc(KIND_NAME[k].replace(/ messages$/, ''))}</label><textarea id="tpl_${k}" data-col="${KIND_TPL[k]}" rows="3">${esc(st[KIND_TPL[k]] || '')}</textarea><p class="hint">${esc(KIND_HELP[k])}</p></div>`).join('')}
       <div class="field"><label for="sHook">Booking Zap (Zapier Catch Hook address)</label><input type="url" id="sHook" value="${esc(st.booking_webhook || '')}" placeholder="https://hooks.zapier.com/hooks/catch/...">
         <p class="hint">When a family presses Book, this Zap gets member_id, efc_ref, date, session_id, location_id, location, student and belt_to, and books the EFC session.</p></div>
@@ -1173,7 +1263,7 @@ async function start() {
     return;
   }
   try { await loadAll(); }
-  catch (e) { showOnly('#noAccess'); $('#noAccessText').textContent = /cb_|does not exist|schema cache/i.test(errMsg(e)) ? 'Gradings aren\'t set up in Supabase yet: run supabase/coloured-belts.sql (then -2 and -3) in the SQL Editor.' : errMsg(e); return; }
+  catch (e) { showOnly('#noAccess'); $('#noAccessText').textContent = /cb_|does not exist|schema cache/i.test(errMsg(e)) ? 'Gradings aren\'t set up in Supabase yet: run supabase/coloured-belts.sql (then -2, -3 and -4) in the SQL Editor.' : errMsg(e); return; }
   showOnly(null); $('#tabs').hidden = false;
   if (!has('instructor', 'grading')) state.view = 'days';   // payments staff: grading days (paid)
   // The address they opened (or were sent back with from 404.html as ?p=...)
