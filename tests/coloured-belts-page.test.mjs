@@ -33,6 +33,7 @@ await db.exec(read(join(ROOT, 'supabase/coloured-belts-6.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-7.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-8.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-9.sql')));
+await db.exec(read(join(ROOT, 'supabase/coloured-belts-10.sql')));
 await db.exec(`insert into prep_roles (email, role) values ('tate@ama.test', 'admin') on conflict do nothing; delete from prep_roles where email <> 'tate@ama.test'; insert into prep_roles (email, role) values ('coach@ama.test', 'instructor'), ('desk@ama.test', 'attendance');`);
 // EFC students (made up): Sam and Kim have enough classes; Alex is overdue; Jo is at another school
 await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_name, phone, location, programme, belt, promoted_on, attended_since_promoted, efc_reference) values
@@ -138,7 +139,19 @@ try {
   ok((await page.textContent('#readyList')).includes('Alex Kim') && (await page.textContent('#readyList')).includes('Overdue'), 'Overdue shows students on their belt for twice the usual time');
   await page.selectOption('#fShow', 'eligible'); await page.selectOption('#fSchool', 'Marrickville');
   ok(!(await page.textContent('#readyList')).includes('Jo Bloggs'), 'filter by school');
+  // Black Belt Club (from the nightly EFC update)
+  await q(`select cb_bbc_seen(array['m1'])`); await page.reload(); await page.waitForSelector('#readyList [data-key]');
+  await page.selectOption('#fShow', 'eligible'); await page.selectOption('#fSchool', 'Marrickville');
+  ok((await page.textContent('#readyList [data-key="efc:m1"]')).includes('Black Belt Club') && !(await page.textContent('#readyList [data-key="efc:m2"]')).includes('Black Belt Club'), 'students in Black Belt Club are tagged');
+  await page.selectOption('#fBbc', 'yes'); let bbcL = await page.textContent('#readyList');
+  ok(bbcL.includes('Sam Lee') && !bbcL.includes('Kim Ng'), 'and can be filtered to only Black Belt Club members');
+  await page.selectOption('#fBbc', 'no'); bbcL = await page.textContent('#readyList');
+  ok(!bbcL.includes('Sam Lee') && bbcL.includes('Kim Ng'), '...or only those not in it');
+  await page.selectOption('#fBbc', '');
+  await q(`update efc_members set bbc_seen_at = now() - interval '4 days' where member_key = 'efc:m2'`);
+  ok((await q(`select black_belt_club from cb_students where member_key = 'efc:m2'`))[0].black_belt_club === false, 'someone not seen in EFC\'s Black Belt Club for 3 days drops off');
   await page.click('#readyList [data-key="efc:m1"]'); await page.waitForSelector('#apReady');
+  ok((await page.textContent('#dlg')).includes('Black Belt Club') && (await page.textContent('#dlg')).includes('Enrolled'), 'the student screen says they are in Black Belt Club');
   await page.click('#apReady'); await toastSays(page, 'Marked ready');
   ok((await q(`select status, belt from cb_approvals where member_key = 'efc:m1'`))[0]?.status === 'ready', 'an instructor marks a student ready (for their current belt)');
   await settle(page);

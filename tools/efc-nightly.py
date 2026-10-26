@@ -5,6 +5,7 @@ Used by the nightly scheduled task, after it has run the Zapier "EFC Aquila: Ass
 It reads those results from the task's own session log (and the files big results are saved to), so nothing is copied by hand.
 
   python3 efc-nightly.py collect            -> OUT/update_NN.sql: select cb_efc_update(program, school, [[id, grade, promoted, attended], ...])
+                                               OUT/bbc.sql: select cb_bbc_seen([...]): everyone enrolled in Black Belt Club
                                                OUT/full.json: every row, for adding new members
   python3 efc-nightly.py new ID [ID ...]    -> OUT/new_NN.sql: select cb_load_efc(...) with names and contacts, for members not in Supabase yet
   python3 efc-nightly.py new --stdin        -> the same, with the IDs (or the JSON the update statements returned) read from stdin
@@ -18,6 +19,7 @@ OUT = os.environ.get('EFC_OUT', '/tmp/efc-nightly')
 # Reference prefix -> school (AU-023-1234 is Marrickville)
 SCHOOLS = {'AU-023': 'Marrickville', 'AU-256': 'Sydenham', 'AU-258': 'Concord', 'AU-257': 'West', 'AU-3096': 'Sylvania'}
 PROGRAMS = {'Taekwondo', 'Taekwondo - Little Dragon', 'Kung Fu', 'Kick Boxing', 'BJJ', 'BJJ Kids', 'Tricking'}
+CLUB = 'Black Belt Club'                     # only who is in it is kept (no balances)
 TEST_ACCOUNTS = ('c804b6eb', 'f2a1e6fd')   # EFC's own test members (Jarrod EFC, Sydenham EFC)
 CAP = 200                                   # EFC returns at most 200 rows per query
 
@@ -67,7 +69,7 @@ def result_lists():
 
 def collect():
     os.makedirs(OUT, exist_ok=True)
-    full, seen, warn = {}, set(), []
+    full, seen, warn, bbc = {}, set(), [], set()
     groups = defaultdict(list)   # (program, school) -> compact rows
     for res in result_lists():
         prog = (res[0].get('programme') or {}).get('name')
@@ -75,6 +77,9 @@ def collect():
             warn.append(f"{prog} at {school_of(res[0]['member'].get('reference')) or '?'} returned {len(res)} rows (EFC's limit): split that query by age (agefrom/ageto) so no one is missed.")
         for x in res:
             m, p = x.get('member') or {}, (x.get('programme') or {}).get('name')
+            if p == CLUB and m.get('id') and not m['id'].startswith(TEST_ACCOUNTS):
+                bbc.add(m['id'])
+                continue
             if not m.get('id') or p not in PROGRAMS or m['id'].startswith(TEST_ACCOUNTS):
                 continue
             if (p, m['id']) in seen:
@@ -100,10 +105,13 @@ def collect():
         batch.append(st); size += len(st)
     if batch:
         n += 1; write(f'update_{n:02d}.sql', batch)
+    if bbc:
+        open(os.path.join(OUT, 'bbc.sql'), 'w').write("select cb_bbc_seen(array[" + ','.join(q(i) for i in sorted(bbc)) + "]) as black_belt_club;")
     json.dump(full, open(os.path.join(OUT, 'full.json'), 'w'), ensure_ascii=False)
     print(f'{len(full)} rows from EFC in {len(groups)} program/school groups -> {n} update file(s) in {OUT}')
     for (p, loc), rows in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1] or '')):
         print(f'  {p} / {loc}: {len(rows)}')
+    print(f'  {CLUB}: {len(bbc)} member(s) -> {"bbc.sql" if bbc else "no file (no Black Belt Club results)"}')
     for w in warn:
         print('WARNING: ' + w)
 
