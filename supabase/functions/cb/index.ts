@@ -12,7 +12,7 @@
 // Requests (POST, JSON):
 //   { action: 'info', token }               a family's booking link: who, what belt, when, where (no sign-in)
 //   { action: 'book', token }               book it (no sign-in)
-//   { action: 'photo', token }              a family's grading photo link: a short-lived address for the photo (no sign-in)
+//   { action: 'photo', code | token }       a family's grading photo link (short code from /p#<code>): a short-lived address for the photo (no sign-in)
 //   { action: 'check' }                     staff: is texting set up?
 //   { action: 'send', kind, items: [{ entry_id?, member_key, body }] }   staff: text families
 //        kind: invite, not_booked, reminder, unpaid, congrats, retest, photo (grading staff); not_ready (instructors or grading staff)
@@ -89,8 +89,9 @@ export async function handle(req, db, env = {}, http = fetch) {
 
     // ---- Families (no sign-in): the grading photo link ----
     if (body.action === 'photo') {
-      if (!tokenOk(body.token)) return json({ ok: false, error: 'This link isn\'t valid. Ask the front desk for a new one.' }, 404);
-      const { data: e } = await db.from('cb_entries').select('entry_id, day_id, full_name, belt_to, photo_path').eq('token', body.token).maybeSingle();
+      const byCode = /^[A-Za-z0-9]{8,16}$/.test(String(body.code || ''));
+      if (!byCode && !tokenOk(body.token)) return json({ ok: false, error: 'This link isn\'t valid. Ask the front desk for a new one.' }, 404);
+      const { data: e } = await db.from('cb_entries').select('entry_id, day_id, full_name, belt_to, photo_path').eq(byCode ? 'photo_code' : 'token', byCode ? body.code : body.token).maybeSingle();
       if (!e) return json({ ok: false, error: 'This link isn\'t valid. Ask the front desk for a new one.' }, 404);
       const { data: d } = await db.from('cb_days').select('location, grading_date').eq('day_id', e.day_id).maybeSingle();
       const info = { ok: true, first: first(e.full_name), belt_to: e.belt_to, school: d ? d.location : null, date: d ? d.grading_date : null, photo: false };

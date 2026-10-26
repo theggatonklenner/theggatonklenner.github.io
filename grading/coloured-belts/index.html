@@ -479,7 +479,8 @@ const forDay = (d, s) => daySchools(d).includes(s.location) && (!dayBelts(d) || 
 const fromText = d => daySchools(d).length > 1 || daySchools(d)[0] !== d.location ? 'students from ' + daySchools(d).join(', ') : '';
 const beltsText = d => dayBelts(d) ? dayBelts(d).slice().sort((a, b) => (beltOf(a).sort || 0) - (beltOf(b).sort || 0)).map(short).join(', ') : 'All belts';
 const bookingLink = e => location.origin + APP_BASE + 'book/#t=' + e.token;
-const photoLink = e => location.origin + APP_BASE + 'photo/#t=' + e.token;   // a family's grading photo
+// A family's grading photo: a short link so the text fits in one SMS (opens photo/ with the code)
+const photoLink = e => e.photo_code ? location.origin + '/p#' + e.photo_code : location.origin + APP_BASE + 'photo/#t=' + e.token;
 // Messages: fill in a template
 function fill(tpl, v) {
   return String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => v[k] != null ? v[k] : '').replace(/\s+([.,!])/g, '$1').replace(/ {2,}/g, ' ').trim();
@@ -671,11 +672,11 @@ function composeTexts(kind, people) {
     <div class="dlg-head"><div><h3>${KIND_NAME[kind]}</h3><p class="hint">Check the wording, then send. Each family gets their own text from AMA through GoHighLevel.</p></div><button class="x" data-close>Close</button></div>
     <div class="field"><label for="txTpl">Message</label><textarea id="txTpl" rows="4">${esc(tpl)}</textarea>
       <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {photo} {distinction} {note}. Change the saved wording in Settings.</p></div>
-    <div class="field"><span class="label">Preview for ${esc(people[0].s ? people[0].s.full_name : people[0].e.full_name)}</span><div class="card" style="box-shadow:none;border:1px solid var(--line)" id="txPrev"></div></div>
+    <div class="field"><span class="label">Preview for ${esc(people[0].s ? people[0].s.full_name : people[0].e.full_name)}</span><div class="card" style="box-shadow:none;border:1px solid var(--line)" id="txPrev"></div><p class="hint" id="txLen"></p></div>
     <ul class="list" id="txList" style="max-height:240px;overflow:auto">${people.map((p, i) => { const ph = p.s && p.s.phone; return `<li><label class="item" style="cursor:pointer;min-height:48px"><input type="checkbox" data-i="${i}" ${ph ? 'checked' : 'disabled'}><div class="main"><div class="name">${esc((p.s && p.s.full_name) || p.e.full_name)}</div><div class="meta">${ph ? esc(ph) : '<span style="color:var(--danger)">No mobile in EFC</span>'}</div></div></label></li>`; }).join('')}</ul>
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" id="txGo" type="submit">Send</button></div>
   </form>`);
-  const upd = () => { $('#txPrev').textContent = preview(people[0]); const n = $$('#txList input:checked').length; $('#txGo').textContent = `Send ${n} text${n === 1 ? '' : 's'}`; $('#txGo').disabled = !n; };
+  const upd = () => { $('#txPrev').textContent = preview(people[0]); smsInfo($$('#txList input:checked').map(c => preview(people[+c.dataset.i]))); const n = $$('#txList input:checked').length; $('#txGo').textContent = `Send ${n} text${n === 1 ? '' : 's'}`; $('#txGo').disabled = !n; };
   $('#txTpl').oninput = upd; $$('#txList input').forEach(c => c.onchange = upd); upd();
   $('#txForm').onsubmit = async ev => {
     ev.preventDefault();
@@ -688,6 +689,23 @@ function composeTexts(kind, people) {
       dlg.close(); await loadAll(); render();
     } catch (e) { toast(errMsg(e), 7000); upd(); }
   };
+}
+// SMS length: 160 characters is one text (70 if it has characters like é, curly quotes or emoji); longer texts go in parts
+function smsParts(t) {
+  const gsm = /^[A-Za-z0-9 @£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ!"#¤%&'()*+,\-./:;<=>?¡ÄÖÑÜ§¿äöñüà^{}\\\[~\]|€]*$/.test(t);
+  const len = gsm ? [...t].reduce((n, c) => n + ('^{}\\[~]|€'.includes(c) ? 2 : 1), 0) : [...t].length;
+  const one = gsm ? 160 : 70, many = gsm ? 153 : 67;
+  return { len, gsm, one, parts: len <= one ? 1 : Math.ceil(len / many) };
+}
+function smsInfo(texts) {
+  const el = $('#txLen'); if (!el) return;
+  if (!texts.length) { el.textContent = ''; return; }
+  const all = texts.map(smsParts), worst = all.reduce((a, b) => (b.parts > a.parts || (b.parts === a.parts && b.len > a.len) ? b : a));
+  const over = all.filter(x => x.parts > 1).length;
+  el.style.color = over ? 'var(--danger)' : '';
+  el.textContent = over
+    ? `Longest: ${worst.len} characters, ${worst.parts} SMS parts. ${over} of ${texts.length} won't fit in one SMS (${worst.one} characters${worst.gsm ? '' : ': a name or symbol like é or ’ lowers the limit'}). Shorten the wording to keep it to one.`
+    : `Longest: ${worst.len} of ${worst.one} characters. Every text fits in one SMS.`;
 }
 async function fnCall(body) {
   const { data: { session } } = await sb.auth.getSession();
@@ -1263,7 +1281,7 @@ async function start() {
     return;
   }
   try { await loadAll(); }
-  catch (e) { showOnly('#noAccess'); $('#noAccessText').textContent = /cb_|does not exist|schema cache/i.test(errMsg(e)) ? 'Gradings aren\'t set up in Supabase yet: run supabase/coloured-belts.sql (then -2, -3 and -4) in the SQL Editor.' : errMsg(e); return; }
+  catch (e) { showOnly('#noAccess'); $('#noAccessText').textContent = /cb_|does not exist|schema cache/i.test(errMsg(e)) ? 'Gradings aren\'t set up in Supabase yet: run supabase/coloured-belts.sql (then -2 to -5, in order) in the SQL Editor.' : errMsg(e); return; }
   showOnly(null); $('#tabs').hidden = false;
   if (!has('instructor', 'grading')) state.view = 'days';   // payments staff: grading days (paid)
   // The address they opened (or were sent back with from 404.html as ?p=...)

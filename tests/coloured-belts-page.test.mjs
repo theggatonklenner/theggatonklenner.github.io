@@ -28,6 +28,7 @@ await db.exec(read(join(ROOT, 'supabase/coloured-belts.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-2.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-3.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-4.sql')));
+await db.exec(read(join(ROOT, 'supabase/coloured-belts-5.sql')));
 await db.exec(`insert into prep_roles (email, role) values ('tate@ama.test', 'admin') on conflict do nothing; delete from prep_roles where email <> 'tate@ama.test'; insert into prep_roles (email, role) values ('coach@ama.test', 'instructor'), ('desk@ama.test', 'attendance');`);
 // EFC students (made up): Sam and Kim have enough classes; Alex is overdue; Jo is at another school
 await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_name, phone, location, programme, belt, promoted_on, attended_since_promoted, efc_reference) values
@@ -64,7 +65,7 @@ async function open(email, path = '/grading/coloured-belts/index.html') {
       for (const it of b.items) await q(`insert into cb_messages (entry_id, member_key, kind, body, status) values (${it.entry_id ? `'${it.entry_id}'` : 'null'}, '${it.member_key}', '${b.kind}', $1, 'test')`, [it.body]);
       return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ sent: b.items.length, results: b.items.map(() => ({ ok: true })), testing: true }) });
     }
-    if (b.action === 'photo') return r.fulfill({ contentType: 'application/json', body: JSON.stringify(b.token === 'none' ? { ok: true, first: 'Kim', photo: false, error: 'The photo isn\'t ready yet. Please check again soon.' } : { ok: true, first: 'Sam', belt_to: 'Orange Belt', school: 'Marrickville', date: '2030-11-14', photo: true, url: BASE + '/icons/black-belt-prep.png', download: BASE + '/icons/black-belt-prep.png', filename: 'Sam-Lee-AMA-grading.jpg' }) });
+    if (b.action === 'photo') return r.fulfill({ contentType: 'application/json', body: JSON.stringify(b.token === 'none' || b.code === 'none' ? { ok: true, first: 'Kim', photo: false, error: 'The photo isn\'t ready yet. Please check again soon.' } : { ok: true, first: 'Sam', belt_to: 'Orange Belt', school: 'Marrickville', date: '2030-11-14', photo: true, url: BASE + '/icons/black-belt-prep.png', download: BASE + '/icons/black-belt-prep.png', filename: 'Sam-Lee-AMA-grading.jpg' }) });
     if (b.action === 'info' || b.action === 'book') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, first: 'Sam', belt_to: 'Orange Belt', date: '2026-11-14', time: '10:00', school: 'Marrickville', fee: 55, booked: b.action === 'book', closed: false }) });
     r.fulfill({ status: 400, contentType: 'application/json', body: '{"error":"?"}' });
   });
@@ -227,14 +228,21 @@ try {
   if (SHOTS) { await page.setViewportSize({ width: 390, height: 844 }); await shot(page, 'cb-photos-phone'); await page.setViewportSize({ width: 1100, height: 900 }); }
   await page.click('#phSend'); await page.waitForSelector('#txPrev');
   const phText = await page.textContent('#txPrev');
-  ok(phText.includes('Hi Pat') && phText.includes('Grandmaster') && phText.includes('/grading/coloured-belts/photo/#t=' + sam.token), 'the photo text has the family\'s own photo link');
+  const samCode = (await q(`select photo_code from cb_entries where member_key = 'efc:m1'`))[0].photo_code;
+  ok(/^[A-Za-z0-9]{10}$/.test(samCode) && phText.includes('Hi Pat') && phText.includes('Grandmaster') && phText.includes(BASE + '/p#' + samCode), 'the photo text has the family\'s own short photo link');
+  ok(phText.length <= 160 && (await page.textContent('#txLen')).includes('fits in one SMS'), '...and fits in one SMS, which the send screen confirms');
+  await page.fill('#txTpl', 'x'.repeat(150) + ' {photo}');
+  ok(/2 SMS parts/.test(await page.textContent('#txLen')), 'a text too long for one SMS is flagged with how many parts');
+  await page.fill('#txTpl', 'Hi {parent}, Ciarán\'s photo: {photo}');
+  ok(/70 characters/.test(await page.textContent('#txLen')), '...and characters like é lower the limit to 70, which it explains');
+  await page.click('#dlg [data-close]'); await page.click('#phSend'); await page.waitForSelector('#txPrev');
   await page.click('#txGo');
-  ok(await until(() => fnCalls.some(c => c.kind === 'photo' && c.items.length === 1 && c.items[0].entry_id && c.items[0].body.includes('photo/#t=' + sam.token))), 'Text photos sends each family their link');
+  ok(await until(() => fnCalls.some(c => c.kind === 'photo' && c.items.length === 1 && c.items[0].entry_id && c.items[0].body.includes('/p#' + samCode))), 'Text photos sends each family their link');
   ok(await until(async () => (await page.textContent('.phcard')).includes('texted')), '...and shows who has been texted');
   await page.click('#backDay'); await page.waitForSelector('#photosBtn');
   ok((await page.textContent('#photosBtn')).includes('1 of 1') && await page.isDisabled('#sendPhotos'), 'the day shows photos taken, and texted photos are not offered again');
   await page.click('#entryList [data-entry]:has-text("Sam Lee")'); await page.waitForSelector('#copyPhoto');
-  ok((await page.textContent('#dlg')).includes('photo/#t=' + sam.token) && (await page.textContent('#dlg')).includes('texted to the family'), 'a student\'s details show their photo link, to resend by hand if needed');
+  ok((await page.textContent('#dlg')).includes('/p#' + samCode) && (await page.textContent('#dlg')).includes('texted to the family'), 'a student\'s details show their photo link, to resend by hand if needed');
   await page.click('#dlg [data-close]');
 
   console.log('\nStudents from other schools');
@@ -357,10 +365,11 @@ try {
   await page.goto(BASE + '/grading/coloured-belts/book/index.html');
   await page.waitForSelector('#error:not([hidden])');
   ok((await page.textContent('#error')).includes('missing its code'), 'a link without its code explains what to do');
-  await page.goto(BASE + '/grading/coloured-belts/photo/index.html#t=' + sam.token);
+  await page.goto(BASE + '/p/index.html#' + samCode);
   await page.waitForSelector('#img:not([hidden])');
+  ok(new URL(page.url()).pathname === '/grading/coloured-belts/photo/' && page.url().endsWith('#c=' + samCode), 'the short link opens the photo page with the code');
   ok((await page.textContent('#title')) === "Sam's grading photo" && (await page.textContent('#sub')).includes('Orange Belt') && await page.isVisible('#save'), 'the family photo page shows their child\'s photo with a Save button');
-  ok(fnCalls.some(c => c.action === 'photo' && c.token === sam.token), '...fetched through the cb function with their code');
+  ok(fnCalls.some(c => c.action === 'photo' && c.code === samCode), '...fetched through the cb function with their code');
   await page.goto('about:blank'); await page.goto(BASE + '/grading/coloured-belts/photo/index.html#t=none');
   await page.waitForSelector('#error:not([hidden])');
   ok((await page.textContent('#error')).includes("isn't ready") && await page.isHidden('#save'), 'before the photo is taken, the page says it isn\'t ready yet');

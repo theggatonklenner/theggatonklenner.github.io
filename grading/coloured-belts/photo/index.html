@@ -55,14 +55,16 @@
   </div>
 </main>
 <script>
-// A family's grading photo from the Grandmaster photo text: /grading/coloured-belts/photo/#t=<token>
+// A family's grading photo from the Grandmaster photo text: /p#<code> (sent here as photo/#c=<code>), or photo/#t=<token>
 const CFG = window.TOOLKIT_CONFIG || {};
 const $ = s => document.querySelector(s);
-const token = new URLSearchParams(location.hash.replace(/^#/, '')).get('t') || '';
+// The short code from theggatonklenner.github.io/p#<code> (c=), or the entry's full code (t=)
+const hp = new URLSearchParams(location.hash.replace(/^#/, ''));
+const token = hp.get('t') || '', code = hp.get('c') || '';
 const fmtDate = d => new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 async function call() {
   try {
-    const r = await fetch(CFG.SUPABASE_URL + '/functions/v1/cb', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CFG.SUPABASE_KEY }, body: JSON.stringify({ action: 'photo', token }) });
+    const r = await fetch(CFG.SUPABASE_URL + '/functions/v1/cb', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CFG.SUPABASE_KEY }, body: JSON.stringify({ action: 'photo', ...(code ? { code } : { token }) }) });
     return await r.json();
   } catch (e) { return { ok: false, error: 'Something went wrong. Please try again.' }; }
 }
@@ -94,7 +96,7 @@ $('#save').onclick = async () => {
   } catch (e) { if (e && e.name !== 'AbortError') location.href = photo.download; }
   finally { $('#save').disabled = false; }
 };
-(async () => { if (!token) return show({ error: 'This link is missing its code. Open it from the text message you were sent.' }); show(await call()); })();
+(async () => { if (!token && !code) return show({ error: 'This link is missing its code. Open it from the text message you were sent.' }); show(await call()); })();
 </script>
 </body>
 </html>
