@@ -93,7 +93,7 @@ The TV picks up changes within 20 seconds, keeps playing its last slides if the 
 
 ## Coloured belt grading (once, about 3 minutes)
 
-1. In Supabase, open **SQL Editor > New query**, paste the whole of `supabase/coloured-belts.sql`, and click **Run**. It uses Black Belt Prep's roles and the EFC copy (`efc_members`), so Black Belt Prep's updates come first.
+1. In Supabase, open **SQL Editor > New query**, paste the whole of `supabase/coloured-belts.sql`, and click **Run**. It uses Black Belt Prep's roles and the EFC copy (`efc_members`), so Black Belt Prep's updates come first. Then run `supabase/coloured-belts-2.sql` the same way (ages, and importing an EFC list from Update EFC).
 2. Deploy `supabase/functions/cb/index.ts` as an Edge Function named `cb`, with JWT verification off. It uses the same `GHL_TOKEN` and `GHL_LOCATION_ID` secrets as Black Belt Prep's texts.
 3. Open https://theggatonklenner.github.io/grading/coloured-belts/ as an admin. In **Settings**, set each belt's classes needed, weeks between gradings and fee, and paste the booking Zap's address.
 

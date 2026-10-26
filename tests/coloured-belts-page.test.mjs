@@ -25,6 +25,7 @@ for (const f of ['setup.sql', 'roles.sql', 'printed.sql']) await db.exec(read(jo
 await db.exec(read(join(PREP, 'supabase/prep-setup.sql')));
 for (let i = 1; i <= 14; i++) await db.exec(read(join(PREP, `supabase/prep-update-${String(i).padStart(2, '0')}.sql`)));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts.sql')));
+await db.exec(read(join(ROOT, 'supabase/coloured-belts-2.sql')));
 await db.exec(`insert into prep_roles (email, role) values ('tate@ama.test', 'admin') on conflict do nothing; delete from prep_roles where email <> 'tate@ama.test'; insert into prep_roles (email, role) values ('coach@ama.test', 'instructor'), ('desk@ama.test', 'attendance');`);
 // EFC students (made up): Sam and Kim have enough classes; Alex is overdue; Jo is at another school
 await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_name, phone, location, programme, belt, promoted_on, attended_since_promoted, efc_reference) values
@@ -34,6 +35,10 @@ await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_na
   ('efc:m4', 'member', 'Jo Bloggs', 'Mo Bloggs', '0412 000 222', 'Concord', 'Taekwondo', 'Red Three Belt', current_date - 95, 40, 'AU-258-4'),
   ('efc:m5', 'member', 'Black Belt', null, null, 'Marrickville', 'Taekwondo', 'Black Belt: First Dan', current_date - 95, 40, 'AU-023-5'),
   ('efc:m6', 'member', 'Little One', null, null, 'Marrickville', 'Taekwondo - Little Dragon', 'Yellow Belt', current_date - 95, 40, 'AU-023-6')`);
+// Ages: Kim is the youngest, then Sam, then Jo
+await db.exec(`update efc_members set date_of_birth = to_char(current_date - interval '11 years 2 months', 'YYYY-MM-DD') where member_key = 'efc:m1';
+  update efc_members set date_of_birth = to_char(current_date - interval '8 years 1 month', 'YYYY-MM-DD') where member_key = 'efc:m2';
+  update efc_members set date_of_birth = to_char(current_date - interval '14 years 3 months', 'YYYY-MM-DD') where member_key = 'efc:m4';`);
 
 const users = { 'tate@ama.test': { id: '00000000-0000-0000-0000-000000000001', password: 'pw' }, 'coach@ama.test': { id: '00000000-0000-0000-0000-000000000002', password: 'pw' }, 'desk@ama.test': { id: '00000000-0000-0000-0000-000000000003', password: 'pw' } };
 const server = await startServer({ db, appDir: ROOT, users, config: '' });
@@ -86,6 +91,17 @@ try {
   ok(list.includes('Sam Lee') && list.includes('Kim Ng') && list.includes('Jo Bloggs') && !list.includes('Alex Kim'), 'students with enough classes are listed (24 by default); Alex (5 classes) is not');
   ok(!list.includes('Black Belt') && !list.includes('Little One'), 'black belts and Little Dragons are left out');
   ok((await page.textContent('#readyList [data-key="efc:m1"]')).includes('30/24 classes') && (await page.textContent('#readyList [data-key="efc:m1"]')).includes('Yellow to Orange'), 'each row shows classes against what the belt needs, and the belt they grade to');
+  const order = async () => page.$$eval('#readyList [data-key]', bs => bs.map(b => b.dataset.key).join());
+  ok(await order() === 'efc:m2,efc:m1,efc:m4', 'the list is in age order, youngest first (Kim 8, Sam 11, Jo 14)');
+  ok((await page.textContent('#readyList [data-key="efc:m2"]')).includes('8 yrs'), 'each row shows the student\'s age');
+  await page.selectOption('#fSort', 'age_desc');
+  ok(await order() === 'efc:m4,efc:m1,efc:m2', 'or oldest first');
+  await page.selectOption('#fSort', 'name');
+  ok(await order() === 'efc:m4,efc:m2,efc:m1', 'or by name');
+  await page.selectOption('#fSort', 'age');
+  await page.selectOption('#fBelt', 'White Belt');
+  ok(await order() === 'efc:m2', 'filter by belt');
+  await page.selectOption('#fBelt', '');
   await page.selectOption('#fShow', 'overdue');
   ok((await page.textContent('#readyList')).includes('Alex Kim') && (await page.textContent('#readyList')).includes('Overdue'), 'Overdue shows students on their belt for twice the usual time');
   await page.selectOption('#fShow', 'eligible'); await page.selectOption('#fSchool', 'Marrickville');
@@ -127,6 +143,11 @@ try {
   await page.fill('#psQ', 'Kim'); await page.click('#psList [data-key="efc:m2"]');
   ok(await until(async () => (await q(`select count(*)::int n from cb_entries`))[0].n === 2), 'a student can also be added by hand');
   await page.waitForSelector('#entryList [data-entry]:has-text("Kim Ng")');
+  ok((await page.$$eval('#entryList [data-entry] .name', ns => ns.map(n => n.textContent).join())) === 'Kim Ng,Sam Lee', 'the grading day list is in age order too (Kim before Sam)');
+  ok((await page.textContent('#entryList')).includes('11 yrs'), '...with ages');
+  await page.selectOption('#dfBelt', 'White Belt');
+  ok((await page.textContent('#entryList')).includes('Kim Ng') && !(await page.textContent('#entryList')).includes('Sam Lee'), 'a grading day can be filtered by belt');
+  await page.selectOption('#dfBelt', '');
   await page.click('#sendInv'); await page.waitForSelector('#txPrev');
   const inv = await page.textContent('#txPrev');
   const sam = (await q(`select token from cb_entries where member_key = 'efc:m1'`))[0], kim = (await q(`select token from cb_entries where member_key = 'efc:m2'`))[0];
@@ -180,6 +201,22 @@ try {
   await page.check('[data-efc]');
   ok(await until(async () => (await q(`select efc_done from cb_entries where member_key = 'efc:m1'`))[0].efc_done === true && (await page.textContent('#view-efc')).includes('Nothing to update in EFC')), 'ticking it off clears it from the list');
   ok((await q(`select belt from efc_members where member_key = 'efc:m1'`))[0].belt === 'Yellow Belt', 'results never change EFC\'s belt here (EFC is the master)');
+  // Importing an EFC export: matches by EFC ref, adds new students, leaves other programmes alone
+  const efcCsv = 'Member Ref,First Name,Surname,Date of Birth,Grade,Venue,Programme,Attended Since Grading,Medical\r\n' +
+    'AU-023-3,Alex,Kim,01/02/2016,Green,AMA Marrickville,Taekwondo,30,asthma\r\n' +
+    'AU-023-9,New,Kid,"5/6/2017",yellow belt,AMA Marrickville,Taekwondo,25,\r\n' +
+    'AU-023-7,Tiny,Tot,1/1/2022,White,AMA Marrickville,Little Dragon,10,\r\n';
+  await page.setInputFiles('#impFile', { name: 'efc.csv', mimeType: 'text/csv', buffer: Buffer.from(efcCsv) });
+  await page.waitForSelector('#impGo');
+  const ip = await page.textContent('#impPrev');
+  ok(ip.includes('2 students to import') && ip.includes('1 in other programmes left out') && ip.includes('EFC ref ← Member Ref') && ip.includes('Not used: Medical'), 'an EFC file is read and its columns matched (medical notes are not used)');
+  await page.click('#impGo'); await toastSays(page, 'imported');
+  ok((await page.textContent('#toast')).includes('1 updated, 1 added'), 'importing reports how many were updated and added');
+  const alex = (await q(`select attended_since_promoted, date_of_birth, belt from efc_members where member_key = 'efc:m3'`))[0];
+  ok(alex.attended_since_promoted === 30 && alex.date_of_birth === '2016-02-01' && alex.belt === 'Green Belt', 'a student already here is updated (classes, date of birth read day first, belt name matched)');
+  const kid = (await q(`select full_name, belt, location, programme from efc_members where efc_reference = 'AU-023-9'`))[0];
+  ok(kid && kid.full_name === 'New Kid' && kid.belt === 'Yellow Belt' && kid.location === 'Marrickville', 'a new student is added with their belt and school');
+  ok(!(await q(`select 1 from efc_members where efc_reference = 'AU-023-7'`)).length && !JSON.stringify(await q(`select * from efc_members`)).includes('asthma'), 'Little Dragons are left out and medical notes are never stored');
   await page.click('.tab[data-view="settings"]'); await page.waitForSelector('#beltForm');
   await page.fill('tr[data-belt="Yellow Belt"] [name=fee]', '55'); await page.fill('tr[data-belt="White Belt"] [name=classes]', '30');
   await page.click('#saveBelts');

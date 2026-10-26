@@ -466,6 +466,24 @@ function vars(e, s, d, extra = {}) {
     school: (d && d.location) || (s && s.location) || '', date: d ? longDate(d.grading_date) : '', time: d && d.start_time ? ' at ' + fmtTime(d.start_time) : '',
     link: e ? bookingLink(e) : '', distinction: e && e.result === 'distinction' ? ' with distinction' : '', note: (s && s.approval_note) || '', ...extra };
 }
+// Age and list order (youngest first by default, as gradings line up by age)
+const yrs = s => s && s.age != null ? s.age : null;
+const ageText = s => yrs(s) != null ? `${yrs(s)} yrs` : 'Age not in EFC';
+const SORTS = { age: 'Age, youngest first', age_desc: 'Age, oldest first', belt: 'Belt, then age', name: 'Name' };
+const pref = (k, d) => { try { return localStorage.getItem('cb_' + k) || d; } catch (e) { return d; } };
+const savePref = (k, v) => { try { localStorage.setItem('cb_' + k, v); } catch (e) { /* private window */ } };
+// Compare two people by the chosen order. s = their EFC record (for date of birth), belt = their belt now, name = full name.
+function byOrder(mode) {
+  const dob = x => (x.s && x.s.date_of_birth) ? String(x.s.date_of_birth).slice(0, 10) : '';
+  const age = (a, b) => { const da = dob(a), db = dob(b); if (!da || !db) return (da ? -1 : db ? 1 : 0); return mode === 'age_desc' ? da.localeCompare(db) : db.localeCompare(da); };
+  const belt = (a, b) => (beltOf(a.belt).sort || 99) - (beltOf(b.belt).sort || 99);
+  const name = (a, b) => a.name.localeCompare(b.name);
+  if (mode === 'name') return (a, b) => name(a, b);
+  if (mode === 'belt') return (a, b) => belt(a, b) || age(a, b) || name(a, b);
+  return (a, b) => age(a, b) || name(a, b);
+}
+const sortStudents = (list, mode) => list.map(s => ({ s, belt: s.belt, name: s.full_name })).sort(byOrder(mode)).map(x => x.s);
+const sortEntries = (list, mode) => list.map(e => ({ e, s: student(e.member_key), belt: e.belt_from, name: e.full_name })).sort(byOrder(mode)).map(x => x.e);
 const sentTo = (kind, entryId) => state.messages.some(m => m.kind === kind && m.entry_id === entryId && (m.status === 'sent' || m.status === 'test'));
 
 // Readiness
@@ -524,7 +542,7 @@ window.addEventListener('popstate', () => { if (!state.loaded) return; if (apply
 $$('#tabs .tab').forEach(b => b.onclick = () => go(b.dataset.view));
 
 /* ---------------- Who's ready ---------------- */
-const filt = { school: '', belt: '', show: 'eligible', q: '' };
+const filt = { school: '', belt: '', show: 'eligible', q: '', sort: pref('sort', 'age') };
 function renderReady() {
   const v = $('#view-ready');
   if (!v.dataset.built) {
@@ -535,13 +553,15 @@ function renderReady() {
         <select id="fSchool" aria-label="School"><option value="">All schools</option>${SCHOOLS.map(s => `<option>${s}</option>`).join('')}</select>
         <select id="fBelt" aria-label="Belt"><option value="">All belts</option></select>
         <select id="fShow" aria-label="Show"><option value="eligible">Enough classes</option><option value="ready">Marked ready</option><option value="not_yet">Marked not yet</option><option value="undecided">Enough classes, not decided</option><option value="overdue">Overdue</option><option value="all">Everyone</option></select>
+        <select id="fSort" aria-label="Order">${Object.entries(SORTS).map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select>
         <input type="search" id="fQ" placeholder="Search name" aria-label="Search name">
       </div>
       <p class="hint" id="readyCount"></p>
       <ul class="list" id="readyList"></ul>`;
     $('#fBelt').innerHTML += state.belts.map(b => `<option value="${esc(b.belt)}">${esc(b.belt)}</option>`).join('');
-    const sync = () => { filt.school = $('#fSchool').value; filt.belt = $('#fBelt').value; filt.show = $('#fShow').value; filt.q = $('#fQ').value.trim().toLowerCase(); drawReady(); };
-    ['#fSchool', '#fBelt', '#fShow', '#fQ'].forEach(s => $(s).oninput = sync);
+    $('#fSort').value = filt.sort;
+    const sync = () => { filt.school = $('#fSchool').value; filt.belt = $('#fBelt').value; filt.show = $('#fShow').value; filt.q = $('#fQ').value.trim().toLowerCase(); filt.sort = $('#fSort').value; savePref('sort', filt.sort); drawReady(); };
+    ['#fSchool', '#fBelt', '#fShow', '#fSort', '#fQ'].forEach(s => $(s).oninput = sync);
   }
   const newest = state.students.reduce((m, s) => s.efc_updated_at > m ? s.efc_updated_at : m, '');
   $('#efcFresh').textContent = newest ? 'EFC numbers from ' + new Date(newest).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
@@ -549,13 +569,12 @@ function renderReady() {
 }
 function drawReady() {
   const show = filt.show;
-  const list = state.students.filter(s => (!filt.school || s.location === filt.school) && (!filt.belt || s.belt === filt.belt) && (!filt.q || s.full_name.toLowerCase().includes(filt.q)) &&
+  const list = sortStudents(state.students.filter(s => (!filt.school || s.location === filt.school) && (!filt.belt || s.belt === filt.belt) && (!filt.q || s.full_name.toLowerCase().includes(filt.q)) &&
     (show === 'all' || (show === 'eligible' && eligible(s)) || (show === 'ready' && s.approval === 'ready') || (show === 'not_yet' && s.approval === 'not_yet') ||
-     (show === 'undecided' && eligible(s) && !s.approval) || (show === 'overdue' && overdue(s))))
-    .sort((a, b) => a.location.localeCompare(b.location) || a.belt_sort - b.belt_sort || a.full_name.localeCompare(b.full_name));
+     (show === 'undecided' && eligible(s) && !s.approval) || (show === 'overdue' && overdue(s)))), filt.sort);
   $('#readyCount').textContent = `${list.length} student${list.length === 1 ? '' : 's'}`;
   $('#readyList').innerHTML = list.length ? list.slice(0, 400).map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}
-      <div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta"><span>${esc(s.location)}</span><span>·</span><span>${esc(short(s.belt))} to ${esc(short(s.next_belt))}</span><span>·</span><span>${s.weeks_at_belt ?? '?'} weeks on this belt</span></div></div>
+      <div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta"><span>${esc(ageText(s))}</span><span>·</span><span>${esc(s.location)}</span><span>·</span><span>${esc(short(s.belt))} to ${esc(short(s.next_belt))}</span><span>·</span><span>${s.weeks_at_belt ?? '?'} weeks on this belt</span></div></div>
       <span class="tags">${readyTags(s)}</span></button></li>`).join('') + (list.length > 400 ? `<li class="empty">Showing the first 400. Narrow it down with the filters.</li>` : '')
     : '<li class="empty">No one matches.</li>';
   $$('#readyList [data-key]').forEach(b => b.onclick = () => openStudent(b.dataset.key));
@@ -566,6 +585,7 @@ function openStudent(key) {
   openDlg(`<div class="dlg">
     <div class="dlg-head"><div><h3>${esc(s.full_name)}</h3><p class="hint">${esc(s.location)} · ${esc(s.efc_reference || '')}</p></div><button class="x" data-close>Close</button></div>
     <dl class="kv">
+      <dt>Age</dt><dd>${esc(ageText(s))}${s.date_of_birth ? ` (born ${esc(fmtDate(String(s.date_of_birth).slice(0, 10)))})` : ''}</dd>
       <dt>Belt</dt><dd>${swatch(s.belt)} ${esc(s.belt)}, grading to <b>${esc(s.next_belt)}</b></dd>
       <dt>Last grading</dt><dd>${s.promoted_on ? esc(fmtDate(s.promoted_on)) + ` (${s.weeks_at_belt} weeks ago)` : 'Not in EFC'}${overdue(s) ? ' <span class="tag bad">Overdue</span>' : ''}</dd>
       <dt>Classes since</dt><dd><b>${s.classes}</b> of ${s.classes_needed} needed ${s.enough_classes ? '<span class="tag ok">Enough</span>' : `<span class="tag warn">${s.classes_needed - s.classes} more</span>`}</dd>
@@ -687,11 +707,16 @@ function openDayForm(d = null) {
   };
 }
 
+const dayFilt = { belt: '', sort: pref('day_sort', 'age') };
 function renderDay() {
   const d = dayOf(state.day), v = $('#view-day');
   if (!d) return go('days');
-  const es = entriesOf(d.day_id).sort((a, b) => (beltOf(a.belt_from).sort || 0) - (beltOf(b.belt_from).sort || 0) || a.full_name.localeCompare(b.full_name));
-  if (state.resultsMode) return renderResults(d, es);
+  if (dayFilt.day !== d.day_id) { dayFilt.day = d.day_id; dayFilt.belt = ''; }
+  const es = sortEntries(entriesOf(d.day_id), dayFilt.sort);
+  const dayBeltsHere = [...new Set(es.map(e => e.belt_from))].sort((a, b) => (beltOf(a).sort || 99) - (beltOf(b).sort || 99));
+  if (dayFilt.belt && !dayBeltsHere.includes(dayFilt.belt)) dayFilt.belt = '';
+  const shown = es.filter(e => !dayFilt.belt || e.belt_from === dayFilt.belt);   // the list, printout, CSVs and results follow the belt filter
+  if (state.resultsMode) return renderResults(d, shown);
   const n = k => es.filter(k).length;
   const notInvited = es.filter(e => !e.invited_at && !e.result);
   const passed = es.filter(e => e.result === 'pass' || e.result === 'distinction');
@@ -716,13 +741,17 @@ function renderDay() {
         <div class="row"><button class="btn sm" id="sendNotBooked" ${notBooked.length ? '' : 'disabled'}>Remind to book${notBooked.length ? ' (' + notBooked.length + ')' : ''}</button>
           <button class="btn sm" id="sendReminder" ${booked.length ? '' : 'disabled'}>Grading day reminder${booked.length ? ' (' + booked.length + ')' : ''}</button>
           <button class="btn sm" id="sendUnpaid" ${unpaid.length ? '' : 'disabled'}>Fee reminder${unpaid.length ? ' (' + unpaid.length + ')' : ''}</button></div></div>` : ''}
-    <ul class="list" id="entryList">${es.length ? es.map(e => `<li><button class="item" data-entry="${e.entry_id}">${swatch(e.belt_from)}
-        <div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}${e.booking_error ? ' · <span style="color:var(--danger)">Booking failed</span>' : ''}</div></div>
+    ${es.length ? `<div class="filters" style="margin-bottom:8px">
+      <select id="dfBelt" aria-label="Belt"><option value="">All belts (${es.length})</option>${dayBeltsHere.map(b => `<option value="${esc(b)}"${b === dayFilt.belt ? ' selected' : ''}>${esc(b)} (${es.filter(e => e.belt_from === b).length})</option>`).join('')}</select>
+      <select id="dfSort" aria-label="Order">${Object.entries(SORTS).map(([k, t]) => `<option value="${k}"${k === dayFilt.sort ? ' selected' : ''}>${t}</option>`).join('')}</select></div>` : ''}
+    <ul class="list" id="entryList">${shown.length ? shown.map(e => `<li><button class="item" data-entry="${e.entry_id}">${swatch(e.belt_from)}
+        <div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(ageText(student(e.member_key)))} · ${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}${e.booking_error ? ' · <span style="color:var(--danger)">Booking failed</span>' : ''}</div></div>
         <span class="tags">${e.result ? `<span class="tag ${e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[e.result]}</span>` : ''}${e.booked_at ? '<span class="tag ok">Booked</span>' : e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Not invited</span>'}${e.paid ? '<span class="tag ok">Paid</span>' : e.booked_at ? '<span class="tag warn">Unpaid</span>' : ''}</span></button></li>`).join('') : '<li class="empty">No students on this day yet.</li>'}</ul>
     ${es.length ? `<div class="card"><h3>Getting ready</h3>
       <p class="hint">New belts and certificates needed (everyone not marked re-test${n(e => e.result) ? '' : ', until results are in'}). EFC doesn't hold belt sizes, so check sizes against the list.</p>
       <table class="grid"><thead><tr><th>Belt</th><th>Belts</th><th>Certificates</th></tr></thead><tbody>${Object.entries(needs).sort((a, b) => (beltOf(a[0]).sort || 99) - (beltOf(b[0]).sort || 99)).map(([b, c]) => `<tr><td>${esc(b)}</td><td>${c}</td><td>${c}</td></tr>`).join('')}</tbody></table>
-      <div class="row"><button class="btn" id="printList">Print the day's list</button><button class="btn" id="csvAll">Certificates CSV (everyone)</button></div></div>` : ''}
+      <div class="row"><button class="btn" id="printList">Print the day's list</button><button class="btn" id="csvAll">Certificates CSV (everyone)</button></div>
+      <p class="hint">The printout, CSVs and results screen follow the belt and order chosen above the list.</p></div>` : ''}
     ${es.length && canGrade() ? `<div class="card"><h3>On the day</h3><div class="row">
       <button class="btn primary" id="resultsBtn">Enter results</button>
       <button class="btn" id="csvPassed" ${passed.length ? '' : 'disabled'}>Certificates CSV (passed)</button>
@@ -741,9 +770,11 @@ function renderDay() {
   on('#sendUnpaid', () => composeTexts('unpaid', people(unpaid)));
   on('#sendRetest', () => composeTexts('retest', people(toRetest)));
   on('#resultsBtn', () => go('day', d.day_id, true));
-  on('#csvPassed', () => certCsv(d, passed));
-  on('#csvAll', () => certCsv(d, es.filter(e => e.result !== 'retest')));
-  on('#printList', () => printDay(d, es));
+  on('#csvPassed', () => certCsv(d, shown.filter(e => e.result === 'pass' || e.result === 'distinction')));
+  on('#csvAll', () => certCsv(d, shown.filter(e => e.result !== 'retest')));
+  on('#printList', () => printDay(d, shown));
+  const dfb = $('#dfBelt'); if (dfb) dfb.onchange = () => { dayFilt.belt = dfb.value; renderDay(); };
+  const dfs = $('#dfSort'); if (dfs) dfs.onchange = () => { dayFilt.sort = dfs.value; savePref('day_sort', dfs.value); renderDay(); };
   on('#sendCongrats', () => composeTexts('congrats', people(toCongrats)));
   on('#closeDay', async () => { try { await run(sb.from('cb_days').update({ closed: !d.closed }).eq('day_id', d.day_id), d.closed ? 'Reopened' : 'Marked finished'); await loadAll(); render(); } catch (e) { toast(errMsg(e), 6000); } });
   $$('#entryList [data-entry]').forEach(b => b.onclick = () => openEntry(b.dataset.entry));
@@ -795,7 +826,7 @@ function renderResults(d, es) {
   const v = $('#view-day');
   v.innerHTML = `<div class="view-head"><div><button class="x" id="backDay" style="padding:0">‹ Back to the day</button><h2>Results · ${esc(d.location)} ${esc(fmtDate(d.grading_date))}</h2></div><span class="hint" id="resCount"></span></div>
     <p class="hint">Tap a result; it saves straight away. Tap it again to clear it.</p>
-    ${es.map(e => `<div class="rescard"><div class="row" style="flex-wrap:nowrap">${swatch(e.belt_from)}<div class="main" style="flex:1;min-width:0"><div class="name" style="font-size:18px">${esc(e.full_name)}</div><div class="meta">${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}</div></div></div>
+    ${es.map(e => `<div class="rescard"><div class="row" style="flex-wrap:nowrap">${swatch(e.belt_from)}<div class="main" style="flex:1;min-width:0"><div class="name" style="font-size:18px">${esc(e.full_name)}</div><div class="meta">${esc(ageText(student(e.member_key)))} · ${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}</div></div></div>
       <div class="res" data-entry="${e.entry_id}">${Object.entries(RESULT).map(([k, t]) => `<button type="button" data-r="${k}" aria-pressed="${e.result === k}">${t}</button>`).join('')}</div></div>`).join('')}`;
   const count = () => { const n = state.entries.filter(x => x.day_id === d.day_id && x.result).length; $('#resCount').textContent = `${n} of ${es.length} done`; };
   count();
@@ -822,8 +853,8 @@ function certCsv(d, list) {
 function printDay(d, es) {
   const w = window.open('', '_blank'); if (!w) return toast('Allow pop-ups to print.');
   w.document.write(`<!doctype html><title>${esc(d.location)} grading ${esc(d.grading_date)}</title><style>body{font:14px Arial,sans-serif;margin:24px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #999;padding:6px;text-align:left}</style>
-    <h2>${esc(d.location)} coloured belt grading · ${esc(fmtDate(d.grading_date))} ${esc(fmtTime(d.start_time))}</h2>
-    <table class="grid"><tr><th>Name</th><th>From</th><th>To</th><th>Booked</th><th>Paid</th><th>Result</th></tr>${es.map(e => `<tr><td>${esc(e.full_name)}</td><td>${esc(e.belt_from)}</td><td>${esc(e.belt_to)}</td><td>${e.booked_at ? 'Yes' : ''}</td><td>${e.paid ? 'Yes' : ''}</td><td>${e.result ? RESULT[e.result] : ''}</td></tr>`).join('')}</table>`);
+    <h2>${esc(d.location)} coloured belt grading · ${esc(fmtDate(d.grading_date))} ${esc(fmtTime(d.start_time))}${dayFilt.belt ? ' · ' + esc(dayFilt.belt) : ''}</h2>
+    <table class="grid"><tr><th>#</th><th>Name</th><th>Age</th><th>From</th><th>To</th><th>Booked</th><th>Paid</th><th>Result</th></tr>${es.map((e, i) => { const s = student(e.member_key); return `<tr><td>${i + 1}</td><td>${esc(e.full_name)}</td><td>${yrs(s) ?? ''}</td><td>${esc(e.belt_from)}</td><td>${esc(e.belt_to)}</td><td>${e.booked_at ? 'Yes' : ''}</td><td>${e.paid ? 'Yes' : ''}</td><td>${e.result ? RESULT[e.result] : ''}</td></tr>`; }).join('')}</table>`);
   w.document.close(); w.focus(); w.print();
 }
 
@@ -837,12 +868,156 @@ function renderEfc() {
     <p class="hint">EFC is the master for belts. Promote each of these students in EFC, then tick them off. The next EFC update brings the new belt back here.</p>
     <ul class="list">${todo.length ? todo.map(({ e, d }) => `<li><label class="item" style="cursor:pointer"><input type="checkbox" data-efc="${e.entry_id}" ${canGrade() ? '' : 'disabled'}>
       <div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(d.location)} · ${esc(fmtDate(d.grading_date))} · ${esc(e.belt_from)} to <b>${esc(e.belt_to)}</b>${e.result === 'distinction' ? ' · distinction' : ''}</div></div></label></li>`).join('') : '<li class="empty">Nothing to update in EFC.</li>'}</ul>
-    ${done.length ? `<h3>Recently done</h3><ul class="list">${done.map(e => `<li><div class="item" style="cursor:default"><div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(e.belt_to)} · ${esc(e.efc_done_by || '')}</div></div>${canGrade() ? `<button class="btn sm" data-undo="${e.entry_id}">Undo</button>` : ''}</div></li>`).join('')}</ul>` : ''}`;
+    ${done.length ? `<h3>Recently done</h3><ul class="list">${done.map(e => `<li><div class="item" style="cursor:default"><div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(e.belt_to)} · ${esc(e.efc_done_by || '')}</div></div>${canGrade() ? `<button class="btn sm" data-undo="${e.entry_id}">Undo</button>` : ''}</div></li>`).join('')}</ul>` : ''}
+    ${canGrade() ? `<div class="card" id="importCard" style="margin-top:16px"><h3>Import an EFC list</h3>
+      <p class="hint">Export students from EFC (CSV or Excel) and pick the file here. Belts, last grading dates, classes since grading, dates of birth and contacts are updated; students not here yet are added. Blank cells leave what's already saved. Medical notes and balances are never stored.</p>
+      <div class="grid2"><div class="field"><label for="impFile">EFC file</label><input type="file" id="impFile" accept=".csv,.xlsx,.xls,.json,text/csv"></div>
+        <div class="field"><label for="impSchool">School (for rows with no school)</label><select id="impSchool"><option value="">Keep what's saved</option>${SCHOOLS.map(x => `<option>${x}</option>`).join('')}</select></div></div>
+      <div id="impPrev"></div></div>` : ''}`;
+  if (canGrade()) wireImport();
   $$('[data-efc]').forEach(c => c.onchange = async () => {
     try { await run(sb.from('cb_entries').update({ efc_done: true, efc_done_at: new Date().toISOString(), efc_done_by: state.me }).eq('entry_id', c.dataset.efc), 'Ticked off'); await loadAll(); render(); }
     catch (e) { c.checked = false; toast(errMsg(e), 6000); }
   });
   $$('[data-undo]').forEach(b => b.onclick = async () => { try { await run(sb.from('cb_entries').update({ efc_done: false, efc_done_at: null, efc_done_by: null }).eq('entry_id', b.dataset.undo)); await loadAll(); render(); } catch (e) { toast(errMsg(e), 6000); } });
+}
+
+/* ---------------- Import an EFC list ---------------- */
+// Column names EFC (and people) use, squashed to letters and numbers, for each field the import understands.
+const IMPORT_COLS = {
+  member_id: ['id', 'memberid', 'memberguid', 'efcid'],
+  reference: ['reference', 'ref', 'memberref', 'memberreference', 'membernumber', 'memberno', 'efcref', 'efcreference', 'membershipnumber'],
+  first_name: ['firstname', 'forename', 'givenname', 'memberfirstname'],
+  last_name: ['lastname', 'surname', 'familyname', 'memberlastname'],
+  full_name: ['name', 'fullname', 'member', 'membername', 'student', 'studentname'],
+  dob: ['dob', 'dateofbirth', 'birthdate', 'memberdob'],
+  belt: ['belt', 'grade', 'currentgrade', 'gradename', 'rank', 'currentbelt', 'currentrank'],
+  location: ['location', 'venue', 'school', 'club', 'locationname', 'venuename'],
+  programme: ['programme', 'program', 'programmename', 'programname'],
+  status: ['status', 'memberstatus'],
+  phone: ['mobile', 'telephonemobile', 'phone', 'mobilephone', 'contactmobile', 'mobilenumber', 'phonenumber', 'telephone'],
+  email: ['email', 'emailaddress', 'contactemail'],
+  guardian_name: ['contactname', 'parent', 'parentname', 'guardian', 'guardianname', 'contact'],
+  contact_first: ['contactfirstname', 'parentfirstname', 'guardianfirstname'],
+  contact_last: ['contactlastname', 'parentlastname', 'guardianlastname'],
+  promoted_on: ['lastgraded', 'gradedate', 'graded', 'gradedon', 'promoted', 'promotedon', 'lastgrading', 'lastgradingdate', 'dategraded', 'lastpromoted', 'lastpromotion', 'awarded', 'dateawarded'],
+  classes: ['attendedsincegrading', 'sincegrading', 'classessincegrading', 'attendedsincelastgrading', 'attendancesincegrading', 'attendedsincepromoted', 'attendedsincepromotion', 'classessince', 'attendedsince', 'classes', 'sessionssincegrading'],
+  attendance_total: ['attendancetotal', 'totalattendance', 'totalclasses', 'totalattended'],
+  last_attended: ['attended', 'lastattended', 'lastattendance', 'lastvisit', 'lastclass']
+};
+const IMPORT_LABEL = { member_id: 'EFC member ID', reference: 'EFC ref', first_name: 'First name', last_name: 'Last name', full_name: 'Name', dob: 'Date of birth', belt: 'Belt', location: 'School', programme: 'Programme', status: 'Status', phone: 'Mobile', email: 'Email', guardian_name: 'Parent', contact_first: 'Parent first name', contact_last: 'Parent last name', promoted_on: 'Last grading', classes: 'Classes since grading', attendance_total: 'Total classes', last_attended: 'Last attended' };
+const squash = h => String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+// A small CSV reader (quotes, commas and new lines inside quotes)
+function parseCsv(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  text = String(text).replace(/^\uFEFF/, '');
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  const head = (rows.shift() || []).map(h => h.trim());
+  return rows.filter(r => r.some(x => String(x).trim())).map(r => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ''])));
+}
+// Dates as YYYY-MM-DD from 2019-06-07, 7/6/2019 (Australian day first), 7 Jun 2019 or an Excel date number
+function isoDate(v) {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Date.UTC(1899, 11, 30) + v * 864e5).toISOString().slice(0, 10);
+  const t = String(v).trim();
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t); if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/.exec(t);
+  if (m) { const y = m[3].length === 2 ? (Number(m[3]) > 30 ? '19' : '20') + m[3] : m[3]; return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; }
+  const d = new Date(t); return isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// EFC belt names, matched to the belts set up here ("Yellow" or "yellow belt" -> "Yellow Belt", "Red 2" -> "Red Two Belt")
+function beltName(v) {
+  const t = String(v || '').trim(); if (!t) return '';
+  const k = x => squash(x).replace(/belt$/, '').replace(/2/g, 'two').replace(/3/g, 'three');
+  const hit = state.belts.find(b => k(b.belt) === k(t));
+  return hit ? hit.belt : t;
+}
+function schoolName(v) {
+  const t = String(v || '').trim(); if (!t) return '';
+  return SCHOOLS.find(x => x.toLowerCase() === t.toLowerCase()) || SCHOOLS.find(x => new RegExp('\\b' + x + '\\b', 'i').test(t)) || t;
+}
+// Turn a file's rows into import rows; returns { rows, used, unknown, skipped }
+function mapImport(raw, school) {
+  const heads = Object.keys(raw[0] || {});
+  const col = {}, used = [];
+  for (const [f, names] of Object.entries(IMPORT_COLS)) {
+    const h = heads.find(x => names.includes(squash(x)));
+    if (h && !Object.values(col).includes(h)) { col[f] = h; used.push(`${IMPORT_LABEL[f]} ← ${h}`); }
+  }
+  const unknown = heads.filter(h => !Object.values(col).includes(h));
+  const get = (r, f) => col[f] != null ? r[col[f]] : '';
+  const rows = [], other = [];
+  for (const r of raw) {
+    const prog = String(get(r, 'programme') || '').trim();
+    if (prog && !/taekwondo/i.test(prog)) { other.push(r); continue; }   // Little/Mini Dragons and other programmes are left alone
+    const parent = String(get(r, 'guardian_name') || '').trim() || [get(r, 'contact_first'), get(r, 'contact_last')].map(x => String(x || '').trim()).filter(Boolean).join(' ');
+    const num = v => { const n = parseInt(String(v ?? '').replace(/[^\d]/g, ''), 10); return isNaN(n) ? '' : n; };
+    rows.push({ member_id: String(get(r, 'member_id') || '').trim(), reference: String(get(r, 'reference') || '').trim(),
+      first_name: String(get(r, 'first_name') || '').trim(), last_name: String(get(r, 'last_name') || '').trim(), full_name: String(get(r, 'full_name') || '').trim(),
+      dob: isoDate(get(r, 'dob')), belt: beltName(get(r, 'belt')), location: schoolName(get(r, 'location')) || school || '',
+      programme: prog ? 'Taekwondo' : '', status: String(get(r, 'status') || '').trim(), phone: String(get(r, 'phone') || '').trim(), email: String(get(r, 'email') || '').trim(),
+      guardian_name: parent, promoted_on: isoDate(get(r, 'promoted_on')), classes: num(get(r, 'classes')), attendance_total: num(get(r, 'attendance_total')), last_attended: isoDate(get(r, 'last_attended')) });
+  }
+  return { rows, used, unknown, other: other.length, col };
+}
+async function readImportFile(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.json')) {
+    const j = JSON.parse(await file.text());
+    const list = Array.isArray(j) ? j : (j.results || j.data || []);
+    return list.map(x => (x && x.member) ? { ...x, ...x.member } : x).map(x => { const o = { ...x }; delete o.member; return o; });
+  }
+  if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+    if (!window.XLSX) await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; sc.onload = ok; sc.onerror = () => no(new Error('Could not load the Excel reader. Save the file as CSV and try again.')); document.head.append(sc); });
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: true });
+  }
+  return parseCsv(await file.text());
+}
+function wireImport() {
+  const f = $('#impFile'); if (!f) return;
+  let raw = null;
+  const show = () => {
+    if (!raw) return;
+    const m = mapImport(raw, $('#impSchool').value);
+    const named = m.col.full_name || m.col.first_name || m.col.last_name, matched = m.col.member_id || m.col.reference || (named && m.col.dob);
+    const newBelts = [...new Set(m.rows.map(r => r.belt).filter(b => b && !state.belts.some(x => x.belt === b)))];
+    $('#impPrev').innerHTML = `<div class="section">
+      <p><b>${m.rows.length}</b> student${m.rows.length === 1 ? '' : 's'} to import${m.other ? ` · ${m.other} in other programmes left out` : ''}</p>
+      <p class="hint">Columns used: ${esc(m.used.join(', ') || 'none')}</p>
+      ${m.unknown.length ? `<p class="hint">Not used: ${esc(m.unknown.join(', '))}</p>` : ''}
+      ${newBelts.length ? `<p class="hint">Belts not in Settings (fine for black belts): ${esc(newBelts.slice(0, 12).join(', '))}</p>` : ''}
+      ${matched ? '' : '<p class="hint" style="color:var(--danger)">This file needs an EFC ref or member ID column (or name and date of birth) to match students.</p>'}
+      ${!m.col.member_id ? '<p class="hint">No EFC member ID column: new students are added, but online booking for them works after the next full EFC refresh.</p>' : ''}
+      <div class="row"><button class="btn primary" id="impGo" ${matched && m.rows.length ? '' : 'disabled'}>Import ${m.rows.length}</button></div></div>`;
+    const go = $('#impGo'); if (go) go.onclick = async () => {
+      go.disabled = true; const tot = { updated: 0, added: 0, skipped: 0 };
+      try {
+        for (let i = 0; i < m.rows.length; i += 800) {
+          go.textContent = `Importing ${Math.min(i + 800, m.rows.length)} of ${m.rows.length}…`;
+          const r = await run(sb.rpc('cb_import_efc', { p_rows: m.rows.slice(i, i + 800) }));
+          for (const k in tot) tot[k] += (r && r[k]) || 0;
+        }
+        toast(`EFC list imported: ${tot.updated} updated, ${tot.added} added${tot.skipped ? `, ${tot.skipped} skipped (no name or EFC ref)` : ''}`, 8000);
+        await loadAll(); render();
+      } catch (e) { toast(errMsg(e), 8000); go.disabled = false; go.textContent = `Import ${m.rows.length}`; }
+    };
+  };
+  f.onchange = async () => {
+    raw = null; $('#impPrev').innerHTML = f.files[0] ? '<p class="hint">Reading…</p>' : '';
+    if (!f.files[0]) return;
+    try { raw = await readImportFile(f.files[0]); if (!raw.length) throw new Error('No rows found in that file.'); show(); }
+    catch (e) { $('#impPrev').innerHTML = `<p class="hint" style="color:var(--danger)">${esc(errMsg(e))}</p>`; }
+  };
+  $('#impSchool').onchange = show;
 }
 
 /* ---------------- Dashboard ---------------- */

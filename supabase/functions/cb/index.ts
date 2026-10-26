@@ -73,7 +73,7 @@ export async function handle(req, db, env = {}, http = fetch) {
       const hook = st && st.booking_webhook;
       if (!hook || !/^https:\/\/hooks\.zapier\.com\//.test(hook)) return json({ ...info, ok: false, error: 'Online booking isn\'t set up for this grading yet. Please contact the front desk.' });
       const { data: m } = await db.from('efc_members').select('efc_reference').eq('member_key', e.member_key).maybeSingle();
-      const payload = { member_id: e.member_key.replace(/^efc:/, ''), efc_ref: (m && m.efc_reference) || null, date: d.grading_date, session_id: d.efc_session_id || null,
+      const payload = { member_id: e.member_key.startsWith('efc:') ? e.member_key.slice(4) : null, efc_ref: (m && m.efc_reference) || null, date: d.grading_date, session_id: d.efc_session_id || null,
         location_id: EFC_LOCATIONS[d.location] || null, location: d.location, student: e.full_name, belt_to: e.belt_to };
       let okHook = false, why = '';
       try { const r = await http(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); okHook = r.ok; if (!r.ok) why = 'Zapier said ' + r.status; }
