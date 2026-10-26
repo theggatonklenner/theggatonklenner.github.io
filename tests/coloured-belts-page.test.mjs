@@ -34,6 +34,7 @@ await db.exec(read(join(ROOT, 'supabase/coloured-belts-7.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-8.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-9.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-10.sql')));
+await db.exec(read(join(ROOT, 'supabase/coloured-belts-11.sql')));
 await db.exec(`insert into prep_roles (email, role) values ('tate@ama.test', 'admin') on conflict do nothing; delete from prep_roles where email <> 'tate@ama.test'; insert into prep_roles (email, role) values ('coach@ama.test', 'instructor'), ('desk@ama.test', 'attendance');`);
 // EFC students (made up): Sam and Kim have enough classes; Alex is overdue; Jo is at another school
 await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_name, phone, location, programme, belt, promoted_on, attended_since_promoted, efc_reference) values
@@ -251,17 +252,23 @@ try {
   await settle(page); await page.click('#dlg [data-close]');
   await page.click('#resultsBtn'); await page.waitForSelector('.res');
   ok(new URL(page.url()).pathname.endsWith(dayId + '/results'), 'results have their own address too (.../results)');
-  await page.click('.rescard:has-text("Sam Lee") button[data-r="distinction"]'); await settle(page);
+  ok((await page.$$eval('.rescard:has-text("Sam Lee") .res button', bs => bs.map(b => b.textContent).join())) === 'Pass,Fail', 'results are just Pass or Fail');
+  await page.click('.rescard:has-text("Sam Lee") button[data-r="pass"]'); await settle(page);
   await page.click('.rescard:has-text("Kim Ng") button[data-r="retest"]'); await settle(page);
-  ok((await q(`select result from cb_entries where member_key = 'efc:m1'`))[0].result === 'distinction' && (await q(`select result from cb_entries where member_key = 'efc:m2'`))[0].result === 'retest', 'results are entered on a tablet with big buttons and saved straight away');
+  ok((await q(`select result from cb_entries where member_key = 'efc:m1'`))[0].result === 'pass' && (await q(`select result from cb_entries where member_key = 'efc:m2'`))[0].result === 'retest', 'results are entered on a tablet with big buttons and saved straight away');
   ok((await page.textContent('#resCount')).includes('2 of 2'), 'it counts how many are done');
+  // A teacher writes Kim a Black Belt Club invitation (Sam is already in the club)
+  ok(!(await page.$('.rescard:has-text("Sam Lee") [data-bbcinv]')), 'no Black Belt Club invite button for someone already in the club');
+  await page.click('.rescard:has-text("Kim Ng") [data-bbcinv]'); await toastSays(page, 'Marked invited');
+  const bbcInv = (await q(`select bbc_invited_at, bbc_invited_by from efc_members where member_key = 'efc:m2'`))[0];
+  ok(bbcInv.bbc_invited_at && bbcInv.bbc_invited_by === 'tate@ama.test' && await until(async () => (await page.textContent('.rescard:has-text("Kim Ng") [data-bbcinv]').catch(() => '')).includes('Invited')), 'staff mark a student invited to Black Belt Club from the results screen');
   if (SHOTS) { await page.setViewportSize({ width: 390, height: 844 }); await shot(page, 'cb-results-phone'); await page.setViewportSize({ width: 1100, height: 900 }); }
   await page.click('#backDay'); await page.waitForSelector('#csvPassed');
   const dl = page.waitForEvent('download'); await page.click('#csvPassed'); const file = await dl;
   const csv = readFileSync(await file.path(), 'utf8');
   ok(csv.includes('Full name,Belt going for,Date') && csv.includes('Sam Lee,Orange Belt,14 November 2030') && !csv.includes('Kim Ng'), 'the certificates CSV has full name, belt going for and date, for those who passed');
   await page.click('#sendCongrats'); await page.waitForSelector('#txPrev');
-  ok((await page.textContent('#txPrev')).includes('with distinction') && (await page.textContent('#txPrev')).includes('Orange Belt'), 'congratulations texts mention a distinction');
+  ok((await page.textContent('#txPrev')).includes('Orange Belt'), 'congratulations texts go to those who passed');
   await page.click('#txGo');
   ok(await until(() => page.isDisabled('#sendCongrats').catch(() => false)), 'once sent, congratulations are not offered again');
   await page.click('#sendRetest'); await page.waitForSelector('#txPrev');
