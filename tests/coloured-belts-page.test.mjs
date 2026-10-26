@@ -32,6 +32,7 @@ await db.exec(read(join(ROOT, 'supabase/coloured-belts-5.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-6.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-7.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-8.sql')));
+await db.exec(read(join(ROOT, 'supabase/coloured-belts-9.sql')));
 await db.exec(`insert into prep_roles (email, role) values ('tate@ama.test', 'admin') on conflict do nothing; delete from prep_roles where email <> 'tate@ama.test'; insert into prep_roles (email, role) values ('coach@ama.test', 'instructor'), ('desk@ama.test', 'attendance');`);
 // EFC students (made up): Sam and Kim have enough classes; Alex is overdue; Jo is at another school
 await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_name, phone, location, programme, belt, promoted_on, attended_since_promoted, efc_reference) values
@@ -422,6 +423,36 @@ try {
   ok(await page.isHidden('.tab[data-view="settings"]') && (await page.textContent('#readyList')).includes('Sam Lee'), 'an instructor sees who is ready but not Settings');
   await page.click('.tab[data-view="days"]');
   ok(!(await page.$('#newDay')), '...and cannot add grading days');
+  // A teacher checks students in on the day and signs off
+  const ciDay = (await q(`select day_id, count(*)::int n from cb_entries group by day_id order by n desc limit 1`))[0];
+  const ciEs = await q(`select entry_id, full_name from cb_entries where day_id = '${ciDay.day_id}' order by full_name`);
+  await page.goto('about:blank'); await page.goto(BASE + '/grading/coloured-belts/grading-days/' + ciDay.day_id);
+  await page.waitForSelector('#checkinBtn'); await page.click('#checkinBtn'); await page.waitForSelector('#ciList');
+  ok(new URL(page.url()).pathname.endsWith('/check-in'), 'teachers can open check-in for a grading day (its own address, .../check-in)');
+  await page.click(`#ciList [data-entry="${ciEs[0].entry_id}"] button[data-r="in"]`);
+  ok(await until(async () => (await q(`select checked_in_at, checked_in_by from cb_entries where entry_id = '${ciEs[0].entry_id}'`))[0].checked_in_by === 'coach@ama.test'), 'tapping Here checks a student in (and records which teacher)');
+  await shot(page, 'cb-check-in');
+  ok((await page.textContent('#ciCount')).startsWith('1 of ' + ciEs.length + ' here'), 'the count of who is here updates');
+  await page.click('#ciSign'); await page.waitForSelector('#soPad');
+  await page.click('#soGo'); await page.waitForSelector('#soErr:not([hidden])');
+  ok((await page.textContent('#soErr')).includes('name'), 'signing off needs the teacher\'s name');
+  await page.fill('#soName', 'Coach Carter'); await page.click('#soGo');
+  ok((await page.textContent('#soErr')).includes('Sign'), '...and a signature');
+  const pad = await page.$('#soPad'); const bb = await pad.boundingBox();
+  await page.mouse.move(bb.x + 20, bb.y + 60); await page.mouse.down(); await page.mouse.move(bb.x + 120, bb.y + 90, { steps: 6 }); await page.mouse.move(bb.x + 200, bb.y + 40, { steps: 6 }); await page.mouse.up();
+  await shot(page, 'cb-sign-off');
+  await page.click('#soGo'); await toastSays(page, 'Signed off');
+  const sd = (await q(`select signed_off_name, signed_off_by, signed_off_sig like 'data:image/png;base64,%' sig from cb_days where day_id = '${ciDay.day_id}'`))[0];
+  const ns = await q(`select count(*)::int n from cb_entries where day_id = '${ciDay.day_id}' and no_show`);
+  ok(sd.signed_off_name === 'Coach Carter' && sd.signed_off_by === 'coach@ama.test' && sd.sig && ns[0].n === ciEs.length - 1, 'the teacher signs off with their name and signature; everyone not checked in becomes a no-show');
+  await page.goto('about:blank'); await page.goto(BASE + '/grading/coloured-belts/grading-days/' + ciDay.day_id + '/check-in'); await page.waitForSelector('#ciList');
+  ok(await page.isDisabled(`#ciList [data-entry="${ciEs[0].entry_id}"] button[data-r="in"]`) && (await page.textContent('#view-day')).includes('Signed off by Coach Carter') && !(await page.$('#ciReopen')), 'after sign-off, check-in is locked and shows who signed (only grading staff can reopen)');
+  const [sheet] = await Promise.all([page.context().waitForEvent('page'), page.click('#ciPrint')]);
+  await sheet.waitForLoadState(); const st = await sheet.textContent('body');
+  ok(st.includes('Line-up') && st.includes(ciEs[0].full_name) && st.includes('No-show') && st.includes('Coach Carter') && st.includes('Examiner'), 'the line-up sheet lists students youngest first with result boxes, no-shows at the end, and the teacher\'s sign-off');
+  await sheet.close();
+  await q(`update cb_entries set checked_in_at = null, checked_in_by = null, no_show = false where day_id = '${ciDay.day_id}'`);
+  await q(`update cb_days set signed_off_at = null, signed_off_by = null, signed_off_name = null, signed_off_sig = null where day_id = '${ciDay.day_id}'`);
   await ctx.close();
   ({ ctx, page } = await open('desk@ama.test'));
   ok(await page.isVisible('#noAccess') && (await page.textContent('#noAccess')).includes("can't use gradings"), 'attendance-only staff are told they need a role');
