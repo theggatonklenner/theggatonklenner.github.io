@@ -113,6 +113,10 @@ const settle = page => page.waitForTimeout(400);
 // Close a dialog a slow reload may have reopened (e.g. a student's details after saving)
 const noDialog = page => page.evaluate(() => { const d = document.querySelector('#dlg'); if (d && d.open) d.close(); });
 const SHOTS = process.env.SHOT_DIR; const shot = (page, n) => SHOTS ? page.screenshot({ path: join(SHOTS, n + '.png'), fullPage: true }) : null;
+// Desktop and phone pictures of the same screen (only when SHOT_DIR is set)
+const shots = async (page, n) => { if (!SHOTS) return; await shot(page, n); await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(150); await shot(page, n + '-phone'); await page.setViewportSize({ width: 1100, height: 900 }); };
+// Grading day buttons sit under Before / On the day / After: show the right one, then press the button
+const pclick = async (page, sel) => { const st = await page.$eval(sel, el => (el.closest('[data-panel]') || {}).dataset?.panel).catch(() => null); if (st) await page.click(`[data-stage="${st}"]`).catch(() => {}); return page.click(sel); };
 const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await new Promise(r => setTimeout(r, 100)); } return false; };
 
 try {
@@ -121,7 +125,7 @@ try {
   const loaded = await page.evaluate(() => ({ n: state.all.students.length, sam: state.all.students.some(s => s.member_key === 'efc:m1' && s.phone) }));
   ok(loaded.n > 1100 && loaded.sam, 'every student loads, even past Supabase\'s 1,000-row limit (so no one shows "No mobile" by mistake)');
   ok(new URL(page.url()).pathname === '/grading/coloured-belts/ready', 'the first screen has its own address (/grading/coloured-belts/ready)');
-  await shot(page, 'cb-ready');
+  await shots(page, 'cb-ready');
   let list = await page.textContent('#readyList');
   ok(list.includes('Sam Lee') && list.includes('Kim Ng') && list.includes('Jo Bloggs') && !list.includes('Alex Kim'), 'students with enough classes are listed (24 by default); Alex (5 classes) is not');
   ok(!list.includes('Black Belt') && !list.includes('Little One'), 'black belts and Little Dragons are left out');
@@ -153,6 +157,7 @@ try {
   await q(`update efc_members set bbc_seen_at = now() - interval '4 days' where member_key = 'efc:m2'`);
   ok((await q(`select black_belt_club from cb_students where member_key = 'efc:m2'`))[0].black_belt_club === false, 'someone not seen in EFC\'s Black Belt Club for 3 days drops off');
   await page.click('#readyList [data-key="efc:m1"]'); await page.waitForSelector('#apReady');
+  await shots(page, 'cb-student');
   ok((await page.textContent('#dlg')).includes('Black Belt Club') && (await page.textContent('#dlg')).includes('Enrolled'), 'the student screen says they are in Black Belt Club');
   await page.click('#apReady'); await toastSays(page, 'Marked ready');
   ok((await q(`select status, belt from cb_approvals where member_key = 'efc:m1'`))[0]?.status === 'ready', 'an instructor marks a student ready (for their current belt)');
@@ -186,17 +191,17 @@ try {
   ok((await page.$$('#dBelts input:checked')).length === 10, 'a new grading day starts with every belt ticked');
   await page.click('#dNone'); await page.check('#dBelts input[value="White Belt"]'); await page.check('#dBelts input[value="Yellow Belt"]');
   ok(new URL(page.url()).pathname === '/grading/coloured-belts/grading-days', 'Grading days is at /grading/coloured-belts/grading-days');
-  await page.click('#dGo'); await page.waitForSelector('#addReady');
+  await page.click('#dGo'); await page.waitForSelector('#addReady', { state: 'attached' });
   const dayId = (await q(`select day_id from cb_days`))[0].day_id;
   ok(new URL(page.url()).pathname === '/grading/coloured-belts/grading-days/' + dayId, 'each grading day has its own address');
   ok((await page.textContent('#view-day')).includes('Marrickville') && (await page.textContent('#view-day')).includes('10:00am'), 'a grading day is added for a school, date and time');
   ok((await q(`select belts from cb_days`))[0].belts.join() === 'White Belt,Yellow Belt' && (await page.textContent('#view-day')).includes('White, Yellow'), 'and for the belts chosen (White and Yellow)');
   await q(`insert into cb_approvals (member_key, belt, status) values ('efc:m3', 'Green Belt', 'ready')`);   // Alex: Green, ready, but not a belt for this day
-  await page.evaluate(() => loadAll().then(render)); await page.waitForSelector('#addReady');
-  await page.click('#addReady'); await toastSays(page, 'Added');
+  await page.evaluate(() => loadAll().then(render)); await page.waitForSelector('#addReady', { state: 'attached' });
+  await pclick(page, '#addReady'); await toastSays(page, 'Added');
   let entries = await q(`select full_name, belt_from, belt_to from cb_entries order by full_name`);
   ok(entries.length === 1 && entries[0].full_name === 'Sam Lee' && entries[0].belt_to === 'Orange Belt', '"Add everyone marked ready" adds only ready students at that school on the day\'s belts (Sam; Kim is "not yet", Alex is Green)');
-  await page.click('#addOne'); await page.fill('#psQ', 'Alex'); await page.waitForTimeout(200);
+  await pclick(page, '#addOne'); await page.fill('#psQ', 'Alex'); await page.waitForTimeout(200);
   ok((await page.textContent('#psList')).includes('No one matches'), 'adding by hand only offers students on the day\'s belts');
   await page.fill('#psQ', 'Kim'); await page.click('#psList [data-key="efc:m2"]');
   ok(await until(async () => (await q(`select count(*)::int n from cb_entries`))[0].n === 2), 'a student can also be added by hand');
@@ -206,7 +211,7 @@ try {
   await page.selectOption('#dfBelt', 'White Belt');
   ok((await page.textContent('#entryList')).includes('Kim Ng') && !(await page.textContent('#entryList')).includes('Sam Lee'), 'a grading day can be filtered by belt');
   await page.selectOption('#dfBelt', '');
-  await page.click('#sendInv'); await page.waitForSelector('#txPrev');
+  await pclick(page, '#sendInv'); await page.waitForSelector('#txPrev');
   const inv = await page.textContent('#txPrev');
   const sam = (await q(`select token from cb_entries where member_key = 'efc:m1'`))[0], kim = (await q(`select token from cb_entries where member_key = 'efc:m2'`))[0];
   ok(inv.includes('Hi Jo') && inv.includes('Yellow Belt') && inv.includes('Thursday 14 November') && inv.includes('at 10:00am') && inv.includes('/grading/coloured-belts/book/#t=' + kim.token), 'the invitation preview has the date, time, belt and the family\'s own booking link');
@@ -217,11 +222,11 @@ try {
   await page.evaluate(() => loadAll().then(render)); await settle(page);
   ok((await page.textContent('#entryList [data-entry]:has-text("Sam Lee")')).includes('Booked'), 'booked students show Booked (from the family\'s booking link)');
   ok((await page.textContent('#sendNotBooked')).includes('(1)') && (await page.textContent('#sendReminder')).includes('(1)') && (await page.textContent('#sendUnpaid')).includes('(1)'), 'reminders: to book (Kim, invited), grading day (Sam, booked), fee (Sam, unpaid)');
-  await page.click('#sendReminder'); await page.waitForSelector('#txPrev');
+  await pclick(page, '#sendReminder'); await page.waitForSelector('#txPrev');
   ok((await page.textContent('#txPrev')).includes('15 minutes early') && (await page.textContent('#txPrev')).includes('Thursday 14 November'), 'the grading day reminder has its own wording');
   await page.click('#txGo');
   ok(await until(() => fnCalls.some(c => c.kind === 'reminder' && c.items.length === 1 && c.items[0].member_key === 'efc:m1')), 'and goes to booked families');
-  await page.waitForSelector('#sendNotBooked'); await page.click('#sendNotBooked'); await page.waitForSelector('#txPrev');
+  await page.waitForSelector('#sendNotBooked', { state: 'attached' }); await pclick(page, '#sendNotBooked'); await page.waitForSelector('#txPrev');
   ok((await page.textContent('#txPrev')).includes('/grading/coloured-belts/book/#t=' + kim.token), 'the reminder to book includes their booking link');
   await page.click('#dlg [data-close]');
   // Bookings close: then staff can issue someone a new link
@@ -239,7 +244,8 @@ try {
   kim.token = kim2.token;
   await q(`update cb_days set book_by = null where day_id = '${dayId}'`);
   await page.evaluate(() => loadAll().then(render)); await settle(page);
-  await shot(page, 'cb-day');
+  await shots(page, 'cb-day');
+  if (SHOTS) { await page.click('#entryList [data-entry]'); await page.waitForSelector('#dlg[open]'); await shots(page, 'cb-entry'); await page.click('#dlg [data-close]'); }
   const gr = await page.textContent('#view-day');
   ok(gr.includes('Getting ready') && /Orange Belt\s*1\s*1/.test(await page.textContent('#view-day table')), 'Getting ready counts the belts and certificates needed');
 
@@ -251,7 +257,7 @@ try {
   ok((await q(`select paid from cb_entries where member_key = 'efc:m1'`))[0].paid === true, 'paid can be ticked');
   ok(await until(async () => (await page.textContent('#dlg').catch(() => '')).includes('Paid (cash)')), '...and it shows how they paid');
   await settle(page); await page.click('#dlg [data-close]');
-  await page.click('#resultsBtn'); await page.waitForSelector('.res');
+  await pclick(page, '#resultsBtn'); await page.waitForSelector('.res');
   ok(new URL(page.url()).pathname.endsWith(dayId + '/results'), 'results have their own address too (.../results)');
   ok((await page.$$eval('.rescard:has-text("Sam Lee") .res button', bs => bs.map(b => b.textContent).join())) === 'Pass,Fail', 'results are just Pass or Fail');
   await page.click('.rescard:has-text("Sam Lee") button[data-r="pass"]'); await settle(page);
@@ -266,10 +272,11 @@ try {
   const bbcInv = (await q(`select bbc_invited_at, bbc_invited_by from efc_members where member_key = 'efc:m2'`))[0];
   ok(bbcInv.bbc_invited_at && bbcInv.bbc_invited_by === 'tate@ama.test' && await until(async () => (await page.textContent('.rescard:has-text("Kim Ng") [data-bbcinv]').catch(() => '')).includes('asked for')), 'a teacher asks for a Black Belt Club invitation from the results screen');
   // It comes up on the Black Belt Club invitations list for whoever writes them
-  await page.click('#backDay'); await page.waitForSelector('#csvPassed');
+  await page.click('#backDay'); await page.waitForSelector('#csvPassed', { state: 'attached' });
   ok(await until(async () => (await page.textContent('#bbcCount').catch(() => '')) === '1'), 'the BBC invites tab shows how many are waiting to be written');
+  if (SHOTS) { await page.click('.tab[data-view="bbc"]'); await page.waitForSelector('#view-bbc h2'); await shots(page, 'cb-bbc'); }
   await page.click('.tab[data-view="bbc"]'); await page.waitForSelector('#view-bbc h2');
-  ok((await page.textContent('#view-bbc')).includes('Kim Ng') && (await page.textContent('#view-bbc')).includes('asked for by tate@ama.test') && new URL(page.url()).pathname.endsWith('/black-belt-club'), 'the invitation comes up on the Black Belt Club invitations list (its own page)');
+  ok((await page.textContent('#view-bbc')).includes('Kim Ng') && (await page.textContent('#view-bbc')).includes('Asked for by tate@ama.test') && new URL(page.url()).pathname.endsWith('/black-belt-club'), 'the invitation comes up on the Black Belt Club invitations list (its own page)');
   await page.click('#view-bbc [data-written="efc:m2"]'); await toastSays(page, 'written');
   ok(!!(await q(`select bbc_written_at from efc_members where member_key = 'efc:m2'`))[0].bbc_written_at && await until(async () => (await page.textContent('#view-bbc')).includes('No invitations to write') && await page.isHidden('#bbcCount')), 'ticking it off records that it was written');
   // Another staff member asks for an invitation on their device: it shows here without reloading
@@ -277,24 +284,24 @@ try {
   ok(await until(async () => (await page.textContent('#view-bbc')).includes('Sam Lee') && (await page.textContent('#bbcCount')) === '1'), 'an invitation asked for on another device comes up straight away, without reloading');
   await page.evaluate(() => applyLive({ table: 'efc_members', eventType: 'UPDATE', new: { member_key: 'efc:m1', full_name: 'Sam Lee', guardian_name: 'Pat Lee', phone: '0412 345 678', bbc_seen_at: new Date().toISOString() } }));
   ok(await until(async () => (await page.textContent('#view-bbc')).includes('No invitations to write')), '...and goes when it is cancelled');
-  await page.click('.tab[data-view="days"]'); await page.click(`#view-days [data-day="${dayId}"]`); await page.click('#resultsBtn'); await page.waitForSelector('.res');
+  await page.click('.tab[data-view="days"]'); await page.click(`#view-days [data-day="${dayId}"]`); await pclick(page, '#resultsBtn'); await page.waitForSelector('.res');
   if (SHOTS) { await page.setViewportSize({ width: 390, height: 844 }); await shot(page, 'cb-results-phone'); await page.setViewportSize({ width: 1100, height: 900 }); }
-  await page.click('#backDay'); await page.waitForSelector('#csvPassed');
-  const dl = page.waitForEvent('download'); await page.click('#csvPassed'); const file = await dl;
+  await page.click('#backDay'); await page.waitForSelector('#csvPassed', { state: 'attached' });
+  const dl = page.waitForEvent('download'); await pclick(page, '#csvPassed'); const file = await dl;
   const csv = readFileSync(await file.path(), 'utf8');
   ok(csv.includes('Full name,Belt going for,Date') && csv.includes('Sam Lee,Orange Belt,14 November 2030') && !csv.includes('Kim Ng'), 'the certificates CSV has full name, belt going for and date, for those who passed');
-  await page.click('#sendCongrats'); await page.waitForSelector('#txPrev');
+  await pclick(page, '#sendCongrats'); await page.waitForSelector('#txPrev');
   ok((await page.textContent('#txPrev')).includes('Orange Belt'), 'congratulations texts go to those who passed');
   await page.click('#txGo');
   ok(await until(() => page.isDisabled('#sendCongrats').catch(() => false)), 'once sent, congratulations are not offered again');
-  await page.click('#sendRetest'); await page.waitForSelector('#txPrev');
+  await pclick(page, '#sendRetest'); await page.waitForSelector('#txPrev');
   ok((await page.textContent('#txPrev')).includes('re-test') && (await page.textContent('#txPrev')).includes('Hi Jo'), 'a kind re-test message goes to re-test families');
   await page.click('#txGo');
   ok(await until(() => page.isDisabled('#sendRetest').catch(() => false)), 'and is not offered again once sent');
 
   console.log('\nGrading photos');
   ok(await page.isDisabled('#sendPhotos'), 'there are no photos to text before any are taken');
-  await page.click('#photosBtn'); await page.waitForSelector('.phcard');
+  await pclick(page, '#photosBtn'); await page.waitForSelector('.phcard');
   ok(new URL(page.url()).pathname.endsWith(dayId + '/photos'), 'photos have their own address (.../photos)');
   const phNames = await page.$$eval('.phcard .name', ns => ns.map(n => n.textContent).join());
   ok(phNames === 'Sam Lee', 'the photo list has the students who passed (Kim is a re-test)');
@@ -321,7 +328,7 @@ try {
   await page.click('#txGo');
   ok(await until(() => fnCalls.some(c => c.kind === 'photo' && c.items.length === 1 && c.items[0].entry_id && c.items[0].body.includes('/p#' + samCode))), 'Text photos sends each family their link');
   ok(await until(async () => (await page.textContent('.phcard')).includes('texted')), '...and shows who has been texted');
-  await page.click('#backDay'); await page.waitForSelector('#photosBtn');
+  await page.click('#backDay'); await page.waitForSelector('#photosBtn', { state: 'attached' });
   ok((await page.textContent('#photosBtn')).includes('1 of 1') && await page.isDisabled('#sendPhotos'), 'the day shows photos taken, and texted photos are not offered again');
   await page.click('#entryList [data-entry]:has-text("Sam Lee")'); await page.waitForSelector('#copyPhoto');
   ok((await page.textContent('#dlg')).includes('/p#' + samCode) && (await page.textContent('#dlg')).includes('texted to the family'), 'a student\'s details show their photo link, to resend by hand if needed');
@@ -332,14 +339,14 @@ try {
   await page.selectOption('#dSchool', 'Concord'); await page.fill('#dDate', '2030-12-05');
   ok(await page.isChecked('#dFrom input[value="Concord"]') && !(await page.isChecked('#dFrom input[value="Marrickville"]')) && !(await page.isChecked('#dFrom input[value="Sydenham"]')), 'a new day takes its own school\'s students to start with (Sydenham only goes with Marrickville)');
   await page.check('#dFrom input[value="Marrickville"]');
-  await page.click('#dGo'); await page.waitForSelector('#addReady');
+  await page.click('#dGo'); await until(async () => (await page.textContent('#view-day').catch(() => '')).includes('Concord'));
   const cDay = (await q(`select day_id, schools from cb_days where location = 'Concord'`))[0];
-  ok(cDay.schools.join() === 'Marrickville,Concord' && (await page.textContent('#view-day')).includes('students from Marrickville, Concord'), 'a Concord grading day can take Marrickville students too');
-  await page.click('#addReady'); await toastSays(page, 'Added');
+  ok(cDay.schools.join() === 'Marrickville,Concord' && (await page.textContent('#view-day')).includes('Students from Marrickville, Concord'), 'a Concord grading day can take Marrickville students too');
+  await pclick(page, '#addReady'); await toastSays(page, 'Added');
   ok((await q(`select member_key from cb_entries where day_id = '${cDay.day_id}'`)).map(r => r.member_key).join() === 'efc:m3', '"Add everyone marked ready" adds ready Marrickville students (Alex) to the Concord day');
   ok(await until(async () => (await page.textContent('#entryList').catch(() => '')).includes('from Marrickville')), 'the list shows they come from Marrickville');
   ok(!(await q(`select 1 from cb_entries where day_id = '${cDay.day_id}' and member_key = 'efc:m1'`)).length, 'Sam (passed, not yet promoted in EFC) is not added again');
-  await page.click('#addOne'); await page.fill('#psQ', 'Jo Bloggs'); await page.waitForTimeout(200);
+  await pclick(page, '#addOne'); await page.fill('#psQ', 'Jo Bloggs'); await page.waitForTimeout(200);
   ok((await page.textContent('#psList')).includes('Jo Bloggs'), 'Concord\'s own students can be added too');
   await page.check('#psAny'); await page.fill('#psQ', 'Black'); await page.waitForTimeout(200);
   ok((await page.textContent('#psList')).includes('No one matches'), '"Any school" still only offers coloured belts on the day\'s belts');
@@ -363,9 +370,10 @@ try {
 
   console.log('\nUpdate EFC, dashboard, settings');
   await page.click('.tab[data-view="efc"]');
-  ok(/last updated from EFC/.test(await page.textContent('#efcAt')) && /every night/.test(await page.textContent('#efcAt')), 'Update EFC says when belts and classes last came from EFC');
+  ok(/last came from EFC/.test(await page.textContent('#efcAt')) && /nightly/.test(await page.textContent('#efcAt')), 'Update EFC says when belts and classes last came from EFC');
   ok((await page.textContent('#view-efc')).includes('Sam Lee') && !(await page.textContent('#view-efc')).includes('Kim Ng'), 'the Update EFC checklist lists passes to promote in EFC (not re-tests)');
   await page.check('[data-efc]');
+  if (SHOTS) { await page.click('.tab[data-view="efc"]'); await page.waitForSelector('#efcAt'); await shots(page, 'cb-efc'); }
   ok(await until(async () => (await q(`select efc_done from cb_entries where member_key = 'efc:m1'`))[0].efc_done === true && (await page.textContent('#view-efc')).includes('Nothing to update in EFC')), 'ticking it off clears it from the list');
   ok((await q(`select belt from efc_members where member_key = 'efc:m1'`))[0].belt === 'Yellow Belt', 'results never change EFC\'s belt here (EFC is the master)');
   // Importing an EFC export: matches by EFC ref, adds new students, leaves other programmes alone
@@ -385,7 +393,7 @@ try {
   ok(kid && kid.full_name === 'New Kid' && kid.belt === 'Yellow Belt' && kid.location === 'Marrickville', 'a new student is added with their belt and school');
   ok(!(await q(`select 1 from efc_members where efc_reference = 'AU-023-7'`)).length && !JSON.stringify(await q(`select * from efc_members`)).includes('asthma'), 'Mini Dragons are left out and medical notes are never stored');
   await page.waitForFunction(() => !document.querySelector('#dlg').open, null, { timeout: 10000 }).catch(async () => console.log('DLG', (await page.textContent('#dlg')).replace(/\s+/g, ' ').slice(0, 300)));
-  await settle(page); await noDialog(page); await page.click('.tab[data-view="settings"]'); await page.waitForSelector('#beltForm');
+  await settle(page); await noDialog(page); await page.click('#settingsBtn'); await page.waitForSelector('#beltForm');
   await page.fill('tr[data-belt="Yellow Belt"] [name=fee]', '55'); await page.fill('tr[data-belt="White Belt"] [name=classes]', '30');
   await page.click('#saveBelts');
   await until(async () => (await q(`select classes_needed from cb_belts where programme = 'Taekwondo' and belt = 'White Belt'`))[0].classes_needed === 30); await page.waitForSelector('#saveBelts:not([disabled])'); await settle(page);
@@ -402,6 +410,7 @@ try {
   await page.click('.tab[data-view="dash"]');
   const dash = await page.textContent('#view-dash');
   ok(dash.includes('50%') && dash.includes('1 of 2') && dash.includes('$55') && dash.includes('Alex Kim'), 'the dashboard shows the pass rate (a re-test is not a pass), grading fees paid and overdue students');
+  await shots(page, 'cb-dash');
 
   console.log('\nAddresses');
   ok(new URL(page.url()).pathname === '/grading/coloured-belts/dashboard', 'the dashboard is at /grading/coloured-belts/dashboard');
@@ -436,14 +445,15 @@ try {
   const apps = await q(`select programme, status from cb_approvals where member_key = 'efc:m2' order by programme`);
   ok(apps.length === 2 && apps.find(a => a.programme === 'Kung Fu').status === 'ready' && apps.find(a => a.programme === 'Taekwondo').status === 'not_yet', 'ready / not yet is kept per program (Kim: ready in Kung Fu, not yet in Taekwondo)');
   await page.click('#dlg [data-close]');
-  await settle(page); await noDialog(page); await page.click('.tab[data-view="settings"]'); await page.waitForSelector('#beltForm');
+  await settle(page); await noDialog(page); await page.click('#settingsBtn'); await page.waitForSelector('#beltForm');
   ok((await page.textContent('#beltForm')).includes('Each belt: Kung Fu') && (await page.$$('#beltForm tr[data-belt]')).length === 15, 'Settings shows the program\'s own grades (15 for Kung Fu)');
+  await shots(page, 'cb-settings');
   await page.selectOption('#progSel', 'Taekwondo - Little Dragon');
   await page.click('.tab[data-view="days"]'); await page.click('#newDay'); await page.waitForSelector('#dayForm');
-  await page.fill('#dDate', '2030-12-12'); await page.check('#dMoveUp'); await page.click('#dGo'); await page.waitForSelector('#addOne');
+  await page.fill('#dDate', '2030-12-12'); await page.check('#dMoveUp'); await page.click('#dGo'); await page.waitForSelector('#addOne', { state: 'attached' });
   const ld = (await q(`select day_id, programme, move_up from cb_days where programme = 'Taekwondo - Little Dragon'`))[0];
   ok(ld && ld.move_up, 'a Little Dragons grading day can be for moving up to Taekwondo');
-  await page.click('#addOne'); await page.fill('#psQ', 'Dragon'); await page.waitForTimeout(200);
+  await pclick(page, '#addOne'); await page.fill('#psQ', 'Dragon'); await page.waitForTimeout(200);
   ok((await page.textContent('#psList')).includes('to Taekwondo Yellow') && (await page.textContent('#psList')).includes('to Taekwondo Orange'), 'moving up: Little Dragon belts go to Taekwondo Yellow, Master Belt to Orange');
   await page.click('#psList [data-key="efc:m7"]');
   ok(await until(async () => (await q(`select belt_to, to_programme from cb_entries where member_key = 'efc:m7'`))[0]?.to_programme === 'Taekwondo'), '...and is saved with the new program');
@@ -456,14 +466,14 @@ try {
   console.log('\nOther logins');
   ({ ctx, page } = await open('coach@ama.test', '/grading/coloured-belts/settings'));
   ok(new URL(page.url()).pathname === '/grading/coloured-belts/ready', 'an instructor opening the Settings address gets Who\'s ready instead');
-  ok(await page.isHidden('.tab[data-view="settings"]') && (await page.textContent('#readyList')).includes('Sam Lee'), 'an instructor sees who is ready but not Settings');
+  ok(await page.isHidden('#settingsBtn') && (await page.textContent('#readyList')).includes('Sam Lee'), 'an instructor sees who is ready but not Settings');
   await page.click('.tab[data-view="days"]');
   ok(!(await page.$('#newDay')), '...and cannot add grading days');
   // A teacher checks students in on the day and signs off
   const ciDay = (await q(`select day_id, count(*)::int n from cb_entries group by day_id order by n desc limit 1`))[0];
   const ciEs = await q(`select entry_id, full_name from cb_entries where day_id = '${ciDay.day_id}' order by full_name`);
   await page.goto('about:blank'); await page.goto(BASE + '/grading/coloured-belts/grading-days/' + ciDay.day_id);
-  await page.waitForSelector('#checkinBtn'); await page.click('#checkinBtn'); await page.waitForSelector('#ciList');
+  await page.waitForSelector('#checkinBtn', { state: 'attached' }); await pclick(page, '#checkinBtn'); await page.waitForSelector('#ciList');
   ok(new URL(page.url()).pathname.endsWith('/check-in'), 'teachers can open check-in for a grading day (its own address, .../check-in)');
   await page.click(`#ciList [data-entry="${ciEs[0].entry_id}"] button[data-r="in"]`);
   ok(await until(async () => (await q(`select checked_in_at, checked_in_by from cb_entries where entry_id = '${ciEs[0].entry_id}'`))[0].checked_in_by === 'coach@ama.test'), 'tapping Here checks a student in (and records which teacher)');
