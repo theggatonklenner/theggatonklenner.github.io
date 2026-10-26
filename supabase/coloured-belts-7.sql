@@ -42,3 +42,9 @@ end $$;
 -- ---------- Booking sheet: bookings go to a Google Sheet (Apps Script), and a Zap books them from new rows ----------
 -- The key the sheet's script checks, so only this app can add bookings (shown in Settings to paste into the script)
 alter table public.cb_settings add column if not exists booking_key text not null default replace(gen_random_uuid()::text, '-', '');
+
+-- ---------- Visitors: EFC won't book a member into another school's session ----------
+-- A student from another school (e.g. a Marrickville member grading at Concord) is booked here but not sent to the
+-- booking sheet; staff see "Book in EFC by hand" until they tick it off.
+alter table public.cb_entries add column if not exists efc_by_hand boolean not null default false;
+alter table public.cb_entries add column if not exists efc_by_hand_done_at timestamptz;

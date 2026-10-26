@@ -230,6 +230,15 @@ ok(r.body.booked && e5.booked_at && row.key === 'sheet-key' && row.member_id ===
 t.cb_settings[0].booking_webhook = 'https://script.google.com/macros/s/x/exec/../evil'; e5.booked_at = null;
 r = await call({ action: 'book', token: TOKEN5 });
 ok(r.body.ok === false && /isn't set up/.test(r.body.error), 'only a real Apps Script web app address (or Zapier hook) is used');
+
+console.log('\nVisitors from another school (EFC won\'t book them into this school\'s session)');
+t.cb_settings[0].booking_webhook = 'https://script.google.com/macros/s/AKfycbx-Test_123/exec';
+t.efc_members.push({ member_key: 'efc:m9', efc_reference: 'AU-258-9', full_name: 'Jo Visitor', location: 'Concord', phone: null });
+t.cb_entries.push({ entry_id: 'e9', day_id: 'd1', member_key: 'efc:m9', full_name: 'Jo Visitor', belt_from: 'Yellow Belt', belt_to: 'Orange Belt', token: '9'.repeat(48) + 'a'.repeat(16), booked_at: null, booking_error: null, result: null, paid: false, paid_how: null });
+const rowsBefore = sheetRows.length;
+r = await call({ action: 'book', token: '9'.repeat(48) + 'a'.repeat(16) });
+const e9 = t.cb_entries.find(e => e.entry_id === 'e9');
+ok(r.body.booked && e9.booked_at && e9.efc_by_hand === true && sheetRows.length === rowsBefore, 'a Concord member grading at Marrickville is booked here, not sent to the booking sheet, and flagged to book in EFC by hand');
 t.cb_settings[0].booking_webhook = 'https://hooks.zapier.com/hooks/catch/1/abc/';
 
 console.log(`\n${passed} passed, ${failed} failed`);

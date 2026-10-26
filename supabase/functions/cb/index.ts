@@ -105,7 +105,13 @@ export async function handle(req, db, env = {}, http = fetch) {
     const hook = st && st.booking_webhook;
     const sheet = !!hook && /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(hook);
     if (!hook || !(sheet || /^https:\/\/hooks\.zapier\.com\//.test(hook))) return { ok: false, notSetUp: true, why: 'Online booking is not set up (no booking sheet in Settings)' };
-    const { data: m } = await db.from('efc_members').select('efc_reference').eq('member_key', e.member_key).maybeSingle();
+    const { data: m } = await db.from('efc_members').select('efc_reference, location').eq('member_key', e.member_key).maybeSingle();
+    // A visitor from another school: EFC won't book them into this school's session, so staff do it by hand
+    if (m && m.location && m.location !== d.location) {
+      e.booked_at = new Date().toISOString();
+      await db.from('cb_entries').update({ booked_at: e.booked_at, booking_error: null, efc_by_hand: true }).eq('entry_id', e.entry_id);
+      return { ok: true, byHand: true };
+    }
     const payload = { member_id: e.member_key.startsWith('efc:') ? e.member_key.slice(4) : null, efc_ref: (m && m.efc_reference) || null, date: d.grading_date, session_id: d.efc_session_id || null,
       location_id: EFC_LOCATIONS[d.location] || null, location: d.location, student: e.full_name, belt_to: e.belt_to, programme: d.programme || 'Taekwondo', paid: !!e.paid, paid_how: e.paid_how || null,
       ...(sheet ? { key: (st && st.booking_key) || '' } : {}) };
