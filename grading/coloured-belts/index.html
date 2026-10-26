@@ -120,11 +120,13 @@
   /* Lists: one panel, hairlines between rows, the belt colour down the left edge */
   .list { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
   .list > li + li { border-top: 1px solid var(--line); }
-  .item { --belt: transparent; display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px 12px 18px; background: none; border: 0; text-align: left; color: inherit;
-    cursor: pointer; min-height: 62px; box-shadow: inset 5px 0 0 var(--belt); }
+  /* The belt down the left edge: --edge is its colour, with black tape bands for tape belts (Red Two, Red Three) */
+  .item, .rescard, .phcard { --edge: linear-gradient(transparent, transparent); background-image: var(--edge); background-repeat: no-repeat; background-size: 5px 100%; background-position: left top; }
+  .item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px 12px 18px; background-color: transparent; border: 0; text-align: left; color: inherit;
+    cursor: pointer; min-height: 62px; }
   .item.plain { cursor: default; }
   label.item { font-weight: 400; font-size: inherit; color: inherit; }
-  button.item:hover, label.item:hover { background: var(--raise); }
+  button.item:hover, label.item:hover { background-color: var(--raise); }
   .item .main { flex: 1 1 auto; min-width: 0; }
   .item .name { font-weight: 600; font-size: 16.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item .meta { font-size: 14px; color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -188,7 +190,7 @@
 
   /* Big-button screens on the day: check-in, results, photos */
   .bigcards { display: flex; flex-direction: column; gap: 10px; }
-  .rescard, .phcard { --belt: transparent; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 14px 14px 19px; display: flex; flex-direction: column; gap: 12px; box-shadow: inset 5px 0 0 var(--belt); }
+  .rescard, .phcard { background-color: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 14px 14px 19px; display: flex; flex-direction: column; gap: 12px; }
   .rescard .name, .phcard .name { font-weight: 700; font-size: 19px; }
   .rescard .meta, .phcard .meta { color: var(--sub); font-size: 14.5px; }
   .rescard.in { border-color: var(--green); }
@@ -356,9 +358,22 @@ const withProg = (belt, prog) => prog && prog !== state.programme && !isAll() ? 
 const toText = e => withProg(e.belt_to, e.to_programme);
 const sNext = s => withProg(s.next_belt, s.next_programme);
 // The belt's colour for a row's left edge
-const beltVar = (name, prog) => `--belt:${esc(beltOf(name, prog).colour || '#5b6b60')}`;
+// Tape belts: a red belt with one black tape (Red Two) or two (Red Three)
+const tapes = name => /\bred\s*(two|2)\b/i.test(name || '') ? 1 : /\bred\s*(three|3)\b/i.test(name || '') ? 2 : 0;
+const beltCol = (name, prog) => beltOf(name, prog).colour || '#5b6b60';
+// A belt as a CSS gradient: dir 'to bottom' for the row edge, 'to right' for the small swatch; tape bands sit near the end like a real belt
+function beltPaint(name, prog, dir) {
+  const c = beltCol(name, prog), n = tapes(name);
+  if (!n) return `linear-gradient(${c}, ${c})`;
+  const bands = n === 1 ? [[68, 80]] : [[58, 68], [76, 86]];
+  let stops = [], at = 0;
+  for (const [a, b] of bands) { stops.push(`${c} ${at}% ${a}%`, `#000 ${a}% ${b}%`); at = b; }
+  stops.push(`${c} ${at}% 100%`);
+  return `linear-gradient(${dir}, ${stops.join(', ')})`;
+}
+const beltVar = (name, prog) => `--edge:${esc(beltPaint(name, prog, 'to bottom'))}`;
 const shortDate = d => new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
-const swatch = (name, prog) => `<span class="belt" style="background:${esc(beltOf(name, prog).colour || '#999')}"></span>`;
+const swatch = (name, prog) => `<span class="belt" style="background:${esc(beltPaint(name, prog, 'to right'))}"></span>`;
 const student = (key, prog) => state.students.find(s => s.member_key === key && (!prog || (s.programme || 'Taekwondo') === prog));
 const dayOf = id => state.days.find(d => d.day_id === id);
 const entriesOf = id => state.entries.filter(e => e.day_id === id);
