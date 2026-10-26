@@ -9,6 +9,8 @@
 // the booking to a Google Sheet (tools/booking-sheet.gs; a Zap books from each new row), or a Zapier "Catch Hook". Pressing Book
 // sends it { member_id, efc_ref, date, session_id, location_id, location, student, belt_to, programme } and your Zap books
 // that EFC session with Zapier's "EFC Aquila: Book Session" (member = member_id, session = session_id, location = location_id, date).
+// Emails (automatic, through GoHighLevel with the same secrets): "booked" when a family books, and "paid and booked" when
+// they pay by card or staff record a payment (with Stripe's receipt link). Each goes once per student, to their EFC email.
 // Card payments (optional): STRIPE_SECRET_KEY (the same one the polo shirts use) and a Stripe webhook to
 //   https://<project>.supabase.co/functions/v1/cb  for checkout.session.completed (+ async_payment_succeeded), with its
 //   signing secret saved as STRIPE_WEBHOOK_SECRET_GRADING. Paying marks them paid and books the session; set the EFC grading
@@ -100,6 +102,54 @@ export async function handle(req, db, env = {}, http = fetch) {
     if (!r.ok) throw new Error((j.error && j.error.message) || `Stripe said ${r.status}`);
     return j;
   };
+  // GoHighLevel: find or add the family's contact, then send them a text or an email
+  const ghl = async (path, opts = {}, version = '2021-07-28') => {
+    const r = await http(API + path, { ...opts, headers: { Authorization: 'Bearer ' + env.GHL_TOKEN, Version: version, Accept: 'application/json', 'Content-Type': 'application/json' } });
+    const t = await r.text(); let j = {}; try { j = JSON.parse(t); } catch (e) { /* not JSON */ }
+    if (!r.ok) throw new Error(j.message ? [].concat(j.message).join(', ') : `GoHighLevel said ${r.status}`);
+    return j;
+  };
+  const contactFor = async (m, phone) => {
+    for (const [k, v] of [['number', phone], ['email', m.email]]) {
+      if (!v) continue;
+      const r = await ghl(`/contacts/search/duplicate?locationId=${encodeURIComponent(env.GHL_LOCATION_ID)}&${k}=${encodeURIComponent(v)}`, { method: 'GET' });
+      if (r.contact && r.contact.id) return r.contact.id;
+    }
+    const parts = String(m.guardian_name || m.full_name || '').trim().split(/\s+/);
+    const r = await ghl('/contacts/', { method: 'POST', body: JSON.stringify({ locationId: env.GHL_LOCATION_ID, firstName: parts[0] || '', lastName: parts.slice(1).join(' '),
+      ...(phone ? { phone } : {}), ...(m.email ? { email: m.email } : {}), tags: ['ama coloured belt grading'], source: 'AMA coloured belt grading' }) });
+    return (r.contact || {}).id;
+  };
+  // Automatic confirmation emails (once each): 'email_booked' or 'email_paid'. Never stops a booking or payment if it fails.
+  const confirmEmail = async (e, d, kind, extra = {}) => {
+    try {
+      if (!(env.GHL_TOKEN && env.GHL_LOCATION_ID)) return;
+      const { data: sent } = await db.from('cb_messages').select('status').eq('entry_id', e.entry_id).eq('kind', kind).eq('status', 'sent').maybeSingle();
+      if (sent) return;
+      const { data: m } = await db.from('efc_members').select('member_key, full_name, guardian_name, phone, guardian_phone, email, guardian_email').eq('member_key', e.member_key).maybeSingle();
+      const email = m && [m.email, m.guardian_email].find(v => v && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v));
+      if (!email) return;
+      const parent = first(m.guardian_name) || 'there', kid = first(e.full_name);
+      const when = new Date(d.grading_date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      const t = d.start_time ? String(d.start_time).slice(0, 5).split(':').map(Number) : null;
+      const time = t ? ` at ${((t[0] + 11) % 12) + 1}:${String(t[1]).padStart(2, '0')}${t[0] < 12 ? 'am' : 'pm'}` : '';
+      const lines = kind === 'email_paid'
+        ? [`Hi ${parent},`, `Thank you, we've received your payment${extra.amount ? ` of $${Number(extra.amount).toFixed(2)}` : ''} for ${kid}'s grading.`,
+           `${kid} is booked to grade for their ${e.belt_to} at AMA ${d.location} on ${when}${time}. Please arrive 15 minutes early in a clean uniform.`,
+           ...(extra.receipt ? [`Your receipt: ${extra.receipt}`] : []), `AMA ${d.location}`]
+        : [`Hi ${parent},`, `${kid} is booked to grade for their ${e.belt_to} at AMA ${d.location} on ${when}${time}.`, 'Please arrive 15 minutes early in a clean uniform.', `AMA ${d.location}`];
+      const subject = kind === 'email_paid' ? `Payment received: ${kid}'s grading on ${when}` : `Grading booked: ${kid}, ${when}`;
+      const esc = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const html = lines.map(l => `<p>${esc(l).replace(/(https:\/\/\S+)/g, '<a href="$1">$1</a>')}</p>`).join('');
+      const log = (status, more = {}) => db.from('cb_messages').insert({ entry_id: e.entry_id, member_key: e.member_key, kind, email, body: subject + '\n\n' + lines.join('\n\n'), status, sent_by: 'automatic', ...more });
+      try {
+        const cid = await contactFor({ ...m, email }, phoneE164(m.phone || m.guardian_phone));
+        if (!cid) throw new Error('Could not find or add the contact');
+        await ghl('/conversations/messages', { method: 'POST', body: JSON.stringify({ type: 'Email', contactId: cid, subject, html, message: lines.join('\n\n') }) }, '2021-04-15');
+        await log('sent');
+      } catch (er) { await log('failed', { error: String(er.message || er).slice(0, 500) }); }
+    } catch (er) { console.error(er); }
+  };
   // Send the booking to the booking sheet (or a Zapier hook); a Zap then books the EFC session
   const bookEntry = async (e, d) => {
     const { data: st } = await db.from('cb_settings').select('booking_webhook, booking_key').eq('id', 1).maybeSingle();
@@ -144,9 +194,10 @@ export async function handle(req, db, env = {}, http = fetch) {
     if (!entryId) return true;
     await db.from('cb_entries').update({ paid: true, paid_at: now, paid_how: 'card' }).eq('entry_id', entryId);
     const { data: e } = await db.from('cb_entries').select('entry_id, day_id, member_key, full_name, belt_from, belt_to, token, booked_at, booking_error, result, paid, paid_how, late_ok_until').eq('entry_id', entryId).maybeSingle();
-    if (e && !e.booked_at) {
+    if (e) {
       const { data: d } = await db.from('cb_days').select('day_id, location, grading_date, start_time, efc_session_id, closed, programme, book_by').eq('day_id', e.day_id).maybeSingle();
-      if (d) await bookEntry(e, d);
+      if (d && !e.booked_at) await bookEntry(e, d);
+      if (d) await confirmEmail(e, d, 'email_paid', { amount: (s.amount_total || 0) / 100, receipt });
     }
     return true;
   };
@@ -201,6 +252,7 @@ export async function handle(req, db, env = {}, http = fetch) {
         const b = await bookEntry(e, d);
         if (b.notSetUp) return json({ ...info, ok: false, error: 'Online booking isn\'t set up for this grading yet. Please contact the front desk.' });
         if (!b.ok) return json({ ...info, ok: false, error: 'We couldn\'t book it just now. Please try again in a minute, or contact the front desk.' }, 502);
+        await confirmEmail(e, d, 'email_booked');
         return json({ ...info, booked: true });
       }
       // Pay by card
@@ -279,10 +331,9 @@ export async function handle(req, db, env = {}, http = fetch) {
       e.paid = true; e.paid_how = how;
       await db.from('cb_entries').update({ paid: true, paid_at: new Date().toISOString(), paid_how: how }).eq('entry_id', e.entry_id);
       let b = { ok: !!e.booked_at };
-      if (!e.booked_at) {
-        const { data: d } = await db.from('cb_days').select('day_id, location, grading_date, start_time, efc_session_id, closed, programme, book_by').eq('day_id', e.day_id).maybeSingle();
-        if (d) b = await bookEntry(e, d);
-      }
+      const { data: d } = await db.from('cb_days').select('day_id, location, grading_date, start_time, efc_session_id, closed, programme, book_by').eq('day_id', e.day_id).maybeSingle();
+      if (d && !e.booked_at) b = await bookEntry(e, d);
+      if (d) { const { data: bf } = await db.from('cb_belts').select('fee').eq('programme', d.programme || 'Taekwondo').eq('belt', e.belt_from).maybeSingle(); await confirmEmail(e, d, 'email_paid', { amount: bf && bf.fee }); }
       return json({ ok: true, booked: !!b.ok, byHand: !!b.byHand, booking_error: b.ok ? null : (b.why || null) });
     }
     const ready = !!(env.GHL_TOKEN && env.GHL_LOCATION_ID), testing = env.GHL_TEST === '1';
@@ -294,24 +345,6 @@ export async function handle(req, db, env = {}, http = fetch) {
     if (!ready && !testing) return fail('Texting is not set up yet: add GHL_TOKEN and GHL_LOCATION_ID in Supabase (Edge Functions > Secrets).', 409);
     const items = Array.isArray(body.items) ? body.items.slice(0, 300) : [];
     if (!items.length) return fail('No one to text.');
-
-    const ghl = async (path, opts = {}, version = '2021-07-28') => {
-      const r = await http(API + path, { ...opts, headers: { Authorization: 'Bearer ' + env.GHL_TOKEN, Version: version, Accept: 'application/json', 'Content-Type': 'application/json' } });
-      const t = await r.text(); let j = {}; try { j = JSON.parse(t); } catch (e) { /* not JSON */ }
-      if (!r.ok) throw new Error(j.message ? [].concat(j.message).join(', ') : `GoHighLevel said ${r.status}`);
-      return j;
-    };
-    const contactFor = async (m, phone) => {
-      for (const [k, v] of [['number', phone], ['email', m.email]]) {
-        if (!v) continue;
-        const r = await ghl(`/contacts/search/duplicate?locationId=${encodeURIComponent(env.GHL_LOCATION_ID)}&${k}=${encodeURIComponent(v)}`, { method: 'GET' });
-        if (r.contact && r.contact.id) return r.contact.id;
-      }
-      const parts = String(m.guardian_name || m.full_name || '').trim().split(/\s+/);
-      const r = await ghl('/contacts/', { method: 'POST', body: JSON.stringify({ locationId: env.GHL_LOCATION_ID, firstName: parts[0] || '', lastName: parts.slice(1).join(' '),
-        phone, ...(m.email ? { email: m.email } : {}), tags: ['ama coloured belt grading'], source: 'AMA coloured belt grading' }) });
-      return (r.contact || {}).id;
-    };
 
     const results = [];
     for (const it of items) {

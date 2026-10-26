@@ -59,11 +59,16 @@ const signed = [], removedFiles = [], oldPhotos = [];
 const hooks = [];
 let hookStatus = 200;
 // Stripe stand-in: Checkout sessions are created here and can be marked paid
-const stripeCalls = [], stripeSessions = {}, sheetRows = [];
+const stripeCalls = [], stripeSessions = {}, sheetRows = [], ghlCalls = [];
 let nextSess = 1;
 const http = async (url, opts) => {
   if (url.startsWith('https://script.google.com/')) { const b = JSON.parse(opts.body); sheetRows.push(b); return new Response(JSON.stringify(b.key === 'sheet-key' ? { ok: true } : { ok: false, error: 'Wrong key' }), { status: 200 }); }
   if (url.startsWith('https://hooks.zapier.com/')) { hooks.push(JSON.parse(opts.body)); return new Response('{"status":"success"}', { status: hookStatus }); }
+  if (url.startsWith('https://services.leadconnectorhq.com/')) {
+    ghlCalls.push({ url, method: opts.method, body: opts.body ? JSON.parse(opts.body) : null });
+    if (url.includes('/contacts/search/duplicate')) return new Response(JSON.stringify({ contact: { id: 'c-1' } }), { status: 200 });
+    return new Response(JSON.stringify({ messageId: 'm-' + ghlCalls.length }), { status: 200 });
+  }
   if (url.startsWith('https://api.stripe.com/v1/payment_intents/')) { const id = decodeURIComponent(url.split('/').pop().split('?')[0]); return new Response(JSON.stringify({ id, latest_charge: { receipt_url: 'https://pay.stripe.test/receipts/' + id } }), { status: 200 }); }
   if (url.startsWith('https://api.stripe.com/v1/checkout/sessions')) {
     stripeCalls.push({ url, method: opts.method, body: opts.body ? decodeURIComponent(opts.body) : '', auth: opts.headers.Authorization });
@@ -278,6 +283,24 @@ r = await call({ action: 'info', token: TOKEN6 }, null, STRIPE_ENV);
 ok(r.body.booking_closed === false && r.body.book_by === e6.late_ok_until, 'with a new (late) link from staff, they can book again until it runs out');
 r = await call({ action: 'book', token: TOKEN6 });
 ok(r.body.booked && e6.booked_at, '...and booking works');
+
+console.log('\nAutomatic emails through GoHighLevel');
+const GHL_ENV = { GHL_TOKEN: 'ghl-x', GHL_LOCATION_ID: 'loc-1' };
+const TOKEN8 = '8'.repeat(64);
+t.cb_settings[0].booking_webhook = 'https://hooks.zapier.com/hooks/catch/1/abc/';
+t.cb_entries.push({ entry_id: 'e8', day_id: 'd1', member_key: 'efc:m1', full_name: 'Sam Lee', belt_from: 'Yellow Belt', belt_to: 'Orange Belt', token: TOKEN8, booked_at: null, booking_error: null, result: null, paid: false, paid_how: null });
+r = await call({ action: 'book', token: TOKEN8 }, null, GHL_ENV);
+let mail = ghlCalls.filter(c => c.url.endsWith('/conversations/messages') && c.body.type === 'Email');
+ok(r.body.booked && mail.length === 1 && /Grading booked: Sam/.test(mail[0].body.subject) && /Hi Pat/.test(mail[0].body.html) && /Orange Belt/.test(mail[0].body.html) && /Saturday 14 November 2026 at 10:00am/.test(mail[0].body.html), 'booking emails the family a confirmation (date, time, school, belt) through GoHighLevel');
+ok(t.cb_messages.some(m => m.kind === 'email_booked' && m.entry_id === 'e8' && m.email === 'pat@example.test' && m.status === 'sent'), '...and it is logged');
+t.cb_belts[0].fee = 55;
+r = await call({ action: 'record_payment', entry_id: 'e8', how: 'cash' }, 'tok-grader', GHL_ENV);
+mail = ghlCalls.filter(c => c.url.endsWith('/conversations/messages') && c.body.type === 'Email');
+ok(mail.length === 2 && /Payment received/.test(mail[1].body.subject) && /\$55\.00/.test(mail[1].body.html), 'recording a payment emails a payment confirmation with the amount');
+const before8 = mail.length;
+await call({ action: 'record_payment', entry_id: 'e8', how: 'cash' }, 'tok-grader', GHL_ENV);
+ok(ghlCalls.filter(c => c.url.endsWith('/conversations/messages') && c.body.type === 'Email').length === before8, 'each email only goes once');
+t.cb_belts[0].fee = null;
 
 console.log('\nVisitors from another school (EFC won\'t book them into this school\'s session)');
 t.cb_settings[0].booking_webhook = 'https://script.google.com/macros/s/AKfycbx-Test_123/exec';
