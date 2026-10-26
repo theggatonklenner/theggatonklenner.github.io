@@ -20,7 +20,7 @@ const t = {
                { entry_id: 'e2', day_id: 'd2', member_key: 'efc:m2', full_name: 'Kim Ng', belt_from: 'White Belt', belt_to: 'Yellow Belt', token: TOKEN2, booked_at: null, booking_error: null, result: null, invited_at: null }],
   cb_days: [{ day_id: 'd1', location: 'Marrickville', grading_date: '2026-11-14', start_time: '10:00:00', efc_session_id: 'sess-1', closed: false },
             { day_id: 'd2', location: 'Sydenham', grading_date: '2026-11-15', start_time: null, efc_session_id: null, closed: true }],
-  cb_belts: [{ belt: 'Yellow Belt', fee: 55 }, { belt: 'White Belt', fee: null }],
+  cb_belts: [{ programme: 'Taekwondo', belt: 'Yellow Belt', fee: 55 }, { programme: 'Taekwondo', belt: 'White Belt', fee: null }, { programme: 'Kung Fu', belt: 'Yellow Belt', fee: 99 }],
   cb_settings: [{ id: 1, booking_webhook: null }],
   efc_members: [{ member_key: 'efc:m1', efc_reference: 'AU-023-1', full_name: 'Sam Lee', guardian_name: 'Pat Lee', phone: '0412 345 678', guardian_phone: null, email: 'pat@example.test', guardian_email: null },
                 { member_key: 'efc:m2', efc_reference: 'AU-256-2', full_name: 'Kim Ng', guardian_name: 'Jo Ng', phone: null, guardian_phone: null, email: null, guardian_email: null }],
@@ -73,7 +73,7 @@ hookStatus = 200;
 r = await call({ action: 'book', token: TOKEN });
 const h = hooks[hooks.length - 1];
 ok(r.body.ok && r.body.booked && t.cb_entries[0].booked_at && !t.cb_entries[0].booking_error, 'pressing Book marks it booked');
-ok(h.member_id === 'm1' && h.efc_ref === 'AU-023-1' && h.date === '2026-11-14' && h.session_id === 'sess-1' && h.location_id === 'f39cf2f5-a3e0-47bc-97cc-bc05c9b2bc58' && h.belt_to === 'Orange Belt', 'the Zap gets the EFC member ID, date, session and location to book');
+ok(h.member_id === 'm1' && h.efc_ref === 'AU-023-1' && h.date === '2026-11-14' && h.session_id === 'sess-1' && h.location_id === 'f39cf2f5-a3e0-47bc-97cc-bc05c9b2bc58' && h.belt_to === 'Orange Belt' && h.programme === 'Taekwondo', 'the Zap gets the EFC member ID, date, session and location to book');
 const n = hooks.length;
 r = await call({ action: 'book', token: TOKEN });
 ok(r.body.booked && hooks.length === n, 'booking twice does not book again');

@@ -6,7 +6,7 @@
 // Uses the same GoHighLevel secrets as Black Belt Prep's "ghl" function (Edge Functions > Secrets):
 //   GHL_TOKEN, GHL_LOCATION_ID, and optional GHL_TEST = "1" to log texts without sending them.
 // Booking: the Zapier "Catch Hook" address saved in the app's Settings (cb_settings.booking_webhook). Pressing Book
-// sends it { member_id, efc_ref, date, session_id, location_id, location, student, belt_to } and your Zap books
+// sends it { member_id, efc_ref, date, session_id, location_id, location, student, belt_to, programme } and your Zap books
 // that EFC session (EFC charges the grading fee through the session).
 //
 // Requests (POST, JSON):
@@ -48,7 +48,7 @@ async function entryByToken(db, token) {
   if (!tokenOk(token)) return null;
   const { data: e } = await db.from('cb_entries').select('entry_id, day_id, member_key, full_name, belt_from, belt_to, booked_at, booking_error, result').eq('token', token).maybeSingle();
   if (!e) return null;
-  const { data: d } = await db.from('cb_days').select('day_id, location, grading_date, start_time, efc_session_id, closed').eq('day_id', e.day_id).maybeSingle();
+  const { data: d } = await db.from('cb_days').select('day_id, location, grading_date, start_time, efc_session_id, closed, programme').eq('day_id', e.day_id).maybeSingle();
   return d ? { e, d } : null;
 }
 
@@ -63,7 +63,7 @@ export async function handle(req, db, env = {}, http = fetch) {
       const x = await entryByToken(db, body.token);
       if (!x) return json({ ok: false, error: 'This link isn\'t valid. Ask the front desk for a new one.' }, 404);
       const { e, d } = x;
-      const { data: belt } = await db.from('cb_belts').select('fee').eq('belt', e.belt_from).maybeSingle();
+      const { data: belt } = await db.from('cb_belts').select('fee').eq('programme', d.programme || 'Taekwondo').eq('belt', e.belt_from).maybeSingle();
       const info = { ok: true, first: first(e.full_name), belt_to: e.belt_to, date: d.grading_date, time: d.start_time ? String(d.start_time).slice(0, 5) : null,
         school: d.location, fee: belt && belt.fee != null ? Number(belt.fee) : null, booked: !!e.booked_at, closed: d.closed || !!e.result };
       if (body.action === 'info') return json(info);
@@ -74,7 +74,7 @@ export async function handle(req, db, env = {}, http = fetch) {
       if (!hook || !/^https:\/\/hooks\.zapier\.com\//.test(hook)) return json({ ...info, ok: false, error: 'Online booking isn\'t set up for this grading yet. Please contact the front desk.' });
       const { data: m } = await db.from('efc_members').select('efc_reference').eq('member_key', e.member_key).maybeSingle();
       const payload = { member_id: e.member_key.startsWith('efc:') ? e.member_key.slice(4) : null, efc_ref: (m && m.efc_reference) || null, date: d.grading_date, session_id: d.efc_session_id || null,
-        location_id: EFC_LOCATIONS[d.location] || null, location: d.location, student: e.full_name, belt_to: e.belt_to };
+        location_id: EFC_LOCATIONS[d.location] || null, location: d.location, student: e.full_name, belt_to: e.belt_to, programme: d.programme || 'Taekwondo' };
       let okHook = false, why = '';
       try { const r = await http(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); okHook = r.ok; if (!r.ok) why = 'Zapier said ' + r.status; }
       catch (err) { why = String(err && err.message || err); }

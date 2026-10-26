@@ -26,6 +26,7 @@ await db.exec(read(join(PREP, 'supabase/prep-setup.sql')));
 for (let i = 1; i <= 14; i++) await db.exec(read(join(PREP, `supabase/prep-update-${String(i).padStart(2, '0')}.sql`)));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-2.sql')));
+await db.exec(read(join(ROOT, 'supabase/coloured-belts-3.sql')));
 await db.exec(`insert into prep_roles (email, role) values ('tate@ama.test', 'admin') on conflict do nothing; delete from prep_roles where email <> 'tate@ama.test'; insert into prep_roles (email, role) values ('coach@ama.test', 'instructor'), ('desk@ama.test', 'attendance');`);
 // EFC students (made up): Sam and Kim have enough classes; Alex is overdue; Jo is at another school
 await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_name, phone, location, programme, belt, promoted_on, attended_since_promoted, efc_reference) values
@@ -225,23 +226,23 @@ try {
   const efcCsv = 'Member Ref,First Name,Surname,Date of Birth,Grade,Venue,Programme,Attended Since Grading,Medical\r\n' +
     'AU-023-3,Alex,Kim,01/02/2016,Green,AMA Marrickville,Taekwondo,30,asthma\r\n' +
     'AU-023-9,New,Kid,"5/6/2017",yellow belt,AMA Marrickville,Taekwondo,25,\r\n' +
-    'AU-023-7,Tiny,Tot,1/1/2022,White,AMA Marrickville,Little Dragon,10,\r\n';
+    'AU-023-7,Tiny,Tot,1/1/2022,White,AMA Marrickville,Taekwondo - Mini Dragon,10,\r\n';
   await page.setInputFiles('#impFile', { name: 'efc.csv', mimeType: 'text/csv', buffer: Buffer.from(efcCsv) });
   await page.waitForSelector('#impGo');
   const ip = await page.textContent('#impPrev');
-  ok(ip.includes('2 students to import') && ip.includes('1 in other programmes left out') && ip.includes('EFC ref ← Member Ref') && ip.includes('Not used: Medical'), 'an EFC file is read and its columns matched (medical notes are not used)');
+  ok(ip.includes('2 students to import') && ip.includes('1 in programs not graded here left out') && ip.includes('EFC ref ← Member Ref') && ip.includes('Not used: Medical'), 'an EFC file is read and its columns matched (medical notes are not used)');
   await page.click('#impGo'); await toastSays(page, 'imported');
   ok((await page.textContent('#toast')).includes('1 updated, 1 added'), 'importing reports how many were updated and added');
   const alex = (await q(`select attended_since_promoted, date_of_birth, belt from efc_members where member_key = 'efc:m3'`))[0];
   ok(alex.attended_since_promoted === 30 && alex.date_of_birth === '2016-02-01' && alex.belt === 'Green Belt', 'a student already here is updated (classes, date of birth read day first, belt name matched)');
   const kid = (await q(`select full_name, belt, location, programme from efc_members where efc_reference = 'AU-023-9'`))[0];
   ok(kid && kid.full_name === 'New Kid' && kid.belt === 'Yellow Belt' && kid.location === 'Marrickville', 'a new student is added with their belt and school');
-  ok(!(await q(`select 1 from efc_members where efc_reference = 'AU-023-7'`)).length && !JSON.stringify(await q(`select * from efc_members`)).includes('asthma'), 'Little Dragons are left out and medical notes are never stored');
+  ok(!(await q(`select 1 from efc_members where efc_reference = 'AU-023-7'`)).length && !JSON.stringify(await q(`select * from efc_members`)).includes('asthma'), 'Mini Dragons are left out and medical notes are never stored');
   await page.click('.tab[data-view="settings"]'); await page.waitForSelector('#beltForm');
   await page.fill('tr[data-belt="Yellow Belt"] [name=fee]', '55'); await page.fill('tr[data-belt="White Belt"] [name=classes]', '30');
   await page.click('#saveBelts');
-  await until(async () => (await q(`select classes_needed from cb_belts where belt = 'White Belt'`))[0].classes_needed === 30); await page.waitForSelector('#saveBelts:not([disabled])'); await settle(page);
-  ok((await q(`select fee, classes_needed from cb_belts where belt = 'Yellow Belt'`))[0].fee == 55 && (await q(`select classes_needed from cb_belts where belt = 'White Belt'`))[0].classes_needed === 30, 'each belt has its own classes needed, weeks between and fee');
+  await until(async () => (await q(`select classes_needed from cb_belts where programme = 'Taekwondo' and belt = 'White Belt'`))[0].classes_needed === 30); await page.waitForSelector('#saveBelts:not([disabled])'); await settle(page);
+  ok((await q(`select fee, classes_needed from cb_belts where programme = 'Taekwondo' and belt = 'Yellow Belt'`))[0].fee == 55 && (await q(`select classes_needed from cb_belts where programme = 'Taekwondo' and belt = 'White Belt'`))[0].classes_needed === 30, 'each belt has its own classes needed, weeks between and fee');
   ok((await q(`select enough_classes from cb_students where member_key = 'efc:m2'`))[0].enough_classes === false, 'changing classes needed changes who is eligible (Kim has 26 of 30)');
   ok((await page.$$('#msgForm textarea[data-col]')).length === 7, 'Settings has all seven texts: invitation, reminder to book, day reminder, fee reminder, congratulations, re-test, not yet');
   await page.fill('#tpl_reminder', 'See you at {school} on {date}!');
@@ -261,6 +262,37 @@ try {
   ok(new URL(page.url()).pathname === '/grading/coloured-belts/grading-days/' + dayId + '/results' && (await page.textContent('#view-day')).includes('Results'), 'opening a saved address (via 404.html) goes straight to that screen');
   await page.goto(BASE + '/grading/coloured-belts/update-efc'); await page.waitForSelector('#view-efc:not([hidden])');
   ok((await page.textContent('#view-efc')).includes('Update EFC') && (await page.title()).startsWith('Update EFC'), '...for every screen, with a matching page title');
+
+  console.log('\nOther programs');
+  // Kim also does Kung Fu; Lily and Max are Little Dragons
+  await q(`insert into efc_grades (member_key, programme, belt, promoted_on, attended_since_promoted) values ('efc:m2', 'Kung Fu', 'Yellow Sash', current_date - 100, 30)`);
+  await q(`insert into efc_members (member_key, kind, full_name, location, programme, efc_reference) values ('efc:m7', 'member', 'Lily Dragon', 'Marrickville', 'Taekwondo - Little Dragon', 'AU-023-7'), ('efc:m8', 'member', 'Max Dragon', 'Marrickville', 'Taekwondo - Little Dragon', 'AU-023-8')`);
+  await q(`insert into efc_grades (member_key, programme, belt, promoted_on, attended_since_promoted) values ('efc:m7', 'Taekwondo - Little Dragon', 'Red/Black Belt', current_date - 100, 30), ('efc:m8', 'Taekwondo - Little Dragon', 'Master Belt', current_date - 100, 30)`);
+  await page.goto(BASE + '/grading/coloured-belts/ready'); await page.waitForSelector('#progSel');
+  ok((await page.$$eval('#progSel option', os => os.map(o => o.textContent))).join() === 'Taekwondo,Little Dragons,Kung Fu,Kickboxing,BJJ,BJJ Kids,Tricking', 'a program switcher lists every program');
+  await page.selectOption('#progSel', 'Kung Fu'); await page.waitForSelector('#readyList');
+  let kf = await page.textContent('#readyList');
+  ok(kf.includes('Kim Ng') && kf.includes('Yellow Sash to Yellow Stripe') && !kf.includes('Sam Lee'), 'Kung Fu shows its own students and grades (Kim: Yellow Sash to Yellow Stripe)');
+  ok((await page.title()).includes('Kung Fu'), '...and the page title says which program');
+  await page.click('#readyList [data-key="efc:m2"]'); await page.waitForSelector('#apReady'); await page.click('#apReady'); await toastSays(page, 'Marked ready');
+  const apps = await q(`select programme, status from cb_approvals where member_key = 'efc:m2' order by programme`);
+  ok(apps.length === 2 && apps.find(a => a.programme === 'Kung Fu').status === 'ready' && apps.find(a => a.programme === 'Taekwondo').status === 'not_yet', 'ready / not yet is kept per program (Kim: ready in Kung Fu, not yet in Taekwondo)');
+  await page.click('#dlg [data-close]');
+  await page.click('.tab[data-view="settings"]'); await page.waitForSelector('#beltForm');
+  ok((await page.textContent('#beltForm')).includes('Each belt: Kung Fu') && (await page.$$('#beltForm tr[data-belt]')).length === 15, 'Settings shows the program\'s own grades (15 for Kung Fu)');
+  await page.selectOption('#progSel', 'Taekwondo - Little Dragon');
+  await page.click('.tab[data-view="days"]'); await page.click('#newDay'); await page.waitForSelector('#dayForm');
+  await page.fill('#dDate', '2030-12-12'); await page.check('#dMoveUp'); await page.click('#dGo'); await page.waitForSelector('#addOne');
+  const ld = (await q(`select day_id, programme, move_up from cb_days where programme = 'Taekwondo - Little Dragon'`))[0];
+  ok(ld && ld.move_up, 'a Little Dragons grading day can be for moving up to Taekwondo');
+  await page.click('#addOne'); await page.fill('#psQ', 'Dragon'); await page.waitForTimeout(200);
+  ok((await page.textContent('#psList')).includes('to Taekwondo Yellow') && (await page.textContent('#psList')).includes('to Taekwondo Orange'), 'moving up: Little Dragon belts go to Taekwondo Yellow, Master Belt to Orange');
+  await page.click('#psList [data-key="efc:m7"]');
+  ok(await until(async () => (await q(`select belt_to, to_programme from cb_entries where member_key = 'efc:m7'`))[0]?.to_programme === 'Taekwondo'), '...and is saved with the new program');
+  await page.waitForSelector('#entryList [data-entry]');
+  ok((await page.textContent('#entryList')).includes('to Taekwondo Yellow'), 'the day\'s list shows "to Taekwondo Yellow"');
+  await shot(page, 'cb-little-dragons');
+  await q(`delete from cb_entries where day_id = '${ld.day_id}'`); await q(`delete from cb_days where day_id = '${ld.day_id}'`);
   await ctx.close();
 
   console.log('\nOther logins');
@@ -271,7 +303,7 @@ try {
   ok(!(await page.$('#newDay')), '...and cannot add grading days');
   await ctx.close();
   ({ ctx, page } = await open('desk@ama.test'));
-  ok(await page.isVisible('#noAccess') && (await page.textContent('#noAccess')).includes("can't use coloured belt grading"), 'attendance-only staff are told they need a role');
+  ok(await page.isVisible('#noAccess') && (await page.textContent('#noAccess')).includes("can't use gradings"), 'attendance-only staff are told they need a role');
   await ctx.close();
 
   console.log('\nBooking page and grading hub');
