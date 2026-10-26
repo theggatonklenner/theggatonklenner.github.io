@@ -198,6 +198,15 @@
   .res button { flex: 1; min-height: 58px; border-radius: 11px; border: 1px solid var(--line2); background: var(--raise); color: var(--text); font: 700 20px var(--display); cursor: pointer; }
   .res button[aria-pressed="true"][data-r="pass"], .res button[aria-pressed="true"][data-r="in"] { background: var(--green); border-color: var(--green); color: #fff; }
   .res button[aria-pressed="true"][data-r="retest"] { background: var(--red); border-color: var(--red); color: #1a0d09; }
+  .bbcblock { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--line2); border-radius: var(--r); background: var(--bg); }
+  .bbcblock.on { border-color: rgba(245,197,24,.5); }
+  .bbcblock-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .bbcblock-text .label { font-size: 13px; }
+  .bbcblock-text b { font-size: 17px; }
+  .bbcblock.on .bbcblock-text b { color: var(--gold); }
+  .btn.gold { border-color: var(--gold); color: var(--gold); }
+  .btn.gold:hover { background: rgba(245,197,24,.1); border-color: var(--gold); }
+  @media (max-width: 480px) { .bbcblock .btn.gold { width: 100%; } }
   .bbcbtn { align-self: flex-start; border: 0; background: none; color: var(--gold); font-weight: 600; font-size: 14.5px; padding: 2px 0; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
   .phcard { flex-direction: row; align-items: center; }
   .phcard.next { border-color: var(--gold); }
@@ -578,7 +587,12 @@ function openStudent(key, prog) {
   const s = student(key, prog); if (!s) return;
   const P = s.programme || 'Taekwondo', open = () => openStudent(key, P);
   const hist = state.entries.filter(e => e.member_key === key && progOfDay(e.day_id) === P).map(e => ({ e, d: dayOf(e.day_id) })).filter(x => x.d);
-  const bbc = s.black_belt_club ? '<span class="tag bbc">Enrolled</span>' : s.bbc_invited_at ? (s.bbc_written_at ? `<span class="tag bbcinv">Card written ${esc(shortDate(s.bbc_written_at.slice(0, 10)))}</span>` : `<span class="tag bbcinv">Card to write, asked for by ${esc(s.bbc_invited_by || 'staff')}</span>`) : 'Not enrolled';
+  // Black Belt Club: where they stand, and one clear button to ask for an invitation card
+  const bbcState = s.black_belt_club ? ['Enrolled', 'In Black Belt Club (from EFC)']
+    : s.bbc_invited_at ? (s.bbc_written_at ? ['Card written', `Written ${shortDate(s.bbc_written_at.slice(0, 10))} by ${s.bbc_written_by || 'staff'}`] : ['Card to write', `Asked for by ${s.bbc_invited_by || 'staff'}, ${shortDate(s.bbc_invited_at.slice(0, 10))}`])
+    : ['Not enrolled', ''];
+  const bbcBlock = `<div class="bbcblock${s.black_belt_club || s.bbc_invited_at ? ' on' : ''}"><div class="bbcblock-text"><span class="label">Black Belt Club</span><b>${esc(bbcState[0])}</b>${bbcState[1] ? `<span class="hint">${esc(bbcState[1])}</span>` : ''}</div>
+    ${!s.black_belt_club && canApprove() ? (s.bbc_invited_at ? `<button type="button" class="btn sm" data-bbcinv="${esc(s.member_key)}" data-on="0">Cancel card</button>` : `<button type="button" class="btn gold" data-bbcinv="${esc(s.member_key)}" data-on="1">Invite to Black Belt Club</button>`) : ''}</div>`;
   openDlg(`<div class="dlg">
     <div class="dlg-head"><div><h3>${esc(s.full_name)}</h3><p class="sub">${swatch(s.belt, P)} ${esc(s.belt)} to <b>${esc(sNext(s))}</b>${s.up_belt && s.up_belt !== s.next_belt ? ` (or ${esc(withProg(s.up_belt, s.up_programme))} when moving up)` : ''}</p></div><button class="x" data-close>Close</button></div>
     ${canApprove() ? `<form id="apForm" class="dlg" style="gap:10px">
@@ -587,15 +601,15 @@ function openStudent(key, prog) {
       ${s.approval ? `<div class="row" style="justify-content:space-between"><span class="hint">Marked ${s.approval === 'ready' ? 'ready' : 'not yet'} by ${esc(s.decided_by || 'staff')}</span><button type="button" class="btn link" id="apClear">Clear</button></div>` : '<p class="hint">The note goes in the "not yet" text to the parent.</p>'}
       ${s.approval === 'not_yet' ? '<button type="button" class="btn" id="apText">Text the parent a kind message</button>' : ''}
     </form>` : `<p class="sub">${s.approval ? 'Marked ' + (s.approval === 'ready' ? 'ready' : 'not yet') : 'Not decided yet'}</p>`}
+    ${bbcBlock}
     <dl class="kv">
       <dt>Classes</dt><dd><b>${s.classes}</b> of ${s.classes_needed} since their last grading ${s.enough_classes ? '<span class="tag ok">Enough</span>' : `<span class="tag warn">${s.classes_needed - s.classes} to go</span>`}</dd>
       <dt>Last grading</dt><dd>${s.promoted_on ? `${esc(fmtDate(s.promoted_on))}, ${s.weeks_at_belt} weeks ago` : 'Not in EFC'}${overdue(s) ? ' <span class="tag bad">Overdue</span>' : ''}</dd>
       <dt>Age</dt><dd>${esc(ageText(s))}</dd>
       <dt>School</dt><dd>${esc(s.location)}${isAll() ? ', ' + esc(progLabel(P)) : ''}${s.efc_reference ? ` <span class="hint">${esc(s.efc_reference)}</span>` : ''}</dd>
-      <dt>Black Belt Club</dt><dd>${bbc}</dd>
       ${contactRows(s)}
     </dl>
-    <div class="row">${bbcInviteBtn(s)}${canGrade() ? '<button class="btn sm" id="editContact">Edit mobile or email</button>' : ''}</div>
+    ${canGrade() ? '<div class="row"><button class="btn sm" id="editContact">Edit mobile or email</button></div>' : ''}
     ${hist.length ? `<div class="section"><h3>Gradings</h3><ul class="list">${hist.map(x => `<li><div class="item plain"><div class="main"><div class="name">${esc(fmtDate(x.d.grading_date))}</div><div class="meta">${esc(x.d.location)}, to ${esc(toText(x.e))}</div></div><span class="tags">${x.e.result ? `<span class="tag ${x.e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[x.e.result]}</span>` : x.e.booked_at ? '<span class="tag ok">Booked</span>' : x.e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Added</span>'}</span></div></li>`).join('')}</ul></div>` : ''}
   </div>`);
   const decide = async status => {

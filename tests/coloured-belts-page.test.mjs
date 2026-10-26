@@ -158,6 +158,7 @@ try {
   ok((await q(`select black_belt_club from cb_students where member_key = 'efc:m2'`))[0].black_belt_club === false, 'someone not seen in EFC\'s Black Belt Club for 3 days drops off');
   await page.click('#readyList [data-key="efc:m1"]'); await page.waitForSelector('#apReady');
   await shots(page, 'cb-student');
+  if (SHOTS) { await page.evaluate(() => { dlg.close(); openStudent('efc:m2', 'Taekwondo'); }); await page.waitForSelector('#dlg[open]'); await shots(page, 'cb-student-not-bbc'); await page.evaluate(() => { dlg.close(); openStudent('efc:m1', 'Taekwondo'); }); await page.waitForSelector('#apReady'); }
   ok((await page.textContent('#dlg')).includes('Black Belt Club') && (await page.textContent('#dlg')).includes('Enrolled'), 'the student screen says they are in Black Belt Club');
   await page.click('#apReady'); await toastSays(page, 'Marked ready');
   ok((await q(`select status, belt from cb_approvals where member_key = 'efc:m1'`))[0]?.status === 'ready', 'an instructor marks a student ready (for their current belt)');
