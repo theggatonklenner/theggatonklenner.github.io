@@ -16,7 +16,8 @@
 //
 // Requests (POST, JSON):
 //   { action: 'info', token }               a family's booking link: who, what belt, when, where (no sign-in)
-//   { action: 'book', token }               book it and pay at the front desk (no sign-in)
+//   { action: 'book', token }               book it, only when there is no fee (no sign-in): with a fee, families pay by card
+//   { action: 'record_payment', entry_id, how }  staff: a cash/EFTPOS/bank payment taken by staff; marks paid and books it
 //   { action: 'pay', token, back? }         pay the fee by card: returns the Stripe payment page (no sign-in); paying books it
 //   Stripe's webhook (has a Stripe-Signature header)
 //   { action: 'photo', code | token }       a family's grading photo link (short code from /p#<code>): a short-lived address for the photo (no sign-in)
@@ -84,9 +85,9 @@ export async function signatureOk(body, header, secret, now = Date.now()) {
 
 async function entryByToken(db, token) {
   if (!tokenOk(token)) return null;
-  const { data: e } = await db.from('cb_entries').select('entry_id, day_id, member_key, full_name, belt_from, belt_to, token, booked_at, booking_error, result, paid, paid_how').eq('token', token).maybeSingle();
+  const { data: e } = await db.from('cb_entries').select('entry_id, day_id, member_key, full_name, belt_from, belt_to, token, booked_at, booking_error, result, paid, paid_how, late_ok_until').eq('token', token).maybeSingle();
   if (!e) return null;
-  const { data: d } = await db.from('cb_days').select('day_id, location, grading_date, start_time, efc_session_id, closed, programme').eq('day_id', e.day_id).maybeSingle();
+  const { data: d } = await db.from('cb_days').select('day_id, location, grading_date, start_time, efc_session_id, closed, programme, book_by').eq('day_id', e.day_id).maybeSingle();
   return d ? { e, d } : null;
 }
 
@@ -135,13 +136,16 @@ export async function handle(req, db, env = {}, http = fetch) {
     const entryId = (pay && pay.entry_id) || s.metadata.entry_id || s.client_reference_id;
     if (pay && pay.status === 'paid') return true;   // already done
     const now = new Date().toISOString(), payment = typeof s.payment_intent === 'string' ? s.payment_intent : (s.payment_intent && s.payment_intent.id) || s.id;
-    if (pay) await db.from('cb_payments').update({ status: 'paid', paid_at: now, amount: (s.amount_total || 0) / 100, stripe_payment: payment }).eq('payment_id', pay.payment_id);
-    else await db.from('cb_payments').insert({ entry_id: entryId, stripe_session: s.id, status: 'paid', paid_at: now, amount: (s.amount_total || 0) / 100, stripe_payment: payment });
+    // Stripe's receipt (from the payment's charge)
+    let receipt = null;
+    if (payment && String(payment).startsWith('pi_')) { try { const pi = await stripe('/payment_intents/' + encodeURIComponent(payment) + '?expand[]=latest_charge', { method: 'GET' }); receipt = (pi.latest_charge && pi.latest_charge.receipt_url) || null; } catch (er) { console.error(er); } }
+    if (pay) await db.from('cb_payments').update({ status: 'paid', paid_at: now, amount: (s.amount_total || 0) / 100, stripe_payment: payment, receipt_url: receipt }).eq('payment_id', pay.payment_id);
+    else await db.from('cb_payments').insert({ entry_id: entryId, stripe_session: s.id, status: 'paid', paid_at: now, amount: (s.amount_total || 0) / 100, stripe_payment: payment, receipt_url: receipt });
     if (!entryId) return true;
     await db.from('cb_entries').update({ paid: true, paid_at: now, paid_how: 'card' }).eq('entry_id', entryId);
-    const { data: e } = await db.from('cb_entries').select('entry_id, day_id, member_key, full_name, belt_from, belt_to, token, booked_at, booking_error, result, paid, paid_how').eq('entry_id', entryId).maybeSingle();
+    const { data: e } = await db.from('cb_entries').select('entry_id, day_id, member_key, full_name, belt_from, belt_to, token, booked_at, booking_error, result, paid, paid_how, late_ok_until').eq('entry_id', entryId).maybeSingle();
     if (e && !e.booked_at) {
-      const { data: d } = await db.from('cb_days').select('day_id, location, grading_date, start_time, efc_session_id, closed, programme').eq('day_id', e.day_id).maybeSingle();
+      const { data: d } = await db.from('cb_days').select('day_id, location, grading_date, start_time, efc_session_id, closed, programme, book_by').eq('day_id', e.day_id).maybeSingle();
       if (d) await bookEntry(e, d);
     }
     return true;
@@ -163,8 +167,10 @@ export async function handle(req, db, env = {}, http = fetch) {
 
     // ---- Families (no sign-in): the booking link ----
     if (body.action === 'info' || body.action === 'book' || body.action === 'pay') {
+      const { data: cs } = await db.from('cb_settings').select('contact_phone').eq('id', 1).maybeSingle();
+      const phone = (cs && cs.contact_phone) || '(02) 9569 1943';
       let x = await entryByToken(db, body.token);
-      if (!x) return json({ ok: false, error: 'This link isn\'t valid. Ask the front desk for a new one.' }, 404);
+      if (!x) return json({ ok: false, phone, error: `This link isn't valid any more. Please call us on ${phone}.` }, 404);
       let { e, d } = x;
       // Back from Stripe (or the webhook hasn't come yet): ask Stripe whether it was paid
       if (!e.paid && env.STRIPE_SECRET_KEY) {
@@ -175,13 +181,23 @@ export async function handle(req, db, env = {}, http = fetch) {
       }
       const { data: belt } = await db.from('cb_belts').select('fee').eq('programme', d.programme || 'Taekwondo').eq('belt', e.belt_from).maybeSingle();
       const fee = belt && belt.fee != null ? Number(belt.fee) : null;
+      // Bookings close at the day's set time, unless staff issued a new (late) link
+      const nowMs = Date.now(), late = e.late_ok_until && Date.parse(e.late_ok_until) > nowMs;
+      const shut = !!(d.book_by && Date.parse(d.book_by) <= nowMs && !late);
+      let receipt = null;
+      if (e.paid && e.paid_how === 'card') { const { data: rp } = await db.from('cb_payments').select('receipt_url').eq('entry_id', e.entry_id).eq('status', 'paid').maybeSingle(); receipt = (rp && rp.receipt_url) || null; }
       const info = { ok: true, first: first(e.full_name), belt_to: e.belt_to, date: d.grading_date, time: d.start_time ? String(d.start_time).slice(0, 5) : null,
         school: d.location, fee, booked: !!e.booked_at, paid: !!e.paid, paid_how: e.paid ? (e.paid_how || 'desk') : null, closed: d.closed || !!e.result,
-        card: !!(env.STRIPE_SECRET_KEY && fee > 0), booking_failed: !!(e.paid && !e.booked_at && e.booking_error) };
+        card: !!(env.STRIPE_SECRET_KEY && fee > 0), booking_failed: !!(e.paid && !e.booked_at && e.booking_error),
+        book_by: late ? e.late_ok_until : (d.book_by || null), booking_closed: shut, phone, receipt };
+      const shutMsg = `Bookings for this grading have closed. Please call us on ${phone}.`;
       if (body.action === 'info') return json(info);
       if (body.action === 'book') {
         if (e.booked_at) return json({ ...info, booked: true });
         if (info.closed) return json({ ...info, ok: false, error: 'This grading has finished.' });
+        if (shut) return json({ ...info, ok: false, error: shutMsg });
+        // With a fee, the link only takes card payments (staff record any other payment)
+        if (fee > 0) return json({ ...info, ok: false, error: info.card ? 'Please pay the grading fee by card to book.' : `Online payment isn't available for this grading. Please call us on ${phone} to book.` });
         const b = await bookEntry(e, d);
         if (b.notSetUp) return json({ ...info, ok: false, error: 'Online booking isn\'t set up for this grading yet. Please contact the front desk.' });
         if (!b.ok) return json({ ...info, ok: false, error: 'We couldn\'t book it just now. Please try again in a minute, or contact the front desk.' }, 502);
@@ -190,11 +206,16 @@ export async function handle(req, db, env = {}, http = fetch) {
       // Pay by card
       if (e.paid) return json({ ...info, ok: false, error: 'This grading is already paid for.' });
       if (info.closed) return json({ ...info, ok: false, error: 'This grading has finished.' });
+      if (shut) return json({ ...info, ok: false, error: shutMsg });
       if (!info.card) return json({ ...info, ok: false, error: 'Card payments aren\'t set up for this grading. Please pay at the front desk.' }, 409);
       const site = backTo(body.back);
+      // Stripe emails the receipt to the family (their email from EFC)
+      const { data: who } = await db.from('efc_members').select('email, guardian_email').eq('member_key', e.member_key).maybeSingle();
+      const email = [who && who.email, who && who.guardian_email].find(v => v && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) || null;
       const sess = await stripe('/checkout/sessions', { method: 'POST', body: form({
         mode: 'payment', client_reference_id: e.entry_id, metadata: { kind: 'grading', entry_id: e.entry_id, day_id: e.day_id },
-        payment_intent_data: { metadata: { kind: 'grading', entry_id: e.entry_id }, description: `AMA ${d.location} grading ${d.grading_date}: ${e.full_name} for ${e.belt_to}` },
+        payment_intent_data: { metadata: { kind: 'grading', entry_id: e.entry_id }, description: `AMA ${d.location} grading ${d.grading_date}: ${e.full_name} for ${e.belt_to}`, ...(email ? { receipt_email: email } : {}) },
+        ...(email ? { customer_email: email } : {}),
         line_items: { 0: { quantity: 1, price_data: { currency: 'aud', unit_amount: Math.round(fee * 100), product_data: { name: `AMA grading: ${e.belt_to}`, description: `${first(e.full_name)}, ${d.location}, ${d.grading_date}` } } } },
         success_url: `${site}?paid=1#t=${e.token}`, cancel_url: `${site}#t=${e.token}` }) });
       const { data: had } = await db.from('cb_payments').select('payment_id').eq('entry_id', e.entry_id).eq('status', 'pending').maybeSingle();
@@ -246,7 +267,24 @@ export async function handle(req, db, env = {}, http = fetch) {
     const { data: roleRows } = await db.from('prep_roles').select('role').eq('email', me);
     const roles = (roleRows || []).map(r => r.role);
     const may = kind => roles.includes('admin') || (KINDS[kind] || []).some(r => roles.includes(r));
-    if (!roles.some(r => ['admin', 'instructor', 'grading'].includes(r))) return fail('Your login cannot use coloured belt grading.', 403);
+    if (!roles.some(r => ['admin', 'instructor', 'grading', 'payments'].includes(r))) return fail('Your login cannot use coloured belt grading.', 403);
+    // A payment taken by staff (cash, EFTPOS, bank transfer): mark paid, then book the EFC session like a card payment would
+    if (body.action === 'record_payment') {
+      if (!roles.some(r => ['admin', 'grading', 'payments'].includes(r))) return fail('Your login cannot record payments.', 403);
+      const how = String(body.how || '');
+      if (!['cash', 'eftpos', 'transfer', 'other'].includes(how)) return fail('Choose how they paid.');
+      const { data: e } = await db.from('cb_entries').select('entry_id, day_id, member_key, full_name, belt_from, belt_to, token, booked_at, booking_error, result, paid, paid_how, late_ok_until').eq('entry_id', String(body.entry_id || '')).maybeSingle();
+      if (!e) return fail('Student not found on this grading day.', 404);
+      if (e.paid) return json({ ok: true, already: true, booked: !!e.booked_at });
+      e.paid = true; e.paid_how = how;
+      await db.from('cb_entries').update({ paid: true, paid_at: new Date().toISOString(), paid_how: how }).eq('entry_id', e.entry_id);
+      let b = { ok: !!e.booked_at };
+      if (!e.booked_at) {
+        const { data: d } = await db.from('cb_days').select('day_id, location, grading_date, start_time, efc_session_id, closed, programme, book_by').eq('day_id', e.day_id).maybeSingle();
+        if (d) b = await bookEntry(e, d);
+      }
+      return json({ ok: true, booked: !!b.ok, byHand: !!b.byHand, booking_error: b.ok ? null : (b.why || null) });
+    }
     const ready = !!(env.GHL_TOKEN && env.GHL_LOCATION_ID), testing = env.GHL_TEST === '1';
     if (body.action === 'check') return json({ ready: ready || testing, testing });
     if (body.action !== 'send') return fail('Unknown action.');

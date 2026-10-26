@@ -39,6 +39,7 @@
   .hint { color: var(--muted); font-size: 15px; margin: 0; }
   .done { background: var(--accent-soft); color: var(--accent); border-radius: 12px; padding: 14px; font-weight: 700; }
   .err { color: var(--danger); margin: 0; }
+  .err a { color: inherit; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -53,6 +54,7 @@
       <button class="btn" id="pay" hidden>Pay and book</button>
       <button class="btn" id="book">Book this grading</button>
       <div class="done" id="booked" hidden></div>
+      <a class="btn plain" id="receipt" hidden target="_blank" rel="noopener">View receipt</a>
     </div>
     <p class="err" id="error" hidden></p>
   </div>
@@ -63,6 +65,7 @@ const CFG = window.TOOLKIT_CONFIG || {};
 const $ = s => document.querySelector(s);
 const token = new URLSearchParams(location.hash.replace(/^#/, '')).get('t') || '';
 const fmtDate = d => new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const fmtWhen = iso => new Date(iso).toLocaleString('en-AU', { weekday: 'short', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' });
 const fmtTime = t => { if (!t) return ''; const [h, m] = t.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`; };
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 async function call(action, extra = {}) {
@@ -74,26 +77,35 @@ async function call(action, extra = {}) {
 let last = null;
 function show(r) {
   $('#loading').hidden = true;
-  if (!r.first) { $('#error').textContent = r.error || 'This link isn\'t valid. Ask the front desk for a new one.'; $('#error').hidden = false; return; }
+  if (!r.first) { showError(r.error || 'This link isn\'t valid any more. Please call us on (02) 9569 1943.', r.phone); return; }
   last = r;
   const fee = r.fee != null ? '$' + Number(r.fee).toFixed(r.fee % 1 ? 2 : 0) : '';
   $('#info').hidden = false;
   $('#title').textContent = `${r.first}'s grading for ${r.belt_to}`;
-  $('#details').innerHTML = `<dt>When</dt><dd>${esc(fmtDate(r.date))}${r.time ? ', ' + esc(fmtTime(r.time)) : ''}</dd><dt>Where</dt><dd>AMA ${esc(r.school)}</dd>${fee ? `<dt>Fee</dt><dd>${esc(fee)}${r.paid ? ' (paid)' : ''}</dd>` : ''}`;
-  const open = !r.closed;
-  // Pay by card (books it too), or book now and pay at the front desk
-  $('#pay').hidden = !(open && r.card && !r.paid);
+  $('#details').innerHTML = `<dt>When</dt><dd>${esc(fmtDate(r.date))}${r.time ? ', ' + esc(fmtTime(r.time)) : ''}</dd><dt>Where</dt><dd>AMA ${esc(r.school)}</dd>${fee ? `<dt>Fee</dt><dd>${esc(fee)}${r.paid ? ' (paid)' : ''}</dd>` : ''}${r.book_by && !r.paid && !r.booked ? `<dt>Book by</dt><dd>${esc(fmtWhen(r.book_by))}</dd>` : ''}`;
+  const open = !r.closed && !r.booking_closed;
+  $('#receipt').hidden = !r.receipt; if (r.receipt) $('#receipt').href = r.receipt;
+  // With a fee: pay by card (which books it). Without a fee: just book. Other payments are taken by staff.
+  const hasFee = r.fee > 0;
+  $('#pay').hidden = !(open && hasFee && r.card && !r.paid);
   $('#pay').textContent = r.booked ? `Pay the ${fee} fee` : `Pay ${fee} and book`;
-  $('#book').hidden = !open || !!r.booked || !!r.paid;
-  $('#book').textContent = r.card ? 'Book now, pay at the front desk' : 'Book this grading';
-  $('#book').classList.toggle('plain', !!r.card);
-  $('#feeNote').textContent = !open || r.paid ? '' : r.card ? (r.booked ? 'Booked. You can pay the fee here by card, or at the front desk.' : 'Paying by card books the grading straight away.') : (r.booked ? '' : 'Pay the grading fee at the front desk.');
+  $('#book').hidden = !open || hasFee || !!r.booked || !!r.paid;
+  $('#book').textContent = 'Book this grading';
+  $('#feeNote').textContent = !open || r.paid ? '' : hasFee ? (r.card ? 'Paying by card books the grading straight away.' : '') : '';
+  if (open && hasFee && !r.card && !r.paid && !r.booked) showError(`Online payment isn't available for this grading. Please call us on ${r.phone || '(02) 9569 1943'} to book.`, r.phone);
   $('#booked').hidden = !(r.booked || r.paid);
   $('#booked').textContent = r.paid && r.booked ? `Paid and booked. See you on ${fmtDate(r.date).split(',')[0]}!`
     : r.paid ? 'Paid, thank you. We\'re booking the grading for you: the front desk will confirm it.'
     : `Booked. See you on ${fmtDate(r.date).split(',')[0]}!`;
-  if (r.closed && !r.booked && !r.paid) { $('#error').textContent = 'This grading has finished.'; $('#error').hidden = false; }
-  if (r.error && r.first) { $('#error').textContent = r.error; $('#error').hidden = false; }
+  if (r.closed && !r.booked && !r.paid) showError('This grading has finished.');
+  else if (r.booking_closed && !r.booked && !r.paid) showError(`Bookings for this grading have closed. Please call us on ${r.phone || '(02) 9569 1943'}.`, r.phone);
+  if (r.error && r.first) showError(r.error, r.phone);
+}
+// An error, with the phone number as a tap-to-call link
+function showError(msg, phone) {
+  const p = phone || '(02) 9569 1943', i = msg.indexOf(p);
+  $('#error').innerHTML = i < 0 ? esc(msg) : esc(msg.slice(0, i)) + `<a href="tel:${esc(p.replace(/[^\d+]/g, ''))}">${esc(p)}</a>` + esc(msg.slice(i + p.length));
+  $('#error').hidden = false;
 }
 $('#book').onclick = async () => {
   $('#book').disabled = true; const was = $('#book').textContent; $('#book').textContent = 'Booking…'; $('#error').hidden = true;
@@ -109,7 +121,7 @@ $('#pay').onclick = async () => {
   show({ ...(last || {}), ...r, error: r.error || 'Something went wrong. Please try again.' });
 };
 if (/[?&]paid=1/.test(location.search)) { try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { /* ignore */ } }   // back from Stripe
-(async () => { if (!token) return show({ error: 'This link is missing its code. Open it from the text message you were sent.' }); show(await call('info')); })();
+(async () => { if (!token) return show({ error: 'This link is missing its code. Open it from the text message you were sent, or call us on (02) 9569 1943.' }); show(await call('info')); })();
 </script>
 </body>
 </html>

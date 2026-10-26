@@ -64,6 +64,7 @@ let nextSess = 1;
 const http = async (url, opts) => {
   if (url.startsWith('https://script.google.com/')) { const b = JSON.parse(opts.body); sheetRows.push(b); return new Response(JSON.stringify(b.key === 'sheet-key' ? { ok: true } : { ok: false, error: 'Wrong key' }), { status: 200 }); }
   if (url.startsWith('https://hooks.zapier.com/')) { hooks.push(JSON.parse(opts.body)); return new Response('{"status":"success"}', { status: hookStatus }); }
+  if (url.startsWith('https://api.stripe.com/v1/payment_intents/')) { const id = decodeURIComponent(url.split('/').pop().split('?')[0]); return new Response(JSON.stringify({ id, latest_charge: { receipt_url: 'https://pay.stripe.test/receipts/' + id } }), { status: 200 }); }
   if (url.startsWith('https://api.stripe.com/v1/checkout/sessions')) {
     stripeCalls.push({ url, method: opts.method, body: opts.body ? decodeURIComponent(opts.body) : '', auth: opts.headers.Authorization });
     if (opts.method === 'POST') {
@@ -86,8 +87,15 @@ console.log('Booking links (no sign-in)');
 let r = await call({ action: 'info', token: TOKEN });
 ok(r.status === 200 && r.body.first === 'Sam' && r.body.belt_to === 'Orange Belt' && r.body.school === 'Marrickville' && r.body.time === '10:00' && r.body.fee === 55 && !r.body.booked, 'a booking link shows the first name, belt, school, time and fee');
 ok(!JSON.stringify(r.body).includes('0412') && !JSON.stringify(r.body).includes('Lee'), '...and nothing private (no surname or phone)');
+t.cb_settings[0].booking_webhook = 'https://hooks.zapier.com/hooks/catch/1/abc/';
+r = await call({ action: 'book', token: TOKEN }, null, { STRIPE_SECRET_KEY: 'sk_test_x' });
+ok(r.body.ok === false && /pay the grading fee by card/.test(r.body.error) && !t.cb_entries[0].booked_at && !hooks.length, 'with a fee, the link can\'t book without paying by card (no "pay at the desk")');
+r = await call({ action: 'book', token: TOKEN });
+ok(r.body.ok === false && /call us/.test(r.body.error), '...and without card payments set up, it says to call');
+t.cb_settings[0].booking_webhook = null;
+t.cb_belts[0].fee = null;   // no fee: the link books straight away (the booking tests below)
 r = await call({ action: 'info', token: 'nope' });
-ok(r.status === 404 && /isn't valid/.test(r.body.error), 'a wrong link is refused');
+ok(r.status === 404 && /isn't valid/.test(r.body.error) && /9569 1943/.test(r.body.error), 'a wrong or replaced link is refused, with the number to call');
 r = await call({ action: 'book', token: TOKEN });
 ok(r.body.ok === false && /isn't set up/.test(r.body.error) && !hooks.length, 'without a booking Zap saved, it says booking is not set up');
 t.cb_settings[0].booking_webhook = 'https://hooks.zapier.com/hooks/catch/1/abc/';
@@ -168,6 +176,7 @@ ok(r.body.ok && r.body.removed && !r.body.photo && /kept for 30 days/.test(r.bod
 
 
 console.log('\nPay by card, then book (Stripe)');
+t.cb_belts[0].fee = 55;
 const TOKEN3 = 'c'.repeat(64), TOKEN4 = 'd'.repeat(64);
 t.cb_entries.push({ entry_id: 'e3', day_id: 'd1', member_key: 'efc:m1', full_name: 'Sam Lee', belt_from: 'Yellow Belt', belt_to: 'Orange Belt', token: TOKEN3, booked_at: null, booking_error: null, result: null, paid: false, paid_how: null },
                   { entry_id: 'e4', day_id: 'd1', member_key: 'efc:m1', full_name: 'Sam Lee', belt_from: 'Yellow Belt', belt_to: 'Orange Belt', token: TOKEN4, booked_at: null, booking_error: null, result: null, paid: false, paid_how: null });
@@ -181,6 +190,7 @@ r = await call({ action: 'info', token: TOKEN3 }, null, STRIPE_ENV);
 ok(r.body.card === true && r.body.paid === false && r.body.booked === false, 'with Stripe set up and a fee, the family can pay by card');
 r = await call({ action: 'pay', token: TOKEN3, back: 'https://evil.test/steal' }, null, STRIPE_ENV);
 const cs = stripeSessions[Object.keys(stripeSessions).pop()];
+ok(cs._form.customer_email === 'pat@example.test' && cs._form['payment_intent_data[receipt_email]'] === 'pat@example.test', 'Stripe is given the family\'s email from EFC, so it emails them a receipt');
 ok(r.body.ok && r.body.url === cs.url && cs.amount_total === 5500 && cs._form['line_items[0][price_data][currency]'] === 'aud' && cs.metadata.kind === 'grading' && cs.metadata.entry_id === 'e3', 'Pay sends them to Stripe for the belt\'s fee ($55, AUD), tagged as a grading payment');
 ok(cs._form.success_url === 'https://theggatonklenner.github.io/grading/coloured-belts/book/?paid=1#t=' + TOKEN3 && !cs._form.success_url.includes('evil'), '...and Stripe only sends them back to AMA\'s own booking page');
 ok(backTo('https://app.australianmartialarts.com.au/grading/coloured-belts/book/') === 'https://app.australianmartialarts.com.au/grading/coloured-belts/book/', '...including on the AMA domain later');
@@ -198,6 +208,9 @@ ok(r.status === 400 && !t.cb_entries.find(e => e.entry_id === 'e3').paid, 'a web
 r = await hook({ ...cs, payment_status: 'paid' });
 const e3 = t.cb_entries.find(e => e.entry_id === 'e3');
 ok(r.body.received && e3.paid && e3.paid_how === 'card' && t.cb_payments[0].status === 'paid' && t.cb_payments[0].amount === 55, 'when Stripe confirms the payment, they are marked paid by card');
+ok(t.cb_payments[0].receipt_url === 'https://pay.stripe.test/receipts/pi_' + cs.id, '...and Stripe\'s receipt is kept');
+r = await call({ action: 'info', token: TOKEN3 }, null, STRIPE_ENV);
+ok(r.body.receipt === t.cb_payments[0].receipt_url, 'the booking page links to the receipt');
 ok(e3.booked_at && hooks.length === before + 1 && hooks[hooks.length - 1].paid === true && hooks[hooks.length - 1].session_id === 'sess-1' && hooks[hooks.length - 1].member_id === 'm1', '...and the Zap is sent the booking (member, session, school, date) straight away');
 r = await hook({ ...cs, payment_status: 'paid' });
 ok(hooks.length === before + 1 && t.cb_payments.length === 1, 'Stripe sending the same payment twice does not book twice');
@@ -216,6 +229,23 @@ ok(!e4.booked_at && e4.booking_error && r.body.booking_failed, '...and if the Za
 hookStatus = 200;
 
 
+
+console.log('\nPayments taken by staff (cash, EFTPOS)');
+const TOKEN7 = '7'.repeat(64);
+t.cb_entries.push({ entry_id: 'e7', day_id: 'd1', member_key: 'efc:m1', full_name: 'Sam Lee', belt_from: 'Yellow Belt', belt_to: 'Orange Belt', token: TOKEN7, booked_at: null, booking_error: null, result: null, paid: false, paid_how: null });
+const staffCall = (b, tok) => call(b, tok, {});
+r = await staffCall({ action: 'record_payment', entry_id: 'e7', how: 'cash' }, 'tok-coach');
+ok(r.status === 403, 'instructors cannot record payments');
+r = await staffCall({ action: 'record_payment', entry_id: 'e7', how: 'bitcoin' }, 'tok-grader');
+ok(r.status === 400, 'the payment type must be cash, EFTPOS, bank transfer or other');
+const hb = hooks.length;
+r = await staffCall({ action: 'record_payment', entry_id: 'e7', how: 'eftpos' }, 'tok-grader');
+const e7 = t.cb_entries.find(e => e.entry_id === 'e7');
+ok(r.body.ok && r.body.booked && e7.paid && e7.paid_how === 'eftpos' && e7.booked_at && hooks.length === hb + 1, 'grading staff record an EFTPOS payment: marked paid and booked into the EFC session');
+r = await staffCall({ action: 'record_payment', entry_id: 'e7', how: 'cash' }, 'tok-grader');
+ok(r.body.already && hooks.length === hb + 1 && e7.paid_how === 'eftpos', 'recording it twice changes nothing');
+t.cb_belts[0].fee = null;
+
 console.log('\nBooking sheet (Google Sheets, then a Zap books from new rows)');
 const TOKEN5 = 'f'.repeat(64);
 t.cb_entries.push({ entry_id: 'e5', day_id: 'd1', member_key: 'efc:m1', full_name: 'Sam Lee', belt_from: 'Yellow Belt', belt_to: 'Orange Belt', token: TOKEN5, booked_at: null, booking_error: null, result: null, paid: false, paid_how: null });
@@ -230,6 +260,24 @@ ok(r.body.booked && e5.booked_at && row.key === 'sheet-key' && row.member_id ===
 t.cb_settings[0].booking_webhook = 'https://script.google.com/macros/s/x/exec/../evil'; e5.booked_at = null;
 r = await call({ action: 'book', token: TOKEN5 });
 ok(r.body.ok === false && /isn't set up/.test(r.body.error), 'only a real Apps Script web app address (or Zapier hook) is used');
+
+console.log('\nBookings close at a set time; a new link lets someone book late');
+const TOKEN6 = '6'.repeat(64);
+t.cb_days.push({ day_id: 'd6', location: 'Marrickville', grading_date: '2026-11-21', start_time: '10:00:00', efc_session_id: 'sess-6', closed: false, book_by: new Date(Date.now() - 3600e3).toISOString() });
+t.cb_entries.push({ entry_id: 'e6', day_id: 'd6', member_key: 'efc:m1', full_name: 'Sam Lee', belt_from: 'Yellow Belt', belt_to: 'Orange Belt', token: TOKEN6, booked_at: null, booking_error: null, result: null, paid: false, paid_how: null, late_ok_until: null });
+t.cb_settings[0].contact_phone = '(02) 9569 1943'; t.cb_settings[0].booking_webhook = 'https://hooks.zapier.com/hooks/catch/1/abc/';
+r = await call({ action: 'info', token: TOKEN6 }, null, STRIPE_ENV);
+ok(r.body.booking_closed === true && r.body.phone === '(02) 9569 1943', 'after the closing time the booking page says bookings have closed');
+r = await call({ action: 'book', token: TOKEN6 });
+const e6 = t.cb_entries.find(e => e.entry_id === 'e6');
+ok(r.body.ok === false && /closed.*9569 1943/.test(r.body.error) && !e6.booked_at, '...Book is refused, saying to call');
+r = await call({ action: 'pay', token: TOKEN6 }, null, STRIPE_ENV);
+ok(r.body.ok === false && /closed/.test(r.body.error), '...and so is paying');
+e6.late_ok_until = new Date(Date.now() + 48 * 3600e3).toISOString();
+r = await call({ action: 'info', token: TOKEN6 }, null, STRIPE_ENV);
+ok(r.body.booking_closed === false && r.body.book_by === e6.late_ok_until, 'with a new (late) link from staff, they can book again until it runs out');
+r = await call({ action: 'book', token: TOKEN6 });
+ok(r.body.booked && e6.booked_at, '...and booking works');
 
 console.log('\nVisitors from another school (EFC won\'t book them into this school\'s session)');
 t.cb_settings[0].booking_webhook = 'https://script.google.com/macros/s/AKfycbx-Test_123/exec';

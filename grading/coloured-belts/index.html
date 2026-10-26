@@ -426,6 +426,7 @@ if (window.AmaHub) { AmaHub.mount(HUB); AmaHub.recheck(HUB); }
 
 const SCHOOLS = ['Marrickville', 'Sydenham', 'Concord', 'West', 'Sylvania'];
 const APP_BASE = '/grading/coloured-belts/';
+const PAID_HOW = { card: 'by card', cash: '(cash)', eftpos: '(EFTPOS)', transfer: '(bank transfer)', other: '(other)', desk: 'at the desk' };
 const RESULT = { pass: 'Pass', distinction: 'Distinction', retest: 'Re-test' };
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -478,6 +479,10 @@ const daySchools = d => (d && d.schools && d.schools.length) ? d.schools : [d.lo
 const forDay = (d, s) => daySchools(d).includes(s.location) && (!dayBelts(d) || dayBelts(d).includes(s.belt));
 const fromText = d => daySchools(d).length > 1 || daySchools(d)[0] !== d.location ? 'students from ' + daySchools(d).join(', ') : '';
 const beltsText = d => dayBelts(d) ? dayBelts(d).slice().sort((a, b) => (beltOf(a).sort || 0) - (beltOf(b).sort || 0)).map(short).join(', ') : 'All belts';
+// Booking cut-off: a datetime-local value from an ISO time, and whether bookings have closed for a day
+const localInput = iso => { const t = new Date(iso); return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
+const whenText = iso => new Date(iso).toLocaleString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+const bookingShut = d => !!(d && d.book_by && new Date(d.book_by) <= new Date());
 const bookingLink = e => location.origin + APP_BASE + 'book/#t=' + e.token;
 // A family's grading photo: a short link so the text fits in one SMS (opens photo/ with the code)
 const photoLink = e => e.photo_code ? location.origin + '/p#' + e.photo_code : location.origin + APP_BASE + 'photo/#t=' + e.token;
@@ -752,7 +757,9 @@ function openDayForm(d = null) {
     <div class="dlg-head"><h3>${d ? 'Edit grading day' : 'New grading day'}</h3><button class="x" data-close>Close</button></div>
     <div class="grid2"><div class="field"><label for="dSchool">School</label><select id="dSchool">${SCHOOLS.map(s => `<option${d && d.location === s ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
       <div class="field"><label for="dDate">Date</label><input type="date" id="dDate" required value="${esc(d ? d.grading_date : '')}"></div>
-      <div class="field"><label for="dTime">Start time</label><input type="time" id="dTime" value="${esc(d && d.start_time ? String(d.start_time).slice(0, 5) : '')}"></div></div>
+      <div class="field"><label for="dTime">Start time</label><input type="time" id="dTime" value="${esc(d && d.start_time ? String(d.start_time).slice(0, 5) : '')}"></div>
+      <div class="field"><label for="dBookBy">Bookings close</label><input type="datetime-local" id="dBookBy" value="${esc(d && d.book_by ? localInput(d.book_by) : '')}"></div></div>
+    <p class="hint">After this, booking links stop working and say to call ${esc(state.settings.contact_phone || '(02) 9569 1943')}. Staff can still issue someone a new link. Leave blank to keep bookings open until the day.</p>
     <div class="field"><span class="label">Students from</span>
       <div class="row" id="dFrom" style="gap:6px 14px">${SCHOOLS.map(x => `<label class="row" style="gap:6px;font-weight:400;color:var(--fg);font-size:15px;min-height:36px"><input type="checkbox" value="${x}" ${(d ? daySchools(d) : defaultFrom(SCHOOLS[0])).includes(x) ? 'checked' : ''}> ${x}</label>`).join('')}</div>
       <p class="hint">Tick other schools to let their members grade here (for example Marrickville members grading at Concord). Sydenham is ticked for Marrickville gradings.</p></div>
@@ -783,7 +790,7 @@ function openDayForm(d = null) {
     const from = $$('#dFrom input:checked').map(c => c.value), here = $('#dSchool').value;
     if (!from.includes(here)) from.unshift(here);
     const mu = $('#dMoveUp');
-    const rec = { ...(d ? {} : { programme: state.programme }), move_up: !!(mu && mu.checked), schools: from.length === 1 ? null : SCHOOLS.filter(x => from.includes(x)), belts: picked.length === state.belts.length ? null : picked, location: $('#dSchool').value, grading_date: $('#dDate').value, start_time: $('#dTime').value || null, efc_session: $('#dSess').value.trim() || null, efc_session_id: $('#dSessId').value.trim() || null, notes: $('#dNotes').value.trim() || null };
+    const rec = { ...(d ? {} : { programme: state.programme }), move_up: !!(mu && mu.checked), schools: from.length === 1 ? null : SCHOOLS.filter(x => from.includes(x)), belts: picked.length === state.belts.length ? null : picked, location: $('#dSchool').value, grading_date: $('#dDate').value, start_time: $('#dTime').value || null, efc_session: $('#dSess').value.trim() || null, efc_session_id: $('#dSessId').value.trim() || null, notes: $('#dNotes').value.trim() || null, book_by: $('#dBookBy').value ? new Date($('#dBookBy').value).toISOString() : null };
     try {
       let id = d && d.day_id;
       if (d) await run(sb.from('cb_days').update(rec).eq('day_id', id), 'Saved');
@@ -823,7 +830,7 @@ function renderDay() {
   const people = list => list.map(e => ({ member_key: e.member_key, entry_id: e.entry_id, e, s: student(e.member_key), d }));
   const needs = {}; es.filter(e => e.result !== 'retest').forEach(e => { needs[toText(e)] = (needs[toText(e)] || 0) + 1; });
   v.innerHTML = `<div class="view-head"><div><button class="x" id="backDays" style="padding:0">‹ Grading days</button><h2>${esc(d.location)} · ${esc(fmtDate(d.grading_date))}</h2>
-      <p class="hint">${d.start_time ? fmtTime(d.start_time) + ' · ' : ''}${d.move_up ? 'Moving up to Taekwondo · ' : ''}${esc(beltsText(d))}${fromText(d) ? ' · ' + esc(fromText(d)) : ''} · ${esc(d.efc_session || 'No EFC session named')}${d.notes ? ' · ' + esc(d.notes) : ''}</p></div>
+      <p class="hint">${d.start_time ? fmtTime(d.start_time) + ' · ' : ''}${d.move_up ? 'Moving up to Taekwondo · ' : ''}${d.book_by ? (bookingShut(d) ? '<b>Bookings closed</b> · ' : 'Bookings close ' + esc(whenText(d.book_by)) + ' · ') : ''}${esc(beltsText(d))}${fromText(d) ? ' · ' + esc(fromText(d)) : ''} · ${esc(d.efc_session || 'No EFC session named')}${d.notes ? ' · ' + esc(d.notes) : ''}</p></div>
       ${canGrade() ? '<button class="btn sm" id="editDay">Edit</button>' : ''}</div>
     <div class="stats">
       <div class="stat"><span class="n">${es.length}</span><span class="l">students</span></div><div class="stat"><span class="n">${n(e => e.invited_at)}</span><span class="l">invited</span></div>
@@ -910,27 +917,56 @@ function openEntry(id) {
     <dl class="kv">
       <dt>Invited</dt><dd>${e.invited_at ? new Date(e.invited_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' }) : 'Not yet'}</dd>
       <dt>Booked in EFC</dt><dd>${e.efc_by_hand && e.booked_at ? (e.efc_by_hand_done_at ? `Booked by hand in EFC ${new Date(e.efc_by_hand_done_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}` : `<span style="color:var(--danger)">Booked here, but visiting from ${esc(s ? s.location : 'another school')}: EFC can't book them into this school's session automatically. Book them in EFC by hand, then press Done in EFC.</span>`) : e.booked_at ? new Date(e.booked_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' }) : e.booking_error ? `<span style="color:var(--danger)">Failed: ${esc(e.booking_error)}${e.paid ? '. They have paid: book them into the EFC session by hand, then press Mark booked.' : ''}</span>` : 'Not yet'}</dd>
-      <dt>Fee</dt><dd>${money(beltOf(e.belt_from).fee) || 'Not set'} ${e.paid ? `<span class="tag ok">Paid${e.paid_how === 'card' ? ' by card' : e.paid_how === 'desk' ? ' at the desk' : ''}</span>` : '<span class="tag warn">Unpaid</span>'}</dd>
+      <dt>Fee</dt><dd>${money(beltOf(e.belt_from).fee) || 'Not set'} ${e.paid ? `<span class="tag ok">Paid ${esc(PAID_HOW[e.paid_how] || '')}</span>` : '<span class="tag warn">Unpaid</span>'}</dd>
       <dt>Result</dt><dd>${e.result ? RESULT[e.result] : '—'}</dd>
       <dt>Photo</dt><dd>${e.photo_path ? `Taken${sentTo('photo', e.entry_id) ? ', texted to the family' : ''}` : e.photo_removed_at ? 'Removed (photos are kept 30 days)' : 'Not yet'}</dd>
       ${s ? `<dt>Parent</dt><dd>${esc([s.guardian_name, s.phone].filter(Boolean).join(' · ') || '—')}</dd>` : ''}
     </dl>
-    <div class="section"><h3>Booking link</h3><p class="hint" style="word-break:break-all">${esc(bookingLink(e))}</p><div class="row"><button class="btn sm" id="copyLink">Copy link</button></div></div>
+    <div class="section"><h3>Booking link</h3><p class="hint" style="word-break:break-all">${esc(bookingLink(e))}</p><div class="row"><button class="btn sm" id="copyLink">Copy link</button>${canGrade() && !e.result && !(e.booked_at && e.paid) ? '<button class="btn sm" id="newLink">Issue new link</button>' : ''}</div>
+      ${e.late_ok_until && new Date(e.late_ok_until) > new Date() ? `<p class="hint">Late booking allowed until ${esc(whenText(e.late_ok_until))}.</p>` : bookingShut(d) && !e.booked_at ? '<p class="hint">Bookings have closed for this day. Issue a new link to let them book or pay late (it works for 48 hours; the old link stops working).</p>' : ''}</div>
     ${e.photo_path ? `<div class="section"><h3>Photo link</h3><p class="hint" style="word-break:break-all">${esc(photoLink(e))}</p><div class="row"><button class="btn sm" id="copyPhoto">Copy link</button></div></div>` : ''}
     <div class="section"><div class="row">
-      ${canPay() && !(e.paid && e.paid_how === 'card') ? `<button class="btn" id="paidBtn">${e.paid ? 'Mark unpaid' : 'Mark paid'}</button>` : ''}
+      ${canPay() && !e.paid ? '<button class="btn primary" id="recordPay">Record payment</button>' : ''}
+      ${canPay() && e.paid && e.paid_how !== 'card' ? '<button class="btn" id="paidBtn">Mark unpaid</button>' : ''}
       ${canGrade() && e.booked_at ? '<button class="btn" id="unbook">Clear booking</button>' : ''}
       ${canGrade() && !e.booked_at ? '<button class="btn" id="markBooked">Mark booked</button>' : ''}
       ${canGrade() && e.efc_by_hand && !e.efc_by_hand_done_at ? '<button class="btn primary" id="byHandDone">Done in EFC</button>' : ''}
       ${canGrade() && !e.result ? '<button class="btn danger" id="removeEntry">Take off this day</button>' : ''}</div></div>
   </div>`);
   $('#copyLink').onclick = async () => { try { await navigator.clipboard.writeText(bookingLink(e)); toast('Link copied'); } catch (er) { toast('Press and hold the link to copy it.'); } };
+  const nl = $('#newLink'); if (nl) nl.onclick = async () => {
+    if (!confirm(`Issue ${e.full_name} a new booking link? The old link stops working, and the new one works for 48 hours even after bookings close.`)) return;
+    const token = [...crypto.getRandomValues(new Uint8Array(32))].map(b => b.toString(16).padStart(2, '0')).join('');
+    try {
+      await run(sb.from('cb_entries').update({ token, late_ok_until: new Date(Date.now() + 48 * 3600 * 1000).toISOString() }).eq('entry_id', e.entry_id), 'New link issued');
+      await loadAll(); render();
+      const ne = state.entries.find(x => x.entry_id === e.entry_id);
+      try { await navigator.clipboard.writeText(bookingLink(ne)); toast('New link issued and copied'); } catch (er) { /* show it instead */ }
+      composeTexts('not_booked', [{ member_key: ne.member_key, entry_id: ne.entry_id, e: ne, s: student(ne.member_key), d }]);
+    } catch (er) { toast(errMsg(er), 6000); }
+  };
   const cp = $('#copyPhoto'); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(photoLink(e)); toast('Link copied'); } catch (er) { toast('Press and hold the link to copy it.'); } };
+  const rp = $('#recordPay'); if (rp) rp.onclick = () => recordPayment(e);
   const p = $('#paidBtn'); if (p) p.onclick = async () => { try { await run(sb.rpc('cb_set_paid', { p_entry: e.entry_id, p_paid: !e.paid }), e.paid ? 'Marked unpaid' : 'Marked paid'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
   const bh = $('#byHandDone'); if (bh) bh.onclick = async () => { try { await run(sb.from('cb_entries').update({ efc_by_hand_done_at: new Date().toISOString() }).eq('entry_id', e.entry_id), 'Ticked off'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
   const mb = $('#markBooked'); if (mb) mb.onclick = async () => { try { await run(sb.from('cb_entries').update({ booked_at: new Date().toISOString(), booking_error: null }).eq('entry_id', e.entry_id), 'Marked booked'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
   const u = $('#unbook'); if (u) u.onclick = async () => { try { await run(sb.from('cb_entries').update({ booked_at: null }).eq('entry_id', e.entry_id), 'Booking cleared (cancel it in EFC too)'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
   const r = $('#removeEntry'); if (r) r.onclick = async () => { try { await run(sb.from('cb_entries').delete().eq('entry_id', e.entry_id), 'Taken off this day'); dlg.close(); await loadAll(); render(); } catch (er) { toast(errMsg(er), 6000); } };
+}
+// A payment taken by staff: marks them paid, then books the EFC session like a card payment
+function recordPayment(e) {
+  openDlg(`<form id="rpForm" class="dlg"><div class="dlg-head"><div><h3>Record payment</h3><p class="hint">${esc(e.full_name)} · ${money(beltOf(e.belt_from).fee) || 'fee not set'}</p></div><button class="x" data-close>Close</button></div>
+    <div class="field"><span class="label">How did they pay?</span><div class="row" id="rpHow" style="gap:6px 14px">${[['cash', 'Cash'], ['eftpos', 'EFTPOS'], ['transfer', 'Bank transfer'], ['other', 'Other']].map(([k, t], i) => `<label class="row" style="gap:6px;font-weight:400;min-height:40px"><input type="radio" name="rpHow" value="${k}" ${i === 1 ? 'checked' : ''}> ${t}</label>`).join('')}</div></div>
+    <p class="hint">${e.booked_at ? 'They are already booked.' : 'This also books them into the EFC session (or flags it to do by hand for a student from another school).'}</p>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" id="rpGo" type="submit">Record payment</button></div></form>`);
+  $('#rpForm').onsubmit = async ev => {
+    ev.preventDefault(); $('#rpGo').disabled = true; $('#rpGo').textContent = 'Saving…';
+    try {
+      const r = await fnCall({ action: 'record_payment', entry_id: e.entry_id, how: ($('#rpForm input[name=rpHow]:checked') || {}).value });
+      toast(r.booked ? (r.byHand ? 'Payment recorded. Book them in EFC by hand.' : 'Payment recorded and booked') : `Payment recorded. Booking failed: ${r.booking_error || 'check Settings'}`, 6000);
+      dlg.close(); await loadAll(); render(); openEntry(e.entry_id);
+    } catch (er) { toast(errMsg(er), 6000); $('#rpGo').disabled = false; $('#rpGo').textContent = 'Record payment'; }
+  };
 }
 // Results on a tablet: one card per student, three big buttons
 function renderResults(d, es) {
@@ -1262,6 +1298,8 @@ function renderSettings() {
     <form id="msgForm" class="card"><h3>Messages</h3>
       <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {photo} {distinction} {note}. You can still change the wording before each send.</p>
       ${Object.keys(KIND_TPL).map(k => `<div class="field"><label for="tpl_${k}">${esc(KIND_NAME[k].replace(/ messages$/, ''))}</label><textarea id="tpl_${k}" data-col="${KIND_TPL[k]}" rows="3">${esc(st[KIND_TPL[k]] || '')}</textarea><p class="hint">${esc(KIND_HELP[k])}</p></div>`).join('')}
+      <div class="field"><label for="sPhone">Phone number for families</label><input type="tel" id="sPhone" value="${esc(st.contact_phone || '(02) 9569 1943')}">
+        <p class="hint">Shown when a booking link has expired or bookings have closed ("Please call us on ...").</p></div>
       <div class="field"><label for="sHook">Booking sheet (Google Apps Script web app address)</label><input type="url" id="sHook" value="${esc(st.booking_webhook || '')}" placeholder="https://script.google.com/macros/s/.../exec">
         <p class="hint">When a family pays by card or presses Book, the booking is added as a row to your Google Sheet, and a Zap (Google Sheets "New Spreadsheet Row" to EFC Aquila "Book Session") books the EFC session. Set it up with <a href="https://github.com/theggatonklenner/theggatonklenner.github.io/blob/main/tools/booking-sheet.gs" target="_blank" rel="noopener">the booking sheet script</a>, then paste its web app address here. A Zapier Catch Hook address also works.</p>
         <div class="row" style="align-items:center"><span class="hint">Key for the script:</span><code id="sKey" style="user-select:all">${esc(st.booking_key || 'run coloured-belts-7.sql')}</code><button type="button" class="btn sm" id="copyKey">Copy key</button></div></div>
@@ -1281,7 +1319,7 @@ function renderSettings() {
     const hook = $('#sHook').value.trim();
     if (hook && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(hook) && !/^https:\/\/hooks\.zapier\.com\//.test(hook)) return toast('The booking sheet address should look like https://script.google.com/macros/s/.../exec (or a Zapier hook address)', 7000);
     const tpl = {}; $$('#msgForm textarea[data-col]').forEach(t => { if (t.value.trim()) tpl[t.dataset.col] = t.value.trim(); });
-    try { await run(sb.from('cb_settings').update({ ...tpl, booking_webhook: hook || null, updated_at: new Date().toISOString() }).eq('id', 1), 'Saved'); await loadAll(); }
+    try { await run(sb.from('cb_settings').update({ ...tpl, booking_webhook: hook || null, contact_phone: $('#sPhone').value.trim() || '(02) 9569 1943', updated_at: new Date().toISOString() }).eq('id', 1), 'Saved'); await loadAll(); }
     catch (er) { toast(errMsg(er), 6000); }
   };
   $('#copyKey').onclick = async () => { try { await navigator.clipboard.writeText(st.booking_key || ''); toast('Key copied'); } catch (e) { toast('Press and hold the key to copy it.'); } };

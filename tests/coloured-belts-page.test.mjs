@@ -71,13 +71,15 @@ async function open(email, path = '/grading/coloured-belts/index.html') {
       for (const it of b.items) await q(`insert into cb_messages (entry_id, member_key, kind, body, status) values (${it.entry_id ? `'${it.entry_id}'` : 'null'}, '${it.member_key}', '${b.kind}', $1, 'test')`, [it.body]);
       return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ sent: b.items.length, results: b.items.map(() => ({ ok: true })), testing: true }) });
     }
+    if (b.action === 'record_payment') { await q(`update cb_entries set paid = true, paid_at = now(), paid_how = $1 where entry_id = $2`, [b.how, b.entry_id]); return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, booked: true }) }); }
     if (b.action === 'photo') return r.fulfill({ contentType: 'application/json', body: JSON.stringify(b.token === 'none' || b.code === 'none' ? { ok: true, first: 'Kim', photo: false, error: 'The photo isn\'t ready yet. Please check again soon.' } : { ok: true, first: 'Sam', belt_to: 'Orange Belt', school: 'Marrickville', date: '2030-11-14', photo: true, url: BASE + '/icons/black-belt-prep.png', download: BASE + '/icons/black-belt-prep.png', filename: 'Sam-Lee-AMA-grading.jpg' }) });
     // Card payments on the booking page: token "c...c" can pay by card, "e...e" has paid by card and is booked
     const base = { ok: true, first: 'Sam', belt_to: 'Orange Belt', date: '2026-11-14', time: '10:00', school: 'Marrickville', fee: 55, closed: false };
     if (b.token === 'c'.repeat(64) && b.action === 'info') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...base, card: true, booked: false, paid: false }) });
     if (b.token === 'c'.repeat(64) && b.action === 'pay') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, url: BASE + '/stripe-checkout-test' }) });
+    if (b.token === '7'.repeat(64)) return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...base, card: true, booked: false, paid: false, booking_closed: true, phone: '(02) 9569 1943' }) });
     if (b.token === 'e'.repeat(64)) return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...base, card: true, booked: true, paid: true, paid_how: 'card' }) });
-    if (b.action === 'info' || b.action === 'book') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, first: 'Sam', belt_to: 'Orange Belt', date: '2026-11-14', time: '10:00', school: 'Marrickville', fee: 55, booked: b.action === 'book', closed: false }) });
+    if (b.action === 'info' || b.action === 'book') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, first: 'Sam', belt_to: 'Orange Belt', date: '2026-11-14', time: '10:00', school: 'Marrickville', fee: null, booked: b.action === 'book', closed: false }) });   // a grading with no fee: the link just books
     r.fulfill({ status: 400, contentType: 'application/json', body: '{"error":"?"}' });
   });
   // Supabase Storage (grading photos): uploads are recorded; signed links point at a test image
@@ -103,6 +105,8 @@ async function open(email, path = '/grading/coloured-belts/index.html') {
 }
 const toastSays = async (page, t) => { await page.waitForFunction(x => { const el = document.querySelector('#toast'); return !el.hidden && el.textContent.includes(x); }, t, { timeout: 5000 }).catch(() => {}); return page.textContent('#toast'); };
 const settle = page => page.waitForTimeout(400);
+// Close a dialog a slow reload may have reopened (e.g. a student's details after saving)
+const noDialog = page => page.evaluate(() => { const d = document.querySelector('#dlg'); if (d && d.open) d.close(); });
 const SHOTS = process.env.SHOT_DIR; const shot = (page, n) => SHOTS ? page.screenshot({ path: join(SHOTS, n + '.png'), fullPage: true }) : null;
 const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await new Promise(r => setTimeout(r, 100)); } return false; };
 
@@ -194,15 +198,32 @@ try {
   await page.waitForSelector('#sendNotBooked'); await page.click('#sendNotBooked'); await page.waitForSelector('#txPrev');
   ok((await page.textContent('#txPrev')).includes('/grading/coloured-belts/book/#t=' + kim.token), 'the reminder to book includes their booking link');
   await page.click('#dlg [data-close]');
+  // Bookings close: then staff can issue someone a new link
+  await q(`update cb_days set book_by = now() - interval '1 hour' where day_id = '${dayId}'`);
+  await page.evaluate(() => loadAll().then(render)); await settle(page);
+  ok((await page.textContent('#view-day')).includes('Bookings closed'), 'after the closing time, the grading day says bookings are closed');
+  await page.click('#entryList [data-entry]:has-text("Kim Ng")'); await page.waitForSelector('#newLink');
+  ok((await page.textContent('#dlg')).includes('Bookings have closed for this day'), 'a student who hasn\'t booked can be issued a new link');
+  await page.click('#newLink');
+  ok(await until(async () => { const k = (await q(`select token, late_ok_until from cb_entries where member_key = 'efc:m2'`))[0]; return k.token !== kim.token && k.late_ok_until; }), 'Issue new link replaces their link (the old one stops working) and lets them book late for 48 hours');
+  const kim2 = (await q(`select token from cb_entries where member_key = 'efc:m2'`))[0];
+  await page.waitForSelector('#txPrev');
+  ok((await page.textContent('#txPrev')).includes('#t=' + kim2.token), '...and offers to text them the new link');
+  await page.click('#dlg [data-close]');
+  kim.token = kim2.token;
+  await q(`update cb_days set book_by = null where day_id = '${dayId}'`);
+  await page.evaluate(() => loadAll().then(render)); await settle(page);
   await shot(page, 'cb-day');
   const gr = await page.textContent('#view-day');
   ok(gr.includes('Getting ready') && /Orange Belt\s*1\s*1/.test(await page.textContent('#view-day table')), 'Getting ready counts the belts and certificates needed');
 
   console.log('\nPaid, results, certificates');
-  await page.click('#entryList [data-entry]:has-text("Sam Lee")'); await page.waitForSelector('#paidBtn');
-  await page.click('#paidBtn'); await toastSays(page, 'Marked paid');
+  await page.click('#entryList [data-entry]:has-text("Sam Lee")'); await page.waitForSelector('#recordPay');
+  await page.click('#recordPay'); await page.waitForSelector('#rpForm');
+  await page.check('#rpForm input[value="cash"]'); await page.click('#rpGo'); await toastSays(page, 'Payment recorded');
+  ok(fnCalls.some(c => c.action === 'record_payment' && c.how === 'cash'), 'staff record a payment taken in person (cash, EFTPOS...) through the cb function');
   ok((await q(`select paid from cb_entries where member_key = 'efc:m1'`))[0].paid === true, 'paid can be ticked');
-  ok((await page.textContent('#dlg')).includes('Paid at the desk') || await until(async () => (await page.textContent('#dlg')).includes('Paid at the desk')), '...and shows it was paid at the desk');
+  ok(await until(async () => (await page.textContent('#dlg').catch(() => '')).includes('Paid (cash)')), '...and it shows how they paid');
   await settle(page); await page.click('#dlg [data-close]');
   await page.click('#resultsBtn'); await page.waitForSelector('.res');
   ok(new URL(page.url()).pathname.endsWith(dayId + '/results'), 'results have their own address too (.../results)');
@@ -317,7 +338,7 @@ try {
   ok(kid && kid.full_name === 'New Kid' && kid.belt === 'Yellow Belt' && kid.location === 'Marrickville', 'a new student is added with their belt and school');
   ok(!(await q(`select 1 from efc_members where efc_reference = 'AU-023-7'`)).length && !JSON.stringify(await q(`select * from efc_members`)).includes('asthma'), 'Mini Dragons are left out and medical notes are never stored');
   await page.waitForFunction(() => !document.querySelector('#dlg').open, null, { timeout: 10000 }).catch(async () => console.log('DLG', (await page.textContent('#dlg')).replace(/\s+/g, ' ').slice(0, 300)));
-  await page.click('.tab[data-view="settings"]'); await page.waitForSelector('#beltForm');
+  await settle(page); await noDialog(page); await page.click('.tab[data-view="settings"]'); await page.waitForSelector('#beltForm');
   await page.fill('tr[data-belt="Yellow Belt"] [name=fee]', '55'); await page.fill('tr[data-belt="White Belt"] [name=classes]', '30');
   await page.click('#saveBelts');
   await until(async () => (await q(`select classes_needed from cb_belts where programme = 'Taekwondo' and belt = 'White Belt'`))[0].classes_needed === 30); await page.waitForSelector('#saveBelts:not([disabled])'); await settle(page);
@@ -359,7 +380,7 @@ try {
   const apps = await q(`select programme, status from cb_approvals where member_key = 'efc:m2' order by programme`);
   ok(apps.length === 2 && apps.find(a => a.programme === 'Kung Fu').status === 'ready' && apps.find(a => a.programme === 'Taekwondo').status === 'not_yet', 'ready / not yet is kept per program (Kim: ready in Kung Fu, not yet in Taekwondo)');
   await page.click('#dlg [data-close]');
-  await page.click('.tab[data-view="settings"]'); await page.waitForSelector('#beltForm');
+  await settle(page); await noDialog(page); await page.click('.tab[data-view="settings"]'); await page.waitForSelector('#beltForm');
   ok((await page.textContent('#beltForm')).includes('Each belt: Kung Fu') && (await page.$$('#beltForm tr[data-belt]')).length === 15, 'Settings shows the program\'s own grades (15 for Kung Fu)');
   await page.selectOption('#progSel', 'Taekwondo - Little Dragon');
   await page.click('.tab[data-view="days"]'); await page.click('#newDay'); await page.waitForSelector('#dayForm');
@@ -391,17 +412,20 @@ try {
   ({ ctx, page } = await open(null, '/grading/coloured-belts/book/index.html#t=' + sam.token));
   await page.waitForSelector('#info:not([hidden])');
   const bt = await page.textContent('body');
-  ok(bt.includes("Sam's grading for Orange Belt") && bt.includes('AMA Marrickville') && bt.includes('$55'), 'the family sees the grading, school and fee');
+  ok(bt.includes("Sam's grading for Orange Belt") && bt.includes('AMA Marrickville') && await page.isVisible('#book') && await page.isHidden('#pay'), 'the family sees the grading and school; with no fee, they just press Book');
   await page.click('#book'); await page.waitForSelector('#booked:not([hidden])');
   ok((await page.textContent('#booked')).includes('Booked') && fnCalls.some(c => c.action === 'book' && c.token === sam.token), 'pressing Book books it through the cb function');
   await page.goto('about:blank'); await page.goto(BASE + '/grading/coloured-belts/book/index.html#t=' + 'c'.repeat(64));
   await page.waitForSelector('#info:not([hidden])');
-  ok((await page.textContent('#pay')).includes('Pay $55 and book') && (await page.textContent('#book')).includes('pay at the front desk') && await page.isVisible('#pay') && await page.isVisible('#book'), 'with card payments on, families can pay $55 and book, or book and pay at the front desk');
+  ok((await page.textContent('#pay')).includes('Pay $55 and book') && await page.isHidden('#book') && await page.isVisible('#pay'), 'with a fee, families can only pay by card (no "pay at the desk"); staff record other payments. Families can pay $55 and book, or book and pay at the front desk');
   await Promise.all([page.waitForURL('**/stripe-checkout-test').catch(() => {}), page.click('#pay')]);
   ok(fnCalls.some(c => c.action === 'pay' && c.token === 'c'.repeat(64) && /\/grading\/coloured-belts\/book\/(index\.html)?$/.test(c.back)) && page.url().endsWith('/stripe-checkout-test'), 'Pay goes to Stripe, telling it to come back to this booking page');
   await page.goto('about:blank'); await page.goto(BASE + '/grading/coloured-belts/book/index.html?paid=1#t=' + 'e'.repeat(64));
   await page.waitForSelector('#booked:not([hidden])');
   ok((await page.textContent('#booked')).includes('Paid and booked') && await page.isHidden('#pay') && await page.isHidden('#book') && !page.url().includes('paid=1'), 'back from Stripe, it says paid and booked (and tidies the address)');
+  await page.goto('about:blank'); await page.goto(BASE + '/grading/coloured-belts/book/index.html#t=' + '7'.repeat(64));
+  await page.waitForSelector('#error:not([hidden])');
+  ok((await page.textContent('#error')).includes('Bookings for this grading have closed') && (await page.getAttribute('#error a', 'href')) === 'tel:0295691943' && await page.isHidden('#pay') && await page.isHidden('#book'), 'after closing, the booking page says to call, with a tap-to-call number, and hides Pay and Book');
   await page.goto('about:blank'); await page.goto(BASE + '/grading/coloured-belts/book/index.html');
   await page.waitForSelector('#error:not([hidden])');
   ok((await page.textContent('#error')).includes('missing its code'), 'a link without its code explains what to do');

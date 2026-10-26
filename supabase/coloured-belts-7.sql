@@ -48,3 +48,9 @@ alter table public.cb_settings add column if not exists booking_key text not nul
 -- booking sheet; staff see "Book in EFC by hand" until they tick it off.
 alter table public.cb_entries add column if not exists efc_by_hand boolean not null default false;
 alter table public.cb_entries add column if not exists efc_by_hand_done_at timestamptz;
+
+-- ---------- Bookings close at a set time; late bookings by phone with a new link; receipts ----------
+alter table public.cb_days add column if not exists book_by timestamptz;            -- bookings and payments close (null: open until the day)
+alter table public.cb_entries add column if not exists late_ok_until timestamptz;  -- a new link issued after closing works until then
+alter table public.cb_settings add column if not exists contact_phone text not null default '(02) 9569 1943';
+alter table public.cb_payments add column if not exists receipt_url text;          -- Stripe's receipt for a card payment
