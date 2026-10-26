@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const tmp = join(mkdtempSync(join(tmpdir(), 'cb-')), 'cb.mjs');
 writeFileSync(tmp, readFileSync(join(here, '../supabase/functions/cb/index.ts'), 'utf8'));
-const { handle, phoneE164 } = await import(pathToFileURL(tmp).href);
+const { handle, phoneE164, signatureOk, backTo } = await import(pathToFileURL(tmp).href);
 
 let passed = 0, failed = 0;
 const ok = (c, m) => { if (c) { passed++; console.log('  pass  ' + m); } else { failed++; console.log('  FAIL  ' + m); } };
@@ -25,7 +25,8 @@ const t = {
   efc_members: [{ member_key: 'efc:m1', efc_reference: 'AU-023-1', full_name: 'Sam Lee', guardian_name: 'Pat Lee', phone: '0412 345 678', guardian_phone: null, email: 'pat@example.test', guardian_email: null },
                 { member_key: 'efc:m2', efc_reference: 'AU-256-2', full_name: 'Kim Ng', guardian_name: 'Jo Ng', phone: null, guardian_phone: null, email: null, guardian_email: null }],
   prep_roles: [{ email: 'grader@ama.test', role: 'grading' }, { email: 'coach@ama.test', role: 'instructor' }, { email: 'desk@ama.test', role: 'attendance' }],
-  cb_messages: []
+  cb_messages: [],
+  cb_payments: []
 };
 const db = {
   from(table) {
@@ -57,8 +58,22 @@ const db = {
 const signed = [], removedFiles = [], oldPhotos = [];
 const hooks = [];
 let hookStatus = 200;
+// Stripe stand-in: Checkout sessions are created here and can be marked paid
+const stripeCalls = [], stripeSessions = {};
+let nextSess = 1;
 const http = async (url, opts) => {
   if (url.startsWith('https://hooks.zapier.com/')) { hooks.push(JSON.parse(opts.body)); return new Response('{"status":"success"}', { status: hookStatus }); }
+  if (url.startsWith('https://api.stripe.com/v1/checkout/sessions')) {
+    stripeCalls.push({ url, method: opts.method, body: opts.body ? decodeURIComponent(opts.body) : '', auth: opts.headers.Authorization });
+    if (opts.method === 'POST') {
+      const f = Object.fromEntries(new URLSearchParams(opts.body));
+      const id = 'cs_test_' + nextSess++;
+      stripeSessions[id] = { id, url: 'https://checkout.stripe.test/' + id, payment_status: 'unpaid', amount_total: Number(f['line_items[0][price_data][unit_amount]']), metadata: { kind: f['metadata[kind]'], entry_id: f['metadata[entry_id]'] }, client_reference_id: f.client_reference_id, payment_intent: 'pi_' + id, _form: f };
+      return new Response(JSON.stringify(stripeSessions[id]), { status: 200 });
+    }
+    const id = decodeURIComponent(url.split('/').pop());
+    return new Response(JSON.stringify(stripeSessions[id] || {}), { status: stripeSessions[id] ? 200 : 404 });
+  }
   throw new Error('unexpected ' + url);
 };
 const call = async (body, tok, env = {}) => {
@@ -149,6 +164,55 @@ ok(r.body.ok && r.body.removed === 2 && removedFiles.join() === 'grading-photos/
 ok(t.cb_entries[0].photo_path === null && t.cb_entries[0].photo_removed_at && r.body.cleared === 1, '...and marks the student\'s photo as removed');
 r = await call({ action: 'photo', code: 'Ab3dE9xYz1' });
 ok(r.body.ok && r.body.removed && !r.body.photo && /kept for 30 days/.test(r.body.error), 'the family\'s link then says the photo was removed after 30 days');
+
+
+console.log('\nPay by card, then book (Stripe)');
+const TOKEN3 = 'c'.repeat(64), TOKEN4 = 'd'.repeat(64);
+t.cb_entries.push({ entry_id: 'e3', day_id: 'd1', member_key: 'efc:m1', full_name: 'Sam Lee', belt_from: 'Yellow Belt', belt_to: 'Orange Belt', token: TOKEN3, booked_at: null, booking_error: null, result: null, paid: false, paid_how: null },
+                  { entry_id: 'e4', day_id: 'd1', member_key: 'efc:m1', full_name: 'Sam Lee', belt_from: 'Yellow Belt', belt_to: 'Orange Belt', token: TOKEN4, booked_at: null, booking_error: null, result: null, paid: false, paid_how: null });
+t.cb_settings[0].booking_webhook = 'https://hooks.zapier.com/hooks/catch/1/abc/';
+const STRIPE_ENV = { STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_WEBHOOK_SECRET_GRADING: 'whsec_grading' };
+r = await call({ action: 'info', token: TOKEN3 });
+ok(r.body.card === false && r.body.fee === 55, 'without Stripe set up, the booking page doesn\'t offer card payment');
+r = await call({ action: 'pay', token: TOKEN3 });
+ok(r.status === 409 && /front desk/.test(r.body.error), '...and paying by card says to pay at the front desk');
+r = await call({ action: 'info', token: TOKEN3 }, null, STRIPE_ENV);
+ok(r.body.card === true && r.body.paid === false && r.body.booked === false, 'with Stripe set up and a fee, the family can pay by card');
+r = await call({ action: 'pay', token: TOKEN3, back: 'https://evil.test/steal' }, null, STRIPE_ENV);
+const cs = stripeSessions[Object.keys(stripeSessions).pop()];
+ok(r.body.ok && r.body.url === cs.url && cs.amount_total === 5500 && cs._form['line_items[0][price_data][currency]'] === 'aud' && cs.metadata.kind === 'grading' && cs.metadata.entry_id === 'e3', 'Pay sends them to Stripe for the belt\'s fee ($55, AUD), tagged as a grading payment');
+ok(cs._form.success_url === 'https://theggatonklenner.github.io/grading/coloured-belts/book/?paid=1#t=' + TOKEN3 && !cs._form.success_url.includes('evil'), '...and Stripe only sends them back to AMA\'s own booking page');
+ok(backTo('https://app.australianmartialarts.com.au/grading/coloured-belts/book/') === 'https://app.australianmartialarts.com.au/grading/coloured-belts/book/', '...including on the AMA domain later');
+ok(t.cb_payments.length === 1 && t.cb_payments[0].status === 'pending' && t.cb_payments[0].amount === 55 && !t.cb_entries.find(e => e.entry_id === 'e3').paid, 'a pending payment is recorded; they are not paid until Stripe says so');
+const before = hooks.length;
+const hook = async (obj, secret = 'whsec_grading', type = 'checkout.session.completed') => {
+  const raw = JSON.stringify({ type, data: { object: obj } }), ts = Math.floor(Date.now() / 1000);
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sigHex = [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(ts + '.' + raw)))].map(b => b.toString(16).padStart(2, '0')).join('');
+  const res = await handle(new Request('https://x.test/functions/v1/cb', { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': `t=${ts},v1=${sigHex}` }, body: raw }), db, STRIPE_ENV, http);
+  return { status: res.status, body: await res.json() };
+};
+r = await hook({ ...cs, payment_status: 'paid' }, 'whsec_wrong');
+ok(r.status === 400 && !t.cb_entries.find(e => e.entry_id === 'e3').paid, 'a webhook with the wrong signature is refused');
+r = await hook({ ...cs, payment_status: 'paid' });
+const e3 = t.cb_entries.find(e => e.entry_id === 'e3');
+ok(r.body.received && e3.paid && e3.paid_how === 'card' && t.cb_payments[0].status === 'paid' && t.cb_payments[0].amount === 55, 'when Stripe confirms the payment, they are marked paid by card');
+ok(e3.booked_at && hooks.length === before + 1 && hooks[hooks.length - 1].paid === true && hooks[hooks.length - 1].session_id === 'sess-1' && hooks[hooks.length - 1].member_id === 'm1', '...and the Zap is sent the booking (member, session, school, date) straight away');
+r = await hook({ ...cs, payment_status: 'paid' });
+ok(hooks.length === before + 1 && t.cb_payments.length === 1, 'Stripe sending the same payment twice does not book twice');
+r = await call({ action: 'pay', token: TOKEN3 }, null, STRIPE_ENV);
+ok(r.body.ok === false && /already paid/.test(r.body.error), 'a paid grading cannot be paid again');
+r = await hook({ id: 'cs_polo', payment_status: 'paid', metadata: { order_id: 'o1' } });
+ok(r.body.received && t.cb_payments.length === 1, 'polo shirt payments are ignored here');
+// Coming back from Stripe before the webhook arrives
+r = await call({ action: 'pay', token: TOKEN4 }, null, STRIPE_ENV);
+const cs4 = stripeSessions[Object.keys(stripeSessions).pop()];
+cs4.payment_status = 'paid'; hookStatus = 500;
+r = await call({ action: 'info', token: TOKEN4 }, null, STRIPE_ENV);
+const e4 = t.cb_entries.find(e => e.entry_id === 'e4');
+ok(r.body.paid && e4.paid_how === 'card', 'coming back from Stripe, the page checks with Stripe and shows it paid (even before the webhook)');
+ok(!e4.booked_at && e4.booking_error && r.body.booking_failed, '...and if the Zap fails, it stays paid and the page says the booking needs doing (staff see the error)');
+hookStatus = 200;
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

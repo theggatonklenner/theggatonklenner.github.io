@@ -763,7 +763,7 @@ function openDayForm(d = null) {
     ${isLD() ? `<label class="check"><input type="checkbox" id="dMoveUp" ${d && d.move_up ? 'checked' : ''}> Moving up to Taekwondo (Little Dragon belts grade to Taekwondo Yellow Belt; Master Belt to Orange Belt)</label>` : ''}
     <div class="grid2"><div class="field"><label for="dSess">EFC grading session (name)</label><input type="text" id="dSess" value="${esc(d ? d.efc_session || '' : '')}" placeholder="e.g. Coloured Belt Grading"></div>
       <div class="field"><label for="dSessId">EFC session ID (optional)</label><input type="text" id="dSessId" value="${esc(d ? d.efc_session_id || '' : '')}" autocomplete="off"></div></div>
-    <p class="hint">Families who press Book are booked into this EFC session through your Zap, which is how the fee is charged. If your Zap already picks the session for each school, leave the ID blank.</p>
+    <p class="hint">Families who pay by card or press Book are booked into this EFC session by your booking Zap, so the session ID is needed. Set the session to $0 in EFC: the fee is paid by card here or at the front desk.</p>
     <div class="field"><label for="dNotes">Notes</label><textarea id="dNotes" rows="2">${esc(d ? d.notes || '' : '')}</textarea></div>
     <div class="row" style="justify-content:flex-end">${d ? '<button type="button" class="btn danger" id="dDel">Delete</button>' : ''}<button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit" id="dGo">${d ? 'Save' : 'Add'}</button></div>
   </form>`);
@@ -841,7 +841,7 @@ function renderDay() {
       <select id="dfSort" aria-label="Order">${Object.entries(SORTS).map(([k, t]) => `<option value="${k}"${k === dayFilt.sort ? ' selected' : ''}>${t}</option>`).join('')}</select></div>` : ''}
     <ul class="list" id="entryList">${shown.length ? shown.map(e => `<li><button class="item" data-entry="${e.entry_id}">${swatch(e.belt_from)}
         <div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(ageText(student(e.member_key)))} · ${esc(short(e.belt_from))} to ${esc(short(toText(e)))}${student(e.member_key) && student(e.member_key).location !== d.location ? ' · from ' + esc(student(e.member_key).location) : ''}${e.booking_error ? ' · <span style="color:var(--danger)">Booking failed</span>' : ''}</div></div>
-        <span class="tags">${e.result ? `<span class="tag ${e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[e.result]}</span>` : ''}${e.booked_at ? '<span class="tag ok">Booked</span>' : e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Not invited</span>'}${e.paid ? '<span class="tag ok">Paid</span>' : e.booked_at ? '<span class="tag warn">Unpaid</span>' : ''}</span></button></li>`).join('') : '<li class="empty">No students on this day yet.</li>'}</ul>
+        <span class="tags">${e.result ? `<span class="tag ${e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[e.result]}</span>` : ''}${e.booked_at ? '<span class="tag ok">Booked</span>' : e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Not invited</span>'}${e.paid ? `<span class="tag ok">Paid${e.paid_how === 'card' ? ' by card' : ''}</span>` : e.booked_at ? '<span class="tag warn">Unpaid</span>' : ''}</span></button></li>`).join('') : '<li class="empty">No students on this day yet.</li>'}</ul>
     ${es.length ? `<div class="card"><h3>Getting ready</h3>
       <p class="hint">New belts and certificates needed (everyone not marked re-test${n(e => e.result) ? '' : ', until results are in'}). EFC doesn't hold belt sizes, so check sizes against the list.</p>
       <table class="grid"><thead><tr><th>Belt</th><th>Belts</th><th>Certificates</th></tr></thead><tbody>${Object.entries(needs).sort((a, b) => (beltOf(a[0]).sort || 99) - (beltOf(b[0]).sort || 99)).map(([b, c]) => `<tr><td>${esc(b)}</td><td>${c}</td><td>${c}</td></tr>`).join('')}</tbody></table>
@@ -909,8 +909,8 @@ function openEntry(id) {
     <div class="dlg-head"><div><h3>${esc(e.full_name)}</h3><p class="hint">${esc(e.belt_from)} to ${esc(toText(e))}</p></div><button class="x" data-close>Close</button></div>
     <dl class="kv">
       <dt>Invited</dt><dd>${e.invited_at ? new Date(e.invited_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' }) : 'Not yet'}</dd>
-      <dt>Booked in EFC</dt><dd>${e.booked_at ? new Date(e.booked_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' }) : e.booking_error ? `<span style="color:var(--danger)">Failed: ${esc(e.booking_error)}</span>` : 'Not yet'}</dd>
-      <dt>Fee</dt><dd>${money(beltOf(e.belt_from).fee) || 'Not set'} ${e.paid ? '<span class="tag ok">Paid</span>' : '<span class="tag warn">Unpaid</span>'}</dd>
+      <dt>Booked in EFC</dt><dd>${e.booked_at ? new Date(e.booked_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' }) : e.booking_error ? `<span style="color:var(--danger)">Failed: ${esc(e.booking_error)}${e.paid ? '. They have paid: book them into the EFC session by hand, then press Mark booked.' : ''}</span>` : 'Not yet'}</dd>
+      <dt>Fee</dt><dd>${money(beltOf(e.belt_from).fee) || 'Not set'} ${e.paid ? `<span class="tag ok">Paid${e.paid_how === 'card' ? ' by card' : e.paid_how === 'desk' ? ' at the desk' : ''}</span>` : '<span class="tag warn">Unpaid</span>'}</dd>
       <dt>Result</dt><dd>${e.result ? RESULT[e.result] : '—'}</dd>
       <dt>Photo</dt><dd>${e.photo_path ? `Taken${sentTo('photo', e.entry_id) ? ', texted to the family' : ''}` : e.photo_removed_at ? 'Removed (photos are kept 30 days)' : 'Not yet'}</dd>
       ${s ? `<dt>Parent</dt><dd>${esc([s.guardian_name, s.phone].filter(Boolean).join(' · ') || '—')}</dd>` : ''}
@@ -918,13 +918,15 @@ function openEntry(id) {
     <div class="section"><h3>Booking link</h3><p class="hint" style="word-break:break-all">${esc(bookingLink(e))}</p><div class="row"><button class="btn sm" id="copyLink">Copy link</button></div></div>
     ${e.photo_path ? `<div class="section"><h3>Photo link</h3><p class="hint" style="word-break:break-all">${esc(photoLink(e))}</p><div class="row"><button class="btn sm" id="copyPhoto">Copy link</button></div></div>` : ''}
     <div class="section"><div class="row">
-      ${canPay() ? `<button class="btn" id="paidBtn">${e.paid ? 'Mark unpaid' : 'Mark paid'}</button>` : ''}
+      ${canPay() && !(e.paid && e.paid_how === 'card') ? `<button class="btn" id="paidBtn">${e.paid ? 'Mark unpaid' : 'Mark paid'}</button>` : ''}
       ${canGrade() && e.booked_at ? '<button class="btn" id="unbook">Clear booking</button>' : ''}
+      ${canGrade() && !e.booked_at ? '<button class="btn" id="markBooked">Mark booked</button>' : ''}
       ${canGrade() && !e.result ? '<button class="btn danger" id="removeEntry">Take off this day</button>' : ''}</div></div>
   </div>`);
   $('#copyLink').onclick = async () => { try { await navigator.clipboard.writeText(bookingLink(e)); toast('Link copied'); } catch (er) { toast('Press and hold the link to copy it.'); } };
   const cp = $('#copyPhoto'); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(photoLink(e)); toast('Link copied'); } catch (er) { toast('Press and hold the link to copy it.'); } };
   const p = $('#paidBtn'); if (p) p.onclick = async () => { try { await run(sb.rpc('cb_set_paid', { p_entry: e.entry_id, p_paid: !e.paid }), e.paid ? 'Marked unpaid' : 'Marked paid'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
+  const mb = $('#markBooked'); if (mb) mb.onclick = async () => { try { await run(sb.from('cb_entries').update({ booked_at: new Date().toISOString(), booking_error: null }).eq('entry_id', e.entry_id), 'Marked booked'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
   const u = $('#unbook'); if (u) u.onclick = async () => { try { await run(sb.from('cb_entries').update({ booked_at: null }).eq('entry_id', e.entry_id), 'Booking cleared (cancel it in EFC too)'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
   const r = $('#removeEntry'); if (r) r.onclick = async () => { try { await run(sb.from('cb_entries').delete().eq('entry_id', e.entry_id), 'Taken off this day'); dlg.close(); await loadAll(); render(); } catch (er) { toast(errMsg(er), 6000); } };
 }
@@ -1259,7 +1261,7 @@ function renderSettings() {
       <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {photo} {distinction} {note}. You can still change the wording before each send.</p>
       ${Object.keys(KIND_TPL).map(k => `<div class="field"><label for="tpl_${k}">${esc(KIND_NAME[k].replace(/ messages$/, ''))}</label><textarea id="tpl_${k}" data-col="${KIND_TPL[k]}" rows="3">${esc(st[KIND_TPL[k]] || '')}</textarea><p class="hint">${esc(KIND_HELP[k])}</p></div>`).join('')}
       <div class="field"><label for="sHook">Booking Zap (Zapier Catch Hook address)</label><input type="url" id="sHook" value="${esc(st.booking_webhook || '')}" placeholder="https://hooks.zapier.com/hooks/catch/...">
-        <p class="hint">When a family presses Book, this Zap gets member_id, efc_ref, date, session_id, location_id, location, student and belt_to, and books the EFC session.</p></div>
+        <p class="hint">Make a Zap: trigger "Webhooks by Zapier: Catch Hook", action "EFC Aquila: Book Session" with Location = location_id, Date = date, Member ID = member_id, Session = session_id (use "Custom" for each). Turn it on and paste the hook address here. It runs when a family pays by card or presses Book.</p></div>
       <div class="row"><button class="btn primary" type="submit" id="saveMsgs">Save</button><button class="btn" type="button" id="checkTexts">Check texting</button></div></form>`;
   $('#beltForm').onsubmit = async e => {
     e.preventDefault(); $('#saveBelts').disabled = true;

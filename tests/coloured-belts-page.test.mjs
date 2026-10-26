@@ -30,6 +30,7 @@ await db.exec(read(join(ROOT, 'supabase/coloured-belts-3.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-4.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-5.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-6.sql')));
+await db.exec(read(join(ROOT, 'supabase/coloured-belts-7.sql')));
 await db.exec(`insert into prep_roles (email, role) values ('tate@ama.test', 'admin') on conflict do nothing; delete from prep_roles where email <> 'tate@ama.test'; insert into prep_roles (email, role) values ('coach@ama.test', 'instructor'), ('desk@ama.test', 'attendance');`);
 // EFC students (made up): Sam and Kim have enough classes; Alex is overdue; Jo is at another school
 await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_name, phone, location, programme, belt, promoted_on, attended_since_promoted, efc_reference) values
@@ -71,6 +72,11 @@ async function open(email, path = '/grading/coloured-belts/index.html') {
       return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ sent: b.items.length, results: b.items.map(() => ({ ok: true })), testing: true }) });
     }
     if (b.action === 'photo') return r.fulfill({ contentType: 'application/json', body: JSON.stringify(b.token === 'none' || b.code === 'none' ? { ok: true, first: 'Kim', photo: false, error: 'The photo isn\'t ready yet. Please check again soon.' } : { ok: true, first: 'Sam', belt_to: 'Orange Belt', school: 'Marrickville', date: '2030-11-14', photo: true, url: BASE + '/icons/black-belt-prep.png', download: BASE + '/icons/black-belt-prep.png', filename: 'Sam-Lee-AMA-grading.jpg' }) });
+    // Card payments on the booking page: token "c...c" can pay by card, "e...e" has paid by card and is booked
+    const base = { ok: true, first: 'Sam', belt_to: 'Orange Belt', date: '2026-11-14', time: '10:00', school: 'Marrickville', fee: 55, closed: false };
+    if (b.token === 'c'.repeat(64) && b.action === 'info') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...base, card: true, booked: false, paid: false }) });
+    if (b.token === 'c'.repeat(64) && b.action === 'pay') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, url: BASE + '/stripe-checkout-test' }) });
+    if (b.token === 'e'.repeat(64)) return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...base, card: true, booked: true, paid: true, paid_how: 'card' }) });
     if (b.action === 'info' || b.action === 'book') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, first: 'Sam', belt_to: 'Orange Belt', date: '2026-11-14', time: '10:00', school: 'Marrickville', fee: 55, booked: b.action === 'book', closed: false }) });
     r.fulfill({ status: 400, contentType: 'application/json', body: '{"error":"?"}' });
   });
@@ -196,7 +202,8 @@ try {
   await page.click('#entryList [data-entry]:has-text("Sam Lee")'); await page.waitForSelector('#paidBtn');
   await page.click('#paidBtn'); await toastSays(page, 'Marked paid');
   ok((await q(`select paid from cb_entries where member_key = 'efc:m1'`))[0].paid === true, 'paid can be ticked');
-  await page.click('#dlg [data-close]');
+  ok((await page.textContent('#dlg')).includes('Paid at the desk') || await until(async () => (await page.textContent('#dlg')).includes('Paid at the desk')), '...and shows it was paid at the desk');
+  await settle(page); await page.click('#dlg [data-close]');
   await page.click('#resultsBtn'); await page.waitForSelector('.res');
   ok(new URL(page.url()).pathname.endsWith(dayId + '/results'), 'results have their own address too (.../results)');
   await page.click('.rescard:has-text("Sam Lee") button[data-r="distinction"]'); await settle(page);
@@ -309,6 +316,7 @@ try {
   const kid = (await q(`select full_name, belt, location, programme from efc_members where efc_reference = 'AU-023-9'`))[0];
   ok(kid && kid.full_name === 'New Kid' && kid.belt === 'Yellow Belt' && kid.location === 'Marrickville', 'a new student is added with their belt and school');
   ok(!(await q(`select 1 from efc_members where efc_reference = 'AU-023-7'`)).length && !JSON.stringify(await q(`select * from efc_members`)).includes('asthma'), 'Mini Dragons are left out and medical notes are never stored');
+  await page.waitForFunction(() => !document.querySelector('#dlg').open, null, { timeout: 10000 }).catch(async () => console.log('DLG', (await page.textContent('#dlg')).replace(/\s+/g, ' ').slice(0, 300)));
   await page.click('.tab[data-view="settings"]'); await page.waitForSelector('#beltForm');
   await page.fill('tr[data-belt="Yellow Belt"] [name=fee]', '55'); await page.fill('tr[data-belt="White Belt"] [name=classes]', '30');
   await page.click('#saveBelts');
@@ -384,7 +392,15 @@ try {
   ok(bt.includes("Sam's grading for Orange Belt") && bt.includes('AMA Marrickville') && bt.includes('$55'), 'the family sees the grading, school and fee');
   await page.click('#book'); await page.waitForSelector('#booked:not([hidden])');
   ok((await page.textContent('#booked')).includes('Booked') && fnCalls.some(c => c.action === 'book' && c.token === sam.token), 'pressing Book books it through the cb function');
-  await page.goto(BASE + '/grading/coloured-belts/book/index.html');
+  await page.goto('about:blank'); await page.goto(BASE + '/grading/coloured-belts/book/index.html#t=' + 'c'.repeat(64));
+  await page.waitForSelector('#info:not([hidden])');
+  ok((await page.textContent('#pay')).includes('Pay $55 and book') && (await page.textContent('#book')).includes('pay at the front desk') && await page.isVisible('#pay') && await page.isVisible('#book'), 'with card payments on, families can pay $55 and book, or book and pay at the front desk');
+  await Promise.all([page.waitForURL('**/stripe-checkout-test').catch(() => {}), page.click('#pay')]);
+  ok(fnCalls.some(c => c.action === 'pay' && c.token === 'c'.repeat(64) && /\/grading\/coloured-belts\/book\/(index\.html)?$/.test(c.back)) && page.url().endsWith('/stripe-checkout-test'), 'Pay goes to Stripe, telling it to come back to this booking page');
+  await page.goto('about:blank'); await page.goto(BASE + '/grading/coloured-belts/book/index.html?paid=1#t=' + 'e'.repeat(64));
+  await page.waitForSelector('#booked:not([hidden])');
+  ok((await page.textContent('#booked')).includes('Paid and booked') && await page.isHidden('#pay') && await page.isHidden('#book') && !page.url().includes('paid=1'), 'back from Stripe, it says paid and booked (and tidies the address)');
+  await page.goto('about:blank'); await page.goto(BASE + '/grading/coloured-belts/book/index.html');
   await page.waitForSelector('#error:not([hidden])');
   ok((await page.textContent('#error')).includes('missing its code'), 'a link without its code explains what to do');
   await page.goto(BASE + '/p/index.html#' + samCode);

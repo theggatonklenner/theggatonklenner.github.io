@@ -6,6 +6,7 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#04794b">
 <title>Book a Grading</title>
+<meta name="referrer" content="no-referrer">
 <link rel="icon" href="../../../icons/ama-id-cards.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -34,6 +35,7 @@
   dt { color: var(--muted); } dd { margin: 0; font-weight: 600; }
   .btn { min-height: 52px; border-radius: 12px; border: 0; background: var(--accent); color: var(--on-accent); font: inherit; font-weight: 700; font-size: 18px; cursor: pointer; }
   .btn:disabled { opacity: .6; cursor: default; }
+  .btn.plain { background: transparent; color: var(--accent); border: 2px solid var(--accent); font-size: 17px; }
   .hint { color: var(--muted); font-size: 15px; margin: 0; }
   .done { background: var(--accent-soft); color: var(--accent); border-radius: 12px; padding: 14px; font-weight: 700; }
   .err { color: var(--danger); margin: 0; }
@@ -48,6 +50,7 @@
       <h1 id="title"></h1>
       <dl id="details"></dl>
       <p class="hint" id="feeNote"></p>
+      <button class="btn" id="pay" hidden>Pay and book</button>
       <button class="btn" id="book">Book this grading</button>
       <div class="done" id="booked" hidden></div>
     </div>
@@ -62,29 +65,50 @@ const token = new URLSearchParams(location.hash.replace(/^#/, '')).get('t') || '
 const fmtDate = d => new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 const fmtTime = t => { if (!t) return ''; const [h, m] = t.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`; };
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-async function call(action) {
-  const r = await fetch(CFG.SUPABASE_URL + '/functions/v1/cb', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CFG.SUPABASE_KEY }, body: JSON.stringify({ action, token }) });
-  return r.json().catch(() => ({ ok: false, error: 'Something went wrong. Please try again.' }));
+async function call(action, extra = {}) {
+  try {
+    const r = await fetch(CFG.SUPABASE_URL + '/functions/v1/cb', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CFG.SUPABASE_KEY }, body: JSON.stringify({ action, token, ...extra }) });
+    return await r.json();
+  } catch (e) { return { ok: false, error: 'Something went wrong. Please try again.' }; }
 }
+let last = null;
 function show(r) {
   $('#loading').hidden = true;
   if (!r.first) { $('#error').textContent = r.error || 'This link isn\'t valid. Ask the front desk for a new one.'; $('#error').hidden = false; return; }
+  last = r;
+  const fee = r.fee != null ? '$' + Number(r.fee).toFixed(r.fee % 1 ? 2 : 0) : '';
   $('#info').hidden = false;
   $('#title').textContent = `${r.first}'s grading for ${r.belt_to}`;
-  $('#details').innerHTML = `<dt>When</dt><dd>${esc(fmtDate(r.date))}${r.time ? ', ' + esc(fmtTime(r.time)) : ''}</dd><dt>Where</dt><dd>AMA ${esc(r.school)}</dd>${r.fee != null ? `<dt>Fee</dt><dd>$${esc(Number(r.fee).toFixed(r.fee % 1 ? 2 : 0))}</dd>` : ''}`;
-  $('#feeNote').textContent = r.booked ? '' : 'Booking adds the grading to your EFC account, where the fee is charged.';
-  $('#book').hidden = !!r.booked || !!r.closed;
-  $('#booked').hidden = !r.booked;
-  $('#booked').textContent = `Booked. See you on ${fmtDate(r.date).split(',')[0]}!`;
-  if (r.closed && !r.booked) { $('#error').textContent = 'This grading has finished.'; $('#error').hidden = false; }
+  $('#details').innerHTML = `<dt>When</dt><dd>${esc(fmtDate(r.date))}${r.time ? ', ' + esc(fmtTime(r.time)) : ''}</dd><dt>Where</dt><dd>AMA ${esc(r.school)}</dd>${fee ? `<dt>Fee</dt><dd>${esc(fee)}${r.paid ? ' (paid)' : ''}</dd>` : ''}`;
+  const open = !r.closed;
+  // Pay by card (books it too), or book now and pay at the front desk
+  $('#pay').hidden = !(open && r.card && !r.paid);
+  $('#pay').textContent = r.booked ? `Pay the ${fee} fee` : `Pay ${fee} and book`;
+  $('#book').hidden = !open || !!r.booked || !!r.paid;
+  $('#book').textContent = r.card ? 'Book now, pay at the front desk' : 'Book this grading';
+  $('#book').classList.toggle('plain', !!r.card);
+  $('#feeNote').textContent = !open || r.paid ? '' : r.card ? (r.booked ? 'Booked. You can pay the fee here by card, or at the front desk.' : 'Paying by card books the grading straight away.') : (r.booked ? '' : 'Pay the grading fee at the front desk.');
+  $('#booked').hidden = !(r.booked || r.paid);
+  $('#booked').textContent = r.paid && r.booked ? `Paid and booked. See you on ${fmtDate(r.date).split(',')[0]}!`
+    : r.paid ? 'Paid, thank you. We\'re booking the grading for you: the front desk will confirm it.'
+    : `Booked. See you on ${fmtDate(r.date).split(',')[0]}!`;
+  if (r.closed && !r.booked && !r.paid) { $('#error').textContent = 'This grading has finished.'; $('#error').hidden = false; }
   if (r.error && r.first) { $('#error').textContent = r.error; $('#error').hidden = false; }
 }
 $('#book').onclick = async () => {
-  $('#book').disabled = true; $('#book').textContent = 'Booking…'; $('#error').hidden = true;
+  $('#book').disabled = true; const was = $('#book').textContent; $('#book').textContent = 'Booking…'; $('#error').hidden = true;
   const r = await call('book');
-  $('#book').disabled = false; $('#book').textContent = 'Book this grading';
+  $('#book').disabled = false; $('#book').textContent = was;
   show(r);
 };
+$('#pay').onclick = async () => {
+  $('#pay').disabled = true; $('#pay').textContent = 'Opening the payment page…'; $('#error').hidden = true;
+  const r = await call('pay', { back: location.origin + location.pathname });
+  if (r.ok && r.url) { location.href = r.url; return; }
+  $('#pay').disabled = false;
+  show({ ...(last || {}), ...r, error: r.error || 'Something went wrong. Please try again.' });
+};
+if (/[?&]paid=1/.test(location.search)) { try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { /* ignore */ } }   // back from Stripe
 (async () => { if (!token) return show({ error: 'This link is missing its code. Open it from the text message you were sent.' }); show(await call('info')); })();
 </script>
 </body>
