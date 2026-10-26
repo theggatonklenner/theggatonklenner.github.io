@@ -32,6 +32,7 @@ Every sign-in page (this site, AMA ID Cards, Black Belt Prep, the TV editor and 
 - On Staff logins, open a person and enter their hub mobile under **Hub sign-in**. Their hub mobile and PIN then sign them in as that login, with the same permissions.
 - `supabase/functions/hub/index.ts` checks the mobile and PIN with the hub, then hands back an ordinary Supabase sign-in. No JWT secret leaves Supabase. `supabase/hub-login.sql` makes the link table. `hub-signin.js` is the shared sign-in option (copies in ama-id-cards/docs and Black-belt-prep-system/docs; keep them the same).
 - Set up once: deploy the `hub` function with JWT verification off, then in **Edge Functions > Secrets** add `HUB_URL` (the hub's Apps Script web app address, ending in /exec) and `HUB_SECRET` (the hub's shared secret).
+- **New staff are added automatically**: the first time someone signs in with a hub mobile and PIN that has no AMA Toolkit login, one is made for them (named from the hub, no permissions). They see "no apps yet" until an admin gives them permissions on Staff logins.
 - Hub sign-ins last as long as the hub's 12-hour session. Switching someone off in the hub signs them out of these apps the next time a page opens.
 
 ## Names, mobiles and logins without an email

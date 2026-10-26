@@ -36,7 +36,10 @@ export function tokenMobile(token) {
   } catch { return ''; }
 }
 
-const NOT_LINKED = "Your hub login isn't linked to the AMA Toolkit yet. Ask an admin to add your mobile on the Staff logins page.";
+// First hub sign-in with no AMA Toolkit login yet: one is made automatically (name from the hub, signs in with the hub
+// mobile and PIN, no permissions until an admin gives them some on Staff logins). Same stand-in email as Staff logins.
+export const hubEmail = m => `hub-${m}@staff.amatoolkit.local`;
+const randomPassword = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), b => b.toString(16).padStart(2, '0')).join('');
 
 // deps: { db (service role client), anon (publishable/anon client), hub(body) -> hub reply, findUser(email) }
 export async function handle(req, deps) {
@@ -69,9 +72,20 @@ export async function handle(req, deps) {
     const mobile9 = tokenMobile(token);
     if (mobile9.length !== 9) return json({ ok: false, error: 'Your hub sign-in has run out. Sign in again.' });
 
-    const { data: link, error: le } = await deps.db.from('hub_logins').select('email').eq('mobile9', mobile9).maybeSingle();
+    let { data: link, error: le } = await deps.db.from('hub_logins').select('email').eq('mobile9', mobile9).maybeSingle();
     if (le) throw le;
-    if (!link) return json({ ok: false, error: NOT_LINKED, name });
+    let created = false;
+    if (!link) {
+      const email = hubEmail(mobile9);
+      if (!(await deps.findUser(email))) {
+        const { error: ce } = await deps.db.auth.admin.createUser({ email, password: randomPassword(), email_confirm: true, user_metadata: { full_name: name || null, hub_only: true } });
+        if (ce) throw ce;
+        created = true;
+      }
+      const { error: ue } = await deps.db.from('hub_logins').upsert({ email, mobile9, updated_at: new Date().toISOString(), updated_by: 'first hub sign-in' }, { onConflict: 'email' });
+      if (ue) throw ue;
+      link = { email };
+    }
     const user = await deps.findUser(link.email);
     if (!user) return json({ ok: false, error: `The linked login (${link.email}) no longer exists. Ask an admin to fix it on the Staff logins page.`, name });
 
@@ -81,7 +95,7 @@ export async function handle(req, deps) {
     const { data: v, error: ve } = await deps.anon.auth.verifyOtp({ type: 'magiclink', token_hash: gl.properties.hashed_token });
     if (ve || !v || !v.session) throw ve || new Error('No session');
     return json({ ok: true, session: { access_token: v.session.access_token, refresh_token: v.session.refresh_token },
-      hub_token: token, name, role, email: link.email });
+      hub_token: token, name, role, email: link.email, created });
   } catch (e) {
     console.error(e);
     return json({ ok: false, error: 'Sign-in failed: ' + String(e && e.message || e) }, 500);

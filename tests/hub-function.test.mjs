@@ -63,7 +63,12 @@ ok(!r.body.ok && r.body.error === 'Mobile or PIN not right.' && !r.body.session,
 r = await call({ mobile: '0412', pin: '1' });
 ok(!r.body.ok && /mobile and PIN/.test(r.body.error), 'missing details are refused before asking the hub');
 r = await call({ mobile: '0498765432', pin: '654321' });
-ok(!r.body.ok && /isn't linked/.test(r.body.error) && r.body.name === 'Jo', 'a hub login with no linked toolkit login is told to ask an admin');
+const jo = 'hub-498765432@staff.amatoolkit.local';
+ok(r.body.ok && r.body.created && r.body.email === jo && r.body.session, 'a first hub sign-in makes their AMA Toolkit login automatically and signs them in');
+ok(db._users.find(u => u.email === jo).user_metadata.full_name === 'Jo' && db._t.hub_logins.some(x => x.email === jo && x.mobile9 === '498765432'), '...named from the hub and linked to their mobile');
+ok(!db._t.prep_roles.some(x => x.email === jo) && !db._t.staff_permissions.some(x => x.email === jo), '...with no permissions until an admin gives them some');
+r = await call({ mobile: '0498765432', pin: '654321' });
+ok(r.body.ok && !r.body.created && db._users.filter(u => u.email === jo).length === 1, 'signing in again uses the same login (no duplicate)');
 r = await call({ mobile: '0400000001', pin: '111111' });
 ok(!r.body.ok && /no longer exists/.test(r.body.error), 'a link to a deleted login is explained');
 
