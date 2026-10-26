@@ -459,16 +459,21 @@ const firstName = n => String(n || '').trim().split(/\s+/)[0] || '';
 const short = b => String(b || '').replace(/ Belt$/, '');
 const money = n => n == null ? '' : '$' + Number(n).toFixed(Number(n) % 1 ? 2 : 0);
 const today = () => new Date().toISOString().slice(0, 10);
-const beltOf = name => state.belts.find(b => b.belt === name) || {};
+// A belt's settings; prog picks the program's belt (belt names repeat across programs in "All programs")
+const beltOf = (name, prog) => (prog && state.belts.find(b => b.belt === name && (b.programme || 'Taekwondo') === prog)) || state.belts.find(b => b.belt === name) || {};
+// "All programs": everything at once (students, grading days, dashboard); adding a day or editing belts needs one program
+const ALL = '*';
+const isAll = () => state.programme === ALL;
+const progOfDay = id => ((state.all.days.find(d => d.day_id === id) || {}).programme) || 'Taekwondo';
 // Programs: Taekwondo, Little Dragons, Kung Fu, Kickboxing, BJJ, BJJ Kids, Tricking (from cb_programmes)
-const progLabel = p => ((state.programmes || []).find(x => x.programme === p) || {}).label || p || '';
+const progLabel = p => p === ALL ? 'All programs' : ((state.programmes || []).find(x => x.programme === p) || {}).label || p || '';
 const isLD = () => /little dragon/i.test(state.programme);
 // The belt someone grades to, with its program when it's another one (Little Dragons moving up to Taekwondo)
-const withProg = (belt, prog) => prog && prog !== state.programme ? `${progLabel(prog)} ${belt}` : belt;
+const withProg = (belt, prog) => prog && prog !== state.programme && !isAll() ? `${progLabel(prog)} ${belt}` : belt;
 const toText = e => withProg(e.belt_to, e.to_programme);
 const sNext = s => withProg(s.next_belt, s.next_programme);
-const swatch = name => `<span class="belt" style="background:${esc(beltOf(name).colour || '#999')}"></span>`;
-const student = key => state.students.find(s => s.member_key === key);
+const swatch = (name, prog) => `<span class="belt" style="background:${esc(beltOf(name, prog).colour || '#999')}"></span>`;
+const student = (key, prog) => state.students.find(s => s.member_key === key && (!prog || (s.programme || 'Taekwondo') === prog));
 const dayOf = id => state.days.find(d => d.day_id === id);
 const entriesOf = id => state.entries.filter(e => e.day_id === id);
 const dayBelts = d => (d && d.belts && d.belts.length) ? d.belts : null;   // null: every belt
@@ -554,12 +559,13 @@ async function loadAll() {
   state.all = { students: st.data || [], belts: be.data || [], days: da.data || [], entries: en.data || [] };
   state.programmes = pr.error || !(pr.data || []).length ? [{ programme: 'Taekwondo', label: 'Taekwondo', active: true }] : pr.data.filter(x => x.active !== false);
   state.settings = (se.data || [])[0] || {}; state.messages = me.data || [];
-  if (!state.programmes.some(x => x.programme === state.programme)) state.programme = state.programmes[0].programme;
+  if (!isAll() && !state.programmes.some(x => x.programme === state.programme)) state.programme = state.programmes[0].programme;
+  if (isAll() && state.programmes.length < 2) state.programme = state.programmes[0].programme;
   applyProgramme();
 }
 // Everything on screen is for one program at a time
 function applyProgramme() {
-  const P = state.programme, of = x => (x.programme || 'Taekwondo') === P;
+  const P = state.programme, of = x => P === ALL || (x.programme || 'Taekwondo') === P;
   state.students = state.all.students.filter(of); state.belts = state.all.belts.filter(of); state.days = state.all.days.filter(of);
   const ids = new Set(state.days.map(d => d.day_id));
   state.entries = state.all.entries.filter(e => ids.has(e.day_id));
@@ -573,7 +579,7 @@ function setProgramme(p) {
 }
 function render() {
   const pb = $('#progBar'); pb.hidden = state.programmes.length < 2;
-  $('#progSel').innerHTML = state.programmes.map(x => `<option value="${esc(x.programme)}"${x.programme === state.programme ? ' selected' : ''}>${esc(x.label)}</option>`).join('');
+  $('#progSel').innerHTML = `<option value="${ALL}"${isAll() ? ' selected' : ''}>All programs</option>` + state.programmes.map(x => `<option value="${esc(x.programme)}"${x.programme === state.programme ? ' selected' : ''}>${esc(x.label)}</option>`).join('');
   $('#progSel').onchange = e => setProgramme(e.target.value);
   $$('#tabs .tab').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.view === (state.view === 'day' ? 'days' : state.view))); b.hidden = b.dataset.admin !== undefined && !isAdmin(); });
   $('#tabs').style.setProperty('--tabs', $$('#tabs .tab:not([hidden])').length);
@@ -623,7 +629,7 @@ function renderReady() {
       </div>
       <p class="hint" id="readyCount"></p>
       <ul class="list" id="readyList"></ul>`;
-    $('#fBelt').innerHTML += state.belts.map(b => `<option value="${esc(b.belt)}">${esc(b.belt)}</option>`).join('');
+    $('#fBelt').innerHTML += [...new Set(state.belts.map(b => b.belt))].map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
     $('#fSort').value = filt.sort;
     const sync = () => { filt.school = $('#fSchool').value; filt.belt = $('#fBelt').value; filt.show = $('#fShow').value; filt.q = $('#fQ').value.trim().toLowerCase(); filt.sort = $('#fSort').value; savePref('sort', filt.sort); drawReady(); };
     ['#fSchool', '#fBelt', '#fShow', '#fSort', '#fQ'].forEach(s => $(s).oninput = sync);
@@ -638,20 +644,21 @@ function drawReady() {
     (show === 'all' || (show === 'eligible' && eligible(s)) || (show === 'ready' && s.approval === 'ready') || (show === 'not_yet' && s.approval === 'not_yet') ||
      (show === 'undecided' && eligible(s) && !s.approval) || (show === 'overdue' && overdue(s)))), filt.sort);
   $('#readyCount').textContent = `${list.length} student${list.length === 1 ? '' : 's'}`;
-  $('#readyList').innerHTML = list.length ? list.slice(0, 400).map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}
-      <div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta"><span>${esc(ageText(s))}</span><span>·</span><span>${esc(s.location)}</span><span>·</span><span>${esc(short(s.belt))} to ${esc(short(sNext(s)))}</span><span>·</span><span>${s.weeks_at_belt ?? '?'} weeks on this belt</span></div></div>
+  $('#readyList').innerHTML = list.length ? list.slice(0, 400).map(s => `<li><button class="item" data-key="${esc(s.member_key)}" data-prog="${esc(s.programme || 'Taekwondo')}">${swatch(s.belt, s.programme)}
+      <div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${isAll() ? `<span>${esc(progLabel(s.programme))}</span><span>·</span>` : ''}<span>${esc(ageText(s))}</span><span>·</span><span>${esc(s.location)}</span><span>·</span><span>${esc(short(s.belt))} to ${esc(short(sNext(s)))}</span><span>·</span><span>${s.weeks_at_belt ?? '?'} weeks on this belt</span></div></div>
       <span class="tags">${readyTags(s)}</span></button></li>`).join('') + (list.length > 400 ? `<li class="empty">Showing the first 400. Narrow it down with the filters.</li>` : '')
     : '<li class="empty">No one matches.</li>';
-  $$('#readyList [data-key]').forEach(b => b.onclick = () => openStudent(b.dataset.key));
+  $$('#readyList [data-key]').forEach(b => b.onclick = () => openStudent(b.dataset.key, b.dataset.prog));
 }
-function openStudent(key) {
-  const s = student(key); if (!s) return;
-  const hist = state.entries.filter(e => e.member_key === key).map(e => ({ e, d: dayOf(e.day_id) })).filter(x => x.d);
+function openStudent(key, prog) {
+  const s = student(key, prog); if (!s) return;
+  const P = s.programme || 'Taekwondo', open = () => openStudent(key, P);
+  const hist = state.entries.filter(e => e.member_key === key && progOfDay(e.day_id) === P).map(e => ({ e, d: dayOf(e.day_id) })).filter(x => x.d);
   openDlg(`<div class="dlg">
-    <div class="dlg-head"><div><h3>${esc(s.full_name)}</h3><p class="hint">${esc(s.location)} · ${esc(s.efc_reference || '')}</p></div><button class="x" data-close>Close</button></div>
+    <div class="dlg-head"><div><h3>${esc(s.full_name)}</h3><p class="hint">${isAll() ? esc(progLabel(P)) + ' · ' : ''}${esc(s.location)} · ${esc(s.efc_reference || '')}</p></div><button class="x" data-close>Close</button></div>
     <dl class="kv">
       <dt>Age</dt><dd>${esc(ageText(s))}${s.date_of_birth ? ` (born ${esc(fmtDate(String(s.date_of_birth).slice(0, 10)))})` : ''}</dd>
-      <dt>Belt</dt><dd>${swatch(s.belt)} ${esc(s.belt)}, grading to <b>${esc(sNext(s))}</b>${s.up_belt && s.up_belt !== s.next_belt ? ` (or ${esc(withProg(s.up_belt, s.up_programme))} when moving up)` : ''}</dd>
+      <dt>Belt</dt><dd>${swatch(s.belt, P)} ${esc(s.belt)}, grading to <b>${esc(sNext(s))}</b>${s.up_belt && s.up_belt !== s.next_belt ? ` (or ${esc(withProg(s.up_belt, s.up_programme))} when moving up)` : ''}</dd>
       <dt>Last grading</dt><dd>${s.promoted_on ? esc(fmtDate(s.promoted_on)) + ` (${s.weeks_at_belt} weeks ago)` : 'Not in EFC'}${overdue(s) ? ' <span class="tag bad">Overdue</span>' : ''}</dd>
       <dt>Classes since</dt><dd><b>${s.classes}</b> of ${s.classes_needed} needed ${s.enough_classes ? '<span class="tag ok">Enough</span>' : `<span class="tag warn">${s.classes_needed - s.classes} more</span>`}</dd>
       ${contactRows(s)}
@@ -667,16 +674,16 @@ function openStudent(key) {
   </div>`);
   const decide = async status => {
     try {
-      if (status) await run(sb.from('cb_approvals').upsert({ member_key: key, programme: state.programme, belt: s.belt, status, note: $('#apNote').value.trim() || null, decided_by: state.me, decided_at: new Date().toISOString() }), status === 'ready' ? 'Marked ready' : 'Marked not yet');
-      else await run(sb.from('cb_approvals').delete().eq('member_key', key).eq('programme', state.programme), 'Cleared');
-      await loadAll(); render(); openStudent(key);
+      if (status) await run(sb.from('cb_approvals').upsert({ member_key: key, programme: P, belt: s.belt, status, note: $('#apNote').value.trim() || null, decided_by: state.me, decided_at: new Date().toISOString() }), status === 'ready' ? 'Marked ready' : 'Marked not yet');
+      else await run(sb.from('cb_approvals').delete().eq('member_key', key).eq('programme', P), 'Cleared');
+      await loadAll(); render(); open();
     } catch (e) { toast(errMsg(e), 6000); }
   };
   const r = $('#apReady'); if (r) r.onclick = () => decide('ready');
   const n = $('#apNot'); if (n) n.onclick = () => decide('not_yet');
   const c = $('#apClear'); if (c) c.onclick = () => decide(null);
   const t = $('#apText'); if (t) t.onclick = () => composeTexts('not_ready', [{ member_key: key, entry_id: null, s, e: null, d: null }]);
-  const ec = $('#editContact'); if (ec) ec.onclick = () => editContact(key, () => openStudent(key));
+  const ec = $('#editContact'); if (ec) ec.onclick = () => editContact(key, open);
 }
 // Parent, mobile and email rows for the student and grading-day screens
 function contactRows(s) {
@@ -774,9 +781,10 @@ function renderDays() {
   const up = state.days.filter(d => !d.closed && d.grading_date >= today()).sort((a, b) => a.grading_date.localeCompare(b.grading_date));
   const past = state.days.filter(d => !up.includes(d));
   const row = d => { const es = entriesOf(d.day_id), n = k => es.filter(k).length;
-    return `<li><button class="item" data-day="${d.day_id}"><div class="main"><div class="name">${esc(fmtDate(d.grading_date))}${d.start_time ? ' · ' + fmtTime(d.start_time) : ''}</div><div class="meta"><span>${esc(d.location)}</span><span>·</span><span>${esc(beltsText(d))}</span>${d.move_up ? '<span>·</span><span>Moving up to Taekwondo</span>' : ''}${fromText(d) ? `<span>·</span><span>${esc(fromText(d))}</span>` : ''}${d.efc_session ? `<span>·</span><span>${esc(d.efc_session)}</span>` : ''}</div></div>
+    return `<li><button class="item" data-day="${d.day_id}"><div class="main"><div class="name">${isAll() ? `<span class="tag info" style="margin-right:6px">${esc(progLabel(d.programme || 'Taekwondo'))}</span>` : ''}${esc(fmtDate(d.grading_date))}${d.start_time ? ' · ' + fmtTime(d.start_time) : ''}</div><div class="meta"><span>${esc(d.location)}</span><span>·</span><span>${esc(beltsText(d))}</span>${d.move_up ? '<span>·</span><span>Moving up to Taekwondo</span>' : ''}${fromText(d) ? `<span>·</span><span>${esc(fromText(d))}</span>` : ''}${d.efc_session ? `<span>·</span><span>${esc(d.efc_session)}</span>` : ''}</div></div>
       <span class="tags"><span class="tag">${es.length} students</span>${es.length ? `<span class="tag info">${n(e => e.invited_at)} invited</span><span class="tag ok">${n(e => e.booked_at)} booked</span>` : ''}${n(e => e.result) ? `<span class="tag ok">${n(e => e.result)} results</span>` : ''}${d.closed ? '<span class="tag">Finished</span>' : ''}</span></button></li>`; };
-  v.innerHTML = `<div class="view-head"><h2>Grading days</h2>${canGrade() ? '<button class="btn primary sm" id="newDay">New grading day</button>' : ''}</div>
+  v.innerHTML = `<div class="view-head"><h2>Grading days</h2>${canGrade() && !isAll() ? '<button class="btn primary sm" id="newDay">New grading day</button>' : ''}</div>
+    ${isAll() && canGrade() ? '<p class="hint">Every program\'s grading days. To add one, choose its program at the top.</p>' : ''}
     <h3>Coming up</h3><ul class="list">${up.length ? up.map(row).join('') : '<li class="empty">No grading days coming up.</li>'}</ul>
     ${past.length ? `<h3>Earlier</h3><ul class="list">${past.map(row).join('')}</ul>` : ''}`;
   $$('#view-days [data-day]').forEach(b => b.onclick = () => go('day', b.dataset.day));
@@ -838,7 +846,7 @@ function openDayForm(d = null) {
 const dayFilt = { belt: '', sort: pref('day_sort', 'age') };
 function renderDay() {
   // A day from another program (e.g. an address someone was sent): switch to that program
-  if (!dayOf(state.day)) { const other = state.all.days.find(x => x.day_id === state.day); if (other) { state.programme = other.programme || 'Taekwondo'; savePref('programme', state.programme); applyProgramme(); $('#view-ready').dataset.built = ''; return render(); } }
+  if (isAll() || !dayOf(state.day)) { const other = state.all.days.find(x => x.day_id === state.day); if (other) { state.programme = other.programme || 'Taekwondo'; savePref('programme', state.programme); applyProgramme(); $('#view-ready').dataset.built = ''; return render(); } }
   const d = dayOf(state.day), v = $('#view-day');
   if (!d) return go('days');
   if (dayFilt.day !== d.day_id) { dayFilt.day = d.day_id; dayFilt.belt = ''; }
@@ -1221,7 +1229,7 @@ function mapImport(raw, school) {
   const rows = [], other = [];
   for (const r of raw) {
     const progRaw = String(get(r, 'programme') || '').trim();
-    const prog = progRaw ? progName(progRaw) : state.programme;   // no program column: the program chosen at the top
+    const prog = progRaw ? progName(progRaw) : isAll() ? 'Taekwondo' : state.programme;   // no program column: the program chosen at the top (Taekwondo in All programs)
     if (!prog) { other.push(r); continue; }   // Mini Dragons, clubs and other programs aren't graded here
     const parent = String(get(r, 'guardian_name') || '').trim() || [get(r, 'contact_first'), get(r, 'contact_last')].map(x => String(x || '').trim()).filter(Boolean).join(' ');
     const num = v => { const n = parseInt(String(v ?? '').replace(/[^\d]/g, ''), 10); return isNaN(n) ? '' : n; };
@@ -1293,12 +1301,12 @@ function renderDash() {
   const days = state.days.filter(d => inSchool(d.location)), ids = new Set(days.map(d => d.day_id));
   const es = state.entries.filter(e => ids.has(e.day_id));
   const results = es.filter(e => e.result), passes = results.filter(e => e.result !== 'retest');
-  const revenue = es.filter(e => e.paid).reduce((t, e) => t + Number(beltOf(e.belt_from).fee || 0), 0);
+  const revenue = es.filter(e => e.paid).reduce((t, e) => t + Number(beltOf(e.belt_from, progOfDay(e.day_id)).fee || 0), 0);
   const st = state.students.filter(s => inSchool(s.location));
   const od = st.filter(s => overdue(s) && !openDayFor(s.member_key));
   const ready = st.filter(s => s.approval === 'ready' && !openDayFor(s.member_key));
   const months = {}; results.forEach(e => { const d = dayOf(e.day_id); const k = d.grading_date.slice(0, 7); months[k] = months[k] || { n: 0, p: 0, r: 0 }; months[k].n++; if (e.result !== 'retest') months[k].p++; });
-  es.filter(e => e.paid).forEach(e => { const k = dayOf(e.day_id).grading_date.slice(0, 7); months[k] = months[k] || { n: 0, p: 0, r: 0 }; months[k].r += Number(beltOf(e.belt_from).fee || 0); });
+  es.filter(e => e.paid).forEach(e => { const k = dayOf(e.day_id).grading_date.slice(0, 7); months[k] = months[k] || { n: 0, p: 0, r: 0 }; months[k].r += Number(beltOf(e.belt_from, progOfDay(e.day_id)).fee || 0); });
   const mname = k => new Date(k + '-01T00:00:00').toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
   v.innerHTML = `<div class="view-head"><h2>Dashboard</h2><select id="dashSchool" aria-label="School" style="width:auto"><option value="">All schools</option>${SCHOOLS.map(s => `<option${s === school ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
     <div class="stats">
@@ -1309,16 +1317,17 @@ function renderDash() {
       <div class="stat"><span class="n" style="color:${od.length ? 'var(--danger)' : 'inherit'}">${od.length}</span><span class="l">overdue for a grading</span></div></div>
     <div class="card"><h3>Each month</h3>${Object.keys(months).length ? `<table class="grid"><thead><tr><th>Month</th><th>Graded</th><th>Passed</th><th>Pass rate</th><th>Fees paid</th></tr></thead><tbody>${Object.keys(months).sort().reverse().map(k => `<tr><td>${esc(mname(k))}</td><td>${months[k].n}</td><td>${months[k].p}</td><td>${months[k].n ? Math.round(months[k].p / months[k].n * 100) + '%' : '—'}</td><td>${money(months[k].r)}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No results yet.</p>'}</div>
     <div class="card"><h3>Overdue for a grading</h3><p class="hint">On their belt at least twice as long as usual, and not on a grading day. A long gap is often a sign a student is about to drop off.</p>
-      ${od.length ? `<ul class="list">${od.sort((a, b) => b.weeks_at_belt - a.weeks_at_belt).slice(0, 50).map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}<div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(s.location)} · ${esc(short(s.belt))} · ${s.weeks_at_belt} weeks · ${s.classes} classes</div></div></button></li>`).join('')}</ul>` : '<p class="hint">No one is overdue.</p>'}</div>`;
+      ${od.length ? `<ul class="list">${od.sort((a, b) => b.weeks_at_belt - a.weeks_at_belt).slice(0, 50).map(s => `<li><button class="item" data-key="${esc(s.member_key)}" data-prog="${esc(s.programme || 'Taekwondo')}">${swatch(s.belt, s.programme)}<div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${isAll() ? esc(progLabel(s.programme)) + ' · ' : ''}${esc(s.location)} · ${esc(short(s.belt))} · ${s.weeks_at_belt} weeks · ${s.classes} classes</div></div></button></li>`).join('')}</ul>` : '<p class="hint">No one is overdue.</p>'}</div>`;
   $('#dashSchool').onchange = () => { v.dataset.school = $('#dashSchool').value; renderDash(); };
-  $$('#view-dash [data-key]').forEach(b => b.onclick = () => openStudent(b.dataset.key));
+  $$('#view-dash [data-key]').forEach(b => b.onclick = () => openStudent(b.dataset.key, b.dataset.prog));
 }
 
 /* ---------------- Settings (admins) ---------------- */
 function renderSettings() {
   const v = $('#view-settings'), st = state.settings;
   v.innerHTML = `<div class="view-head"><h2>Settings</h2></div>
-    <form id="beltForm" class="card"><h3>Each belt: ${esc(progLabel(state.programme))}</h3>
+    ${isAll() ? '<div class="card"><h3>Each belt</h3><p class="hint">Belt settings are per program. Choose a program at the top to change its classes needed, weeks between and fees.</p></div>' : ''}
+    <form id="beltForm" class="card"${isAll() ? ' hidden' : ''}><h3>Each belt: ${esc(progLabel(state.programme))}</h3>
       <p class="hint">Classes needed since their last grading (from EFC), the usual weeks between gradings (twice this is "overdue"), and the grading fee shown in invitations. EFC charges the fee through the grading session.</p>
       <div style="overflow-x:auto"><table class="grid"><thead><tr><th>Belt</th><th>Grades to</th><th>Classes needed</th><th>Weeks between</th><th>Fee ($)</th></tr></thead><tbody>
       ${state.belts.map(b => `<tr data-belt="${esc(b.belt)}"><td>${swatch(b.belt)} ${esc(short(b.belt))}</td><td>${esc(short(withProg(b.next_belt, b.next_programme)))}${b.up_belt && b.up_belt !== b.next_belt ? ' (moving up: ' + esc(withProg(b.up_belt, b.up_programme)) + ')' : ''}</td>

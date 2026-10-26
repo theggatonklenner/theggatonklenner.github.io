@@ -381,7 +381,16 @@ try {
   await q(`insert into efc_members (member_key, kind, full_name, location, programme, efc_reference) values ('efc:m7', 'member', 'Lily Dragon', 'Marrickville', 'Taekwondo - Little Dragon', 'AU-023-7'), ('efc:m8', 'member', 'Max Dragon', 'Marrickville', 'Taekwondo - Little Dragon', 'AU-023-8')`);
   await q(`insert into efc_grades (member_key, programme, belt, promoted_on, attended_since_promoted) values ('efc:m7', 'Taekwondo - Little Dragon', 'Red/Black Belt', current_date - 100, 30), ('efc:m8', 'Taekwondo - Little Dragon', 'Master Belt', current_date - 100, 30)`);
   await page.goto(BASE + '/grading/coloured-belts/ready'); await page.waitForSelector('#progSel');
-  ok((await page.$$eval('#progSel option', os => os.map(o => o.textContent))).join() === 'Taekwondo,Little Dragons,Kung Fu,Kickboxing,BJJ,BJJ Kids,Tricking', 'a program switcher lists every program');
+  ok((await page.$$eval('#progSel option', os => os.map(o => o.textContent))).join() === 'All programs,Taekwondo,Little Dragons,Kung Fu,Kickboxing,BJJ,BJJ Kids,Tricking', 'a program switcher lists every program, and All programs');
+  await page.selectOption('#progSel', '*'); await page.waitForSelector('#readyList');
+  let allp = await page.textContent('#readyList');
+  ok(allp.includes('Kung Fu') && allp.includes('Yellow Sash') && allp.includes('Sam Lee') && (await page.title()).includes('All programs'), 'All programs shows every program\'s students together, each labelled with its program');
+  await page.click('#readyList [data-key="efc:m2"][data-prog="Kung Fu"]'); await page.waitForSelector('#apReady');
+  ok((await page.textContent('#dlg')).includes('Kung Fu') && (await page.textContent('#dlg')).includes('Yellow Sash'), '...and opening a student shows them in that program');
+  await page.click('#dlg [data-close]'); await settle(page);
+  await page.click('.tab[data-view="days"]'); await page.waitForSelector('#view-days h2');
+  ok(!(await page.$('#newDay')) && (await page.textContent('#view-days')).includes('choose its program'), 'in All programs, grading days from every program are listed; adding one asks for a program');
+  await page.click('.tab[data-view="ready"]');
   await page.selectOption('#progSel', 'Kung Fu'); await page.waitForSelector('#readyList');
   let kf = await page.textContent('#readyList');
   ok(kf.includes('Kim Ng') && kf.includes('Yellow Sash to Yellow Stripe') && !kf.includes('Sam Lee'), 'Kung Fu shows its own students and grades (Kim: Yellow Sash to Yellow Stripe)');
