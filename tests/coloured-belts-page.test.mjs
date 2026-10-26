@@ -1,5 +1,5 @@
 // Browser test for coloured belt grading (/grading/coloured-belts/), the booking page and the /grading/ hub.
-// Uses Black Belt Prep's test stand-in for Supabase (a real Postgres in memory) with supabase/coloured-belts.sql.
+// Uses Black Belt Gradings's test stand-in for Supabase (a real Postgres in memory) with supabase/coloured-belts.sql.
 // Run: node tests/coloured-belts-page.test.mjs   (needs ../black-belt-prep-system/tests with its node_modules, and Playwright)
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -286,7 +286,7 @@ try {
   ok((await page.textContent('#error')).includes('missing its code'), 'a link without its code explains what to do');
   await page.goto(BASE + '/grading/index.html');
   const hub = await page.$$eval('a.pick', as => as.map(a => a.getAttribute('href')));
-  ok(hub[0] === 'coloured-belts/' && hub[1].includes('Black-belt-prep-system') && hub[2].includes('ama-id-cards'), '/grading/ is a hub: coloured belts, black belts (Black Belt Prep) and ID cards');
+  ok(hub[0] === 'coloured-belts/' && hub[1].includes('Black-belt-prep-system') && hub[2].includes('ama-id-cards'), '/grading/ is a hub: coloured belts, black belts (Black Belt Gradings) and ID cards');
   await ctx.close();
 } catch (e) { failed++; console.log('  FAIL  stopped: ' + String(e.message || e).split('\n').slice(0, 3).join(' / ')); }
 

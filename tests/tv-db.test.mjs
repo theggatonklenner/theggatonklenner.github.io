@@ -1,5 +1,5 @@
 // Database tests for the TV display (supabase/tv-setup.sql), in an embedded Postgres holding the real
-// AMA ID Cards and Black Belt Prep databases. Run: node tests/tv-db.test.mjs
+// AMA ID Cards and Black Belt Gradings databases. Run: node tests/tv-db.test.mjs
 // Uses the test tools from the black-belt-prep-system repository (set PREP_TESTS / CARD_REPO if elsewhere).
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -21,7 +21,7 @@ async function as(email, fn) {
 }
 const tryAs = async (email, sql, p = []) => { try { const r = await as(email, () => db.query(sql, p)); return { ok: true, rows: r.rows, n: /^\s*select/i.test(sql) ? r.rows.length : r.affectedRows }; } catch (e) { return { ok: false, err: e.message }; } };
 
-console.log('Setting up AMA ID Cards and Black Belt Prep');
+console.log('Setting up AMA ID Cards and Black Belt Gradings');
 await db.exec(read(join(PREP_TESTS, 'supabase-stub.sql')));
 await db.exec(`grant usage on schema public to anon; grant execute on all functions in schema public to anon;`);
 await db.exec(`insert into auth.users (email) values ('tate@ama.test'), ('jo@ama.test'), ('station@ama.test'), ('nobody@ama.test')`);
@@ -44,7 +44,7 @@ ok((await db.query(`select public from storage.buckets where id = 'tv'`)).rows[0
 
 console.log('\nWho can edit');
 ok((await tryAs('tate@ama.test', `insert into tv_slides (kind, title, body) values ('text', 'Welcome', 'Class times') returning id`)).ok, 'ID Cards staff can add slides');
-ok((await tryAs('jo@ama.test', `insert into tv_slides (kind, title) values ('text', 'From Jo')`)).ok, 'Black Belt Prep staff can add slides');
+ok((await tryAs('jo@ama.test', `insert into tv_slides (kind, title) values ('text', 'From Jo')`)).ok, 'Black Belt Gradings staff can add slides');
 ok(!(await tryAs('station@ama.test', `insert into tv_slides (kind, title) values ('text', 'x')`)).ok, 'the print station login cannot');
 ok(!(await tryAs('nobody@ama.test', `insert into tv_slides (kind, title) values ('text', 'x')`)).ok, 'a login with no roles cannot');
 ok(!(await tryAs(null, `insert into tv_slides (kind, title) values ('text', 'x')`)).ok && (await tryAs(null, `select * from tv_slides`)).ok === false || (await tryAs(null, `select * from tv_slides`)).n === 0, 'the public cannot read or change slides directly');
@@ -55,7 +55,7 @@ const tvp = (await db.query(`select email, permission from tv_permissions order 
 ok(tvp === 'jo@ama.test:edit,tate@ama.test:edit', `first run: everyone who could edit the TV keeps it, the print station doesn't (${tvp})`);
 await as('tate@ama.test', () => db.exec(`insert into tv_permissions values ('tvonly@ama.test', 'edit'), ('remote@ama.test', 'remote')`));
 ok((await tryAs('tvonly@ama.test', `insert into tv_slides (kind, title) values ('text', 'From TV only')`)).ok, 'someone with only the TV editor ticked can add slides');
-ok((await as('tvonly@ama.test', () => db.query(`select can_view_cards() a`))).rows[0].a === false && (await tryAs('tvonly@ama.test', `select * from prep_students`)).n === 0, "...but can't see AMA ID Cards or Black Belt Prep");
+ok((await as('tvonly@ama.test', () => db.query(`select can_view_cards() a`))).rows[0].a === false && (await tryAs('tvonly@ama.test', `select * from prep_students`)).n === 0, "...but can't see AMA ID Cards or Black Belt Gradings");
 ok((await tryAs('remote@ama.test', `select * from tv_slides`)).n > 0 && (await tryAs('remote@ama.test', `select tv_remote_send('next')`)).ok, 'TV remote only: can see the slides and press the remote buttons');
 ok(!(await tryAs('remote@ama.test', `insert into tv_slides (kind, title) values ('text', 'x')`)).ok && (await tryAs('remote@ama.test', `select * from tv_settings where id = 1`)).n === 0
   && (await as('remote@ama.test', () => db.query(`select tv_is_staff() a`))).rows[0].a === false, "...but can't change slides, see the screen code or open the editor");

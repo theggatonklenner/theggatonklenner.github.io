@@ -123,7 +123,7 @@
 
   <section id="app" hidden>
     <div class="view-head"><h2>Logins</h2><div class="row" style="margin:0"><button class="btn sm" id="bulkBtn">Add several</button><button class="btn primary sm" id="addBtn">Add login</button></div></div>
-    <p class="hint">Logins and permissions for AMA ID Cards, Black Belt Prep and the dojang TV. Tap someone to change their details or permissions, or remove their login. People without an email sign in with their hub mobile and PIN.</p>
+    <p class="hint">Logins and permissions for AMA ID Cards, Black Belt Gradings and the dojang TV. Tap someone to change their details or permissions, or remove their login. People without an email sign in with their hub mobile and PIN.</p>
     <input type="search" id="search" placeholder="Search name, email or mobile" aria-label="Search name, email or mobile" style="margin:12px 0">
     <ul class="people" id="list"></ul>
     <p class="hint" id="count" style="margin-top:8px"></p>
@@ -242,7 +242,7 @@ const isAdmin = u => u.card_perms.includes('admin') || u.prep_roles.includes('ad
 const tvText = u => isAdmin(u) ? 'Admin' : u.tv_perms.includes('edit') ? 'Editor' : u.tv_perms.length ? ['party', 'remote'].filter(k => u.tv_perms.includes(k)).map(k => TV[k]).join(', ') : 'No access';
 const tvField = cur => state.tv === 'ready'
   ? `<div class="field"><span class="label">Dojang TV</span>${checks('tvChecks', TV, cur.includes('edit') ? ['edit', 'party', 'remote'] : cur)}
-      <p class="hint">Editor: everything (slides, party mode, events, settings and the remote). Party mode: start, stop and book parties and birthday posters. Remote: the phone remote. Admins in AMA ID Cards or Black Belt Prep can always use the TV.</p></div>`
+      <p class="hint">Editor: everything (slides, party mode, events, settings and the remote). Party mode: start, stop and book parties and birthday posters. Remote: the phone remote. Admins in AMA ID Cards or Black Belt Gradings can always use the TV.</p></div>`
   : `<div class="field"><span class="label">Dojang TV</span><p class="hint">${state.tv === 'setup' ? 'To set who can use the TV, first run supabase/tv-setup.sql in Supabase.' : 'To set who can use the TV, update the "staff" function in Supabase with the latest supabase/functions/staff/index.ts.'}</p></div>`;
 const tvPicked = () => state.tv !== 'ready' ? undefined : (l => l.includes('edit') ? ['edit'] : l)(picked('tvChecks'));
 // Editor includes the others: ticking it ticks them
@@ -269,7 +269,7 @@ function openPerson(email) {
     <form id="rolesForm" class="section">
       <h3>Permissions</h3>
       <div class="field"><span class="label">AMA ID Cards</span>${checks('cardChecks', CARD, u.card_perms)}</div>
-      <div class="field"><span class="label">Black Belt Prep</span>${checks('prepChecks', PREP, u.prep_roles)}</div>
+      <div class="field"><span class="label">Black Belt Gradings</span>${checks('prepChecks', PREP, u.prep_roles)}</div>
       ${tvField(u.tv_perms)}
       ${self ? '<p class="hint">You can\'t remove your own admin access.</p>' : ROLE_HELP}
       <div class="row"><button class="btn primary" id="saveRoles" type="submit">Save permissions</button></div>
@@ -316,7 +316,7 @@ function openPerson(email) {
   };
   const rm = $('#removeBtn');
   if (rm) rm.onclick = async () => {
-    if (!await confirmBox(`Remove ${who(u)}? They will no longer be able to sign in to AMA ID Cards, Black Belt Prep or the TV.`, 'Remove', true)) return openPerson(email);
+    if (!await confirmBox(`Remove ${who(u)}? They will no longer be able to sign in to AMA ID Cards, Black Belt Gradings or the TV.`, 'Remove', true)) return openPerson(email);
     try { await api({ action: 'remove', email }); toast(`${who(u)} removed`); await load(); }
     catch (er) { toast(er.message, 7000); openPerson(email); }
   };
@@ -335,7 +335,7 @@ function openAdd() {
     <div class="field" id="addPwRow" hidden><label for="addPw">Starting password</label><div class="row"><input type="text" id="addPw" autocomplete="new-password" placeholder="At least 8 characters" style="flex:1 1 180px;width:auto"><button type="button" class="btn sm" id="addGen">Make one</button></div></div>
     <p class="hint" id="addMailHint">After adding, you get a link to copy or share (text, WhatsApp, email). It opens a page where they choose a password.</p></div>
     <div class="field"><span class="label">AMA ID Cards</span>${checks('cardChecks', CARD, [])}</div>
-    <div class="field"><span class="label">Black Belt Prep</span>${checks('prepChecks', PREP, [])}</div>
+    <div class="field"><span class="label">Black Belt Gradings</span>${checks('prepChecks', PREP, [])}</div>
     ${tvField([])}
     ${ROLE_HELP}
     <p class="hint">If the email already has a login, its permissions are updated (no link is made). Leave the password blank to keep their current one.</p>

@@ -93,7 +93,7 @@ try {
   const msg = await page.inputValue('#linkText');
   const made = db._mail.find(m => m.kind === 'invite' && m.email === 'newbie@ama.test');
   ok(made && msg.includes('https://theggatonklenner.github.io/welcome/#token_hash=' + encodeURIComponent(made.hashed_token) + '&type=invite') && msg.includes('newbie@ama.test'), 'it shows a message with their set-up link, ready to copy or share');
-  ok(made.data.apps === 'Black Belt Prep and the dojang TV' && made.data.setup_pending === true && db._t.prep_roles.some(r => r.email === 'newbie@ama.test' && r.role === 'instructor'), 'their login and permissions are made, waiting for set-up');
+  ok(made.data.apps === 'Black Belt Gradings and the dojang TV' && made.data.setup_pending === true && db._t.prep_roles.some(r => r.email === 'newbie@ama.test' && r.role === 'instructor'), 'their login and permissions are made, waiting for set-up');
   await page.click('#dlg [data-close]');
   await page.waitForSelector('#list [data-email="newbie@ama.test"]');
   ok((await page.textContent('#list [data-email="newbie@ama.test"]')).includes('Not set up yet'), 'the list shows they are not set up yet');

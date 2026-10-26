@@ -17,7 +17,7 @@ const people = {
   'coach@ama.test': { pw: 'password1', card: [], prep: ['instructor'], tv: [] },
   'party@ama.test': { pw: 'password1', card: [], prep: [], tv: ['party'] },
   'nothing@ama.test': { pw: 'password1', card: [], prep: [], tv: [] },
-  'new@ama.test': { pw: null, card: [], prep: ['attendance'], tv: [], meta: { apps: 'Black Belt Prep' } }
+  'new@ama.test': { pw: null, card: [], prep: ['attendance'], tv: [], meta: { apps: 'Black Belt Gradings' } }
 };
 const tokenFor = e => 'tok-' + e;
 const emailOf = req => { const t = (req.headers()['authorization'] || '').replace(/^Bearer\s+/i, ''); return t.startsWith('tok-') ? t.slice(4) : null; };
@@ -87,7 +87,7 @@ try {
 
   await signIn(page, 'coach@ama.test'); n = await names(page);
   ok(n.join() === 'Gradings', 'an instructor sees one Gradings link (' + n.join(', ') + ')');
-  ok((await page.$$eval('#apps h2', hs => hs.map(h => h.textContent))).join() === 'Gradings' && (await page.$('#apps a[href="grading/"]')) && !(await page.$('#apps a[href*="coloured-belts"]')), 'gradings are one link, to the /grading/ hub (coloured belts, Black Belt Prep and ID cards are there)');
+  ok((await page.$$eval('#apps h2', hs => hs.map(h => h.textContent))).join() === 'Gradings' && (await page.$('#apps a[href="grading/"]')) && !(await page.$('#apps a[href*="coloured-belts"]')), 'gradings are one link, to the /grading/ hub (coloured belts, Black Belt Gradings and ID cards are there)');
   await page.click('#signOut'); await page.waitForSelector('#signIn:not([hidden])');
   await signIn(page, 'party@ama.test'); n = await names(page);
   ok(n.includes('TV party mode') && n.includes('Tablet party mode') && !n.includes('TV Remote') && !n.includes('Gradings') && !n.includes('Staff logins'), 'party mode only sees the party pages (' + n.join(', ') + ')');
@@ -106,7 +106,7 @@ try {
   const W = pathToFileURL(join(here, '../welcome/index.html')).href;
   await page.goto(W + '#token_hash=hash-invite-new@ama.test&type=invite');
   await page.waitForSelector('#setPw:not([hidden])', { timeout: 6000 }).catch(() => {});
-  ok(await page.isVisible('#setPw') && (await page.textContent('#spFor')).includes('new@ama.test') && (await page.textContent('#spFor')).includes('Black Belt Prep'), 'the link from the email opens "Choose your password", with their apps');
+  ok(await page.isVisible('#setPw') && (await page.textContent('#spFor')).includes('new@ama.test') && (await page.textContent('#spFor')).includes('Black Belt Gradings'), 'the link from the email opens "Choose your password", with their apps');
   ok(!page.url().includes('token_hash'), 'the code is taken out of the address bar');
   await page.fill('#spPass', 'newpass12'); await page.fill('#spPass2', 'newpass13'); await page.click('#spGo');
   ok((await page.textContent('#spMsg')).includes("don't match"), 'the two passwords must match');

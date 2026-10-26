@@ -1,12 +1,12 @@
 // @ts-nocheck
-// AMA Toolkit: staff logins for AMA ID Cards, Black Belt Prep and the dojang TV, in one place.
+// AMA Toolkit: staff logins for AMA ID Cards, Black Belt Gradings and the dojang TV, in one place.
 //
 // Deploy in Supabase: Edge Functions > Deploy a new function > Via Editor, name it "staff",
 // paste this whole file, Deploy. Then turn OFF "Verify JWT with legacy secret" (or "Enforce JWT verification") for the function
 // (it checks the signed-in person itself).
 //
 // Only people who are an admin in BOTH apps can use it. It can:
-//   list      every login, with its AMA ID Cards, Black Belt Prep and TV permissions
+//   list      every login, with its AMA ID Cards, Black Belt Gradings and TV permissions
 //   create    add a login with permissions, and either a starting password or a set-up link for them to choose
 //             their own password (or update an existing login)
 //   link      a new set-up link for an existing login (first sign-in, or a forgotten password)
@@ -28,14 +28,14 @@ export const CARD_PERMS = ['admin', 'edit', 'delete', 'send', 'approve', 'viewer
 export const PREP_ROLES = ['admin', 'instructor', 'attendance', 'payments', 'grading', 'certificates', 'idcards', 'viewer'];
 export const TV_PERMS = ['edit', 'party', 'remote'];
 export const WELCOME_URL = 'https://theggatonklenner.github.io/welcome/';
-// "AMA ID Cards, Black Belt Prep and the dojang TV" (shown on the welcome page)
+// "AMA ID Cards, Black Belt Gradings and the dojang TV" (shown on the welcome page)
 // The welcome page signs them in with this one-time code, then they choose a password
 const setupLink = (data, type) => `${WELCOME_URL}#token_hash=${encodeURIComponent(data.properties.hashed_token)}&type=${type}`;
-const appNames = (card, prep, tv) => { const l = [card && card.length && 'AMA ID Cards', prep && prep.length && 'Black Belt Prep', tv && tv.length && 'the dojang TV'].filter(Boolean);
+const appNames = (card, prep, tv) => { const l = [card && card.length && 'AMA ID Cards', prep && prep.length && 'Black Belt Gradings', tv && tv.length && 'the dojang TV'].filter(Boolean);
   return l.length <= 1 ? (l[0] || 'the AMA Toolkit') : l.slice(0, -1).join(', ') + ' and ' + l[l.length - 1]; };
 const APPS = {
   card: { table: 'staff_permissions', col: 'permission', allowed: CARD_PERMS, name: 'AMA ID Cards' },
-  prep: { table: 'prep_roles', col: 'role', allowed: PREP_ROLES, name: 'Black Belt Prep' },
+  prep: { table: 'prep_roles', col: 'role', allowed: PREP_ROLES, name: 'Black Belt Gradings' },
   tv: { table: 'tv_permissions', col: 'permission', allowed: TV_PERMS, name: 'Dojang TV' }
 };
 
@@ -111,7 +111,7 @@ export async function handle(req, db) {
       db.from('staff_permissions').select('permission').eq('email', me).eq('permission', 'admin').maybeSingle(),
       db.from('prep_roles').select('role').eq('email', me).eq('role', 'admin').maybeSingle()
     ]);
-    if (!(cardMine && prepMine)) return fail('Only people who are an admin in both AMA ID Cards and Black Belt Prep can manage staff logins.', 403);
+    if (!(cardMine && prepMine)) return fail('Only people who are an admin in both AMA ID Cards and Black Belt Gradings can manage staff logins.', 403);
 
     const body = await req.json().catch(() => ({}));
     const action = body.action;

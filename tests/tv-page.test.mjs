@@ -1,5 +1,5 @@
 // Browser test for the TV display: the editor at phone size and the TV page at TV size, against a local
-// stand-in for Supabase holding the real AMA ID Cards, Black Belt Prep and TV databases.
+// stand-in for Supabase holding the real AMA ID Cards, Black Belt Gradings and TV databases.
 // Run: node tests/tv-page.test.mjs  (uses the black-belt-prep-system test tools; set PREP_TESTS / CARD_REPO if elsewhere)
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -37,7 +37,7 @@ await db.exec(`create view party_now as
          coalesce(case when st.only_until > now() then st.only_until end, b.ends_at) only_until
     from tv_settings st left join lateral (select bb.slide_id, bb.ends_at from tv_party_bookings bb join tv_slides bs on bs.id = bb.slide_id
       where bs.display = st.display and bb.starts_at <= now() and bb.ends_at > now() order by bb.starts_at desc limit 1) b on true`);
-// Black Belt Prep data for the live slides
+// Black Belt Gradings data for the live slides
 await db.exec(`set role authenticated; select set_config('request.jwt.claims', '{"email":"tate@ama.test"}', false);
   insert into prep_students (student_id, full_name, certificate_name, belt_rank) values ('T1', 'Kara Lee', 'Kara Jane Lee', 'Cho Dan Bo'), ('T2', 'Sam Park', null, '1st Dan Level 1');`);
 const cid = (await db.query(`select prep_start_new_cycle('Term 4 2026', null, null, array[current_date - 14, current_date + 1, current_date + 15, current_date + 29]::date[], 0, null, array['T1','T2']) id`)).rows[0].id;
@@ -375,7 +375,7 @@ try {
   }
   const wall = words.join(' | ');
   ok(/Comp\s*3\s*weeks to go/.test(wall), 'the TV shows "Comp 3 weeks to go"');
-  ok(/Black belt grading\s*6\s*weeks to go/.test(wall), 'the grading countdown uses the date from Black Belt Prep');
+  ok(/Black belt grading\s*6\s*weeks to go/.test(wall), 'the grading countdown uses the date from Black Belt Gradings');
 
   await tvp.waitForFunction(() => true); await page.waitForTimeout(2500);
   await page.evaluate(() => pollStatus()); await page.waitForTimeout(400);
@@ -478,7 +478,7 @@ try {
     await tv2.evaluate(() => window.__tv.next());
   }
   const monthName = new Date().toLocaleDateString('en-AU', { month: 'long' }), last10 = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate() < 10;
-  ok(evText.includes(monthName) && /Today Session|Black Belt Prep Session/.test(evText), "the TV shows this month's events with the month name");
+  ok(evText.includes(monthName) && /Today Session|Black Belt Gradings Session/.test(evText), "the TV shows this month's events with the month name");
   if (!process.env.EVENTS_JSON) {
     ok(evText.includes('Month of Testing') && evText.includes('1:30 pm, Marrickville') && evText.includes('Today'), 'with the month theme, notes, and a Today tag');
     ok(!evText.includes('Old thing') && !evText.includes('Far Away'), 'past events and far-off months are left off');

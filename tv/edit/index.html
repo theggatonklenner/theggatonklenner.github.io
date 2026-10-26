@@ -498,7 +498,7 @@ $('#addBtn').onclick = () => {
       <button data-add="countdown"><b>Countdown</b><span>"Grading in 12 days", "Comp in 3 weeks"</span></button>
       ${Object.entries(LIVE).map(([k, [n, d]]) => `<button data-add="live:${k}"><b>Live: ${esc(n)}</b><span>${esc(d)}</span></button>`).join('')}
     </div>
-    <p class="hint">Live slides fill themselves in from Black Belt Prep and only show when there's something to show.</p></div>`);
+    <p class="hint">Live slides fill themselves in from Black Belt Gradings and only show when there's something to show.</p></div>`);
   $$('#dlg [data-add]').forEach(b => b.onclick = () => {
     const a = b.dataset.add;
     if (a === 'photos') { dlg.close(); $('#pickPhotos').click(); }
@@ -658,10 +658,10 @@ function openSlide(s, fresh) {
       <div class="field"><span class="label">Count down to</span><div class="cd-to">
         <label class="check"><input type="radio" name="cdTo" value="date" ${x.count_to !== 'grading' ? 'checked' : ''}> A date</label>
         <input type="date" id="slEvent" value="${esc(x.event_on || '')}" min="${today()}">
-        <label class="check"><input type="radio" name="cdTo" value="grading" ${x.count_to === 'grading' ? 'checked' : ''}> The next black belt grading (from Black Belt Prep)</label></div></div>
+        <label class="check"><input type="radio" name="cdTo" value="grading" ${x.count_to === 'grading' ? 'checked' : ''}> The next black belt grading (from Black Belt Gradings)</label></div></div>
       <p class="hint" id="cdPrev"></p>
       ${themePick}`,
-    live: () => `<p class="hint">${esc(liveInfo(x.live_kind)[1])}. ${x.live_kind === 'events' ? 'It uses the events list (Edit events below).' : x.live_kind === 'month' ? 'It uses the month themes in Edit events, and changes by itself each month.' : 'It fills in by itself from Black Belt Prep.'}</p>
+    live: () => `<p class="hint">${esc(liveInfo(x.live_kind)[1])}. ${x.live_kind === 'events' ? 'It uses the events list (Edit events below).' : x.live_kind === 'month' ? 'It uses the month themes in Edit events, and changes by itself each month.' : 'It fills in by itself from Black Belt Gradings.'}</p>
       <div class="field"><label for="slTitle">Heading (optional)</label><input type="text" id="slTitle" maxlength="120" value="${esc(x.title || '')}" placeholder="${esc({ next_grading: 'Next black belt grading', events: "What's on at AMA", month: 'The month name' }[x.live_kind])}"></div>${themePick}
       ${x.live_kind === 'events' || x.live_kind === 'month' ? '<div class="row"><button type="button" class="btn" id="slEvents">Edit events</button></div>' : ''}`
   }[x.kind]();
@@ -695,7 +695,7 @@ function openSlide(s, fresh) {
       const g = cdTo() === 'grading', to = g ? state.nextGrading : $('#slEvent').value;
       $('#slEvent').disabled = g;
       const what = t.value.trim() || (g ? 'Black belt grading' : 'Countdown');
-      $('#cdPrev').textContent = !to ? (g ? 'No grading date is set in Black Belt Prep yet, so it stays off the TV until there is one.' : 'Pick the date.')
+      $('#cdPrev').textContent = !to ? (g ? 'No grading date is set in Black Belt Gradings yet, so it stays off the TV until there is one.' : 'Pick the date.')
         : to < today() ? 'That date has passed.' : `The TV shows: ${what} · ${countText(daysFromToday(to))} · ${longDate(to)}. It goes away by itself after the day.`;
     };
     $$('#slForm input[name=cdTo]').forEach(r => r.onchange = prev); $('#slEvent').oninput = prev; t.oninput = prev; prev();

@@ -59,7 +59,7 @@ r = await call(TATE, { action: 'create', email: 'New@AMA.test', password: 'longe
 ok(r.status === 200 && !r.body.existed, 'login created');
 ok(db._users.some(u => u.email === 'new@ama.test' && u.password === 'longenough'), 'email is saved in lower case with the starting password');
 ok(cardOf('new@ama.test') === 'edit,send', 'ID Cards permissions ticked; unknown ones ignored');
-ok(prepOf('new@ama.test') === 'attendance,payments', 'Black Belt Prep roles ticked; unknown ones ignored');
+ok(prepOf('new@ama.test') === 'attendance,payments', 'Black Belt Gradings roles ticked; unknown ones ignored');
 r = await call(TATE, { action: 'create', email: 'jo@ama.test', password: '', card_perms: ['edit', 'approve'], prep_roles: ['instructor', 'grading'] });
 ok(r.status === 200 && r.body.existed && db._users.find(u => u.email === 'jo@ama.test').password === 'password1' && cardOf('jo@ama.test') === 'approve,edit', 'adding an existing login sets its ticks and keeps the password');
 

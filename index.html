@@ -140,7 +140,7 @@ function draw(a) {
   const admin = a.card.includes('admin') && a.prep.includes('admin');
   const tvAny = a.edit || a.party || a.remote;
   const groups = [
-    ['Gradings', [(a.prep.length || a.card.length) && { href: 'grading/', icon: 'belt', name: 'Gradings', meta: 'Coloured belt grading, Black Belt Prep and ID cards' }]],
+    ['Gradings', [(a.prep.length || a.card.length) && { href: 'grading/', icon: 'belt', name: 'Gradings', meta: 'Coloured belt grading, Black Belt Gradings and ID cards' }]],
     ['Dojang TV', [
       a.party && { href: 'tv/edit/', icon: 'tv', name: a.edit ? 'TV Display' : 'TV party mode', meta: a.edit ? 'Change the photos, videos and notices on the dojang TV' : 'Birthday posters and messages on the dojang TV' },
       a.party && { href: 'tv/edit/?display=tablet', icon: 'tablet', name: a.edit ? 'Tablet Display' : 'Tablet party mode', meta: a.edit ? 'Slides for the upright tablets, with a link that just works' : 'Birthday posters and messages on the tablets' },
