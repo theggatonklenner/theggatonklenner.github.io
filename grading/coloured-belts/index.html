@@ -359,11 +359,7 @@
   .res button[aria-pressed=true][data-r=pass] { background: var(--green); border-color: var(--green); color: #fff; }
   .res button[aria-pressed=true][data-r=distinction] { background: var(--gold); border-color: var(--gold); color: #070a08; }
   .res button[aria-pressed=true][data-r=in] { background: var(--green); border-color: var(--green); color: #fff; }
-  .res button[aria-pressed=true][data-r=no_show] { background: var(--danger); border-color: var(--danger); color: #070a08; }
-  .rescard.in { border-color: var(--green); } .rescard.gone { opacity: .7; }
-  .sigpad { width: 100%; height: 180px; background: #fff; border-radius: 12px; border: 1px solid var(--line2); touch-action: none; display: block; }
-  .signed { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
-  .signed img { height: 64px; background: #fff; border-radius: 8px; padding: 4px; }
+  .rescard.in { border-color: var(--green); }
   .res button[aria-pressed=true][data-r=retest] { background: var(--danger); border-color: var(--danger); color: #070a08; }
   .phcard { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 12px; display: flex; gap: 12px; align-items: center; }
   .phcard.next { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
@@ -893,11 +889,10 @@ function renderDay() {
       <select id="dfSort" aria-label="Order">${Object.entries(SORTS).map(([k, t]) => `<option value="${k}"${k === dayFilt.sort ? ' selected' : ''}>${t}</option>`).join('')}</select></div>` : ''}
     <ul class="list" id="entryList">${shown.length ? shown.map(e => `<li><button class="item" data-entry="${e.entry_id}">${swatch(e.belt_from)}
         <div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(ageText(student(e.member_key)))} · ${esc(short(e.belt_from))} to ${esc(short(toText(e)))}${student(e.member_key) && student(e.member_key).location !== d.location ? ' · from ' + esc(student(e.member_key).location) : ''}${e.booking_error ? ' · <span style="color:var(--danger)">Booking failed</span>' : ''}${e.efc_by_hand && !e.efc_by_hand_done_at ? ' · <span style="color:var(--danger)">Book in EFC by hand</span>' : ''}</div></div>
-        <span class="tags">${e.result ? `<span class="tag ${e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[e.result]}</span>` : ''}${e.checked_in_at ? '<span class="tag ok">Here</span>' : e.no_show ? '<span class="tag bad">No-show</span>' : ''}${e.booked_at ? '<span class="tag ok">Booked</span>' : e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Not invited</span>'}${e.paid ? `<span class="tag ok">Paid${e.paid_how === 'card' ? ' by card' : ''}</span>` : e.booked_at ? '<span class="tag warn">Unpaid</span>' : ''}</span></button></li>`).join('') : '<li class="empty">No students on this day yet.</li>'}</ul>
+        <span class="tags">${e.result ? `<span class="tag ${e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[e.result]}</span>` : ''}${e.checked_in_at ? '<span class="tag ok">Here</span>' : ''}${e.booked_at ? '<span class="tag ok">Booked</span>' : e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Not invited</span>'}${e.paid ? `<span class="tag ok">Paid${e.paid_how === 'card' ? ' by card' : ''}</span>` : e.booked_at ? '<span class="tag warn">Unpaid</span>' : ''}</span></button></li>`).join('') : '<li class="empty">No students on this day yet.</li>'}</ul>
     ${es.length && canApprove() ? `<div class="card"><h3>Check-in</h3>
-      ${d.signed_off_at ? `<div class="signed">${d.signed_off_sig ? `<img src="${esc(d.signed_off_sig)}" alt="Signature">` : ''}<p class="hint" style="margin:0">Signed off by <b>${esc(d.signed_off_name || d.signed_off_by)}</b>, ${esc(whenText(d.signed_off_at))}.<br>${n(e => e.checked_in_at)} here, ${n(e => e.no_show)} no-show${n(e => e.no_show) === 1 ? '' : 's'}.</p></div>`
-        : `<p class="hint">${n(e => e.checked_in_at)} of ${es.length} checked in${n(e => e.no_show) ? `, ${n(e => e.no_show)} no-show${n(e => e.no_show) === 1 ? '' : 's'}` : ''}. Tap each student in on the iPad as they arrive, then a teacher signs off.</p>`}
-      <div class="row"><button class="btn primary" id="checkinBtn">${d.signed_off_at ? 'See check-in' : 'Check in students'}</button><button class="btn" id="lineupBtn">Print line-up sheet</button></div></div>` : ''}
+      <p class="hint">${n(e => e.checked_in_at)} of ${es.length} here. Tap each student in on the iPad as they arrive.</p>
+      <div class="row"><button class="btn primary" id="checkinBtn">Check in students</button><button class="btn" id="lineupBtn">Print line-up sheet</button></div></div>` : ''}
     ${es.length ? `<div class="card"><h3>Getting ready</h3>
       <p class="hint">New belts and certificates needed (everyone not marked re-test${n(e => e.result) ? '' : ', until results are in'}). EFC doesn't hold belt sizes, so check sizes against the list.</p>
       <table class="grid"><thead><tr><th>Belt</th><th>Belts</th><th>Certificates</th></tr></thead><tbody>${Object.entries(needs).sort((a, b) => (beltOf(a[0]).sort || 99) - (beltOf(b[0]).sort || 99)).map(([b, c]) => `<tr><td>${esc(b)}</td><td>${c}</td><td>${c}</td></tr>`).join('')}</tbody></table>
@@ -1021,91 +1016,45 @@ function recordPayment(e) {
     } catch (er) { toast(errMsg(er), 6000); $('#rpGo').disabled = false; $('#rpGo').textContent = 'Record payment'; }
   };
 }
-// Check-in on the day (iPad): tap each student in as they arrive; a teacher signs off, and anyone not in becomes a no-show
+// Check-in on the day (iPad): tap Here as each student arrives (tap again to undo)
 function renderCheckIn(d, shown) {
-  const v = $('#view-day'), signed = !!d.signed_off_at;
+  const v = $('#view-day');
   const es = sortEntries(shown, dayFilt.sort === 'name' ? 'name' : 'age');
   let q = '';
-  const card = e => `<div class="rescard${e.checked_in_at ? ' in' : e.no_show ? ' gone' : ''}" data-card="${e.entry_id}"><div class="row" style="flex-wrap:nowrap">${swatch(e.belt_from)}<div class="main" style="flex:1;min-width:0"><div class="name" style="font-size:18px">${esc(e.full_name)}</div>
+  const card = e => `<div class="rescard${e.checked_in_at ? ' in' : ''}" data-card="${e.entry_id}"${q && !e.full_name.toLowerCase().includes(q) ? ' hidden' : ''}><div class="row" style="flex-wrap:nowrap">${swatch(e.belt_from)}<div class="main" style="flex:1;min-width:0"><div class="name" style="font-size:18px">${esc(e.full_name)}</div>
       <div class="meta">${esc(ageText(student(e.member_key)))} · ${esc(short(e.belt_from))} to ${esc(short(toText(e)))}${e.booked_at ? '' : ' · <span style="color:var(--danger)">Not booked</span>'}${e.paid ? '' : ' · <span style="color:var(--danger)">Unpaid</span>'}${e.checked_in_at ? ' · in ' + esc(new Date(e.checked_in_at).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })) : ''}</div></div></div>
-      <div class="res" data-entry="${e.entry_id}"><button type="button" data-r="in" aria-pressed="${!!e.checked_in_at}" ${signed ? 'disabled' : ''}>Here</button><button type="button" data-r="no_show" aria-pressed="${!!e.no_show}" ${signed ? 'disabled' : ''}>No-show</button></div></div>`;
+      <div class="res" data-entry="${e.entry_id}"><button type="button" data-r="in" aria-pressed="${!!e.checked_in_at}">${e.checked_in_at ? 'Here' : 'Tap when here'}</button></div></div>`;
   v.innerHTML = `<div class="view-head"><div><button class="x" id="backDay" style="padding:0">‹ Back to the day</button><h2>Check-in · ${esc(d.location)} ${esc(fmtDate(d.grading_date))}</h2></div><span class="hint" id="ciCount"></span></div>
-    ${signed ? `<div class="card"><div class="signed">${d.signed_off_sig ? `<img src="${esc(d.signed_off_sig)}" alt="Signature">` : ''}<p style="margin:0">Signed off by <b>${esc(d.signed_off_name || d.signed_off_by)}</b>, ${esc(whenText(d.signed_off_at))}. Check-in is locked.</p></div>
-      <div class="row"><button class="btn" id="ciPrint">Print line-up sheet</button>${canGrade() ? '<button class="btn" id="ciReopen">Reopen check-in</button>' : ''}</div></div>`
-      : '<p class="hint">Tap Here as each student arrives (tap again to undo). When everyone is in, a teacher signs off: anyone not checked in is marked a no-show.</p>'}
+    <p class="hint">Tap each student as they arrive. Tap again to undo.</p>
     <input type="search" id="ciQ" placeholder="Find a name" aria-label="Find a name" style="margin-bottom:10px">
     <div id="ciList" style="display:flex;flex-direction:column;gap:10px">${es.map(card).join('') || '<p class="hint">No students on this day.</p>'}</div>
-    ${signed ? '' : `<div class="card" style="margin-top:14px"><h3>Sign off</h3><p class="hint" id="ciLeft"></p><div class="row"><button class="btn primary" id="ciSign">Sign off check-in</button><button class="btn" id="ciPrint">Print line-up sheet</button></div></div>`}`;
-  const count = () => {
-    const here = es.filter(e => e.checked_in_at).length, gone = es.filter(e => e.no_show).length, left = es.length - here - gone;
-    $('#ciCount').textContent = `${here} of ${es.length} here${gone ? `, ${gone} no-show${gone === 1 ? '' : 's'}` : ''}`;
-    const l = $('#ciLeft'); if (l) l.textContent = left ? `${left} not checked in yet: signing off marks ${left === 1 ? 'them' : 'them all'} as no-shows.` : 'Everyone is accounted for.';
-  };
+    <div class="row" style="margin-top:14px"><button class="btn" id="ciPrint">Print line-up sheet</button></div>`;
+  const count = () => { const here = es.filter(e => e.checked_in_at).length; $('#ciCount').textContent = `${here} of ${es.length} here`; };
   count();
   $('#backDay').onclick = () => go('day', d.day_id);
   $('#ciQ').oninput = () => { q = $('#ciQ').value.trim().toLowerCase(); $$('#ciList [data-card]').forEach(c => { const e = es.find(x => x.entry_id === c.dataset.card); c.hidden = !!q && !e.full_name.toLowerCase().includes(q); }); };
   // One handler for the whole list (cards are redrawn as students are tapped in)
   $('#ciList').onclick = async ev => {
-    const b = ev.target.closest('.res button'); if (!b || b.disabled) return;
+    const b = ev.target.closest('.res button'); if (!b) return;
     const id = b.parentElement.dataset.entry, e = es.find(x => x.entry_id === id);
-    const now = b.dataset.r === 'in' ? (e.checked_in_at ? 'clear' : 'in') : (e.no_show ? 'clear' : 'no_show');
-    const before = { checked_in_at: e.checked_in_at, no_show: e.no_show };
-    e.checked_in_at = now === 'in' ? new Date().toISOString() : null; e.no_show = now === 'no_show';
+    const now = e.checked_in_at ? 'clear' : 'in', before = e.checked_in_at;
+    e.checked_in_at = now === 'in' ? new Date().toISOString() : null;
     b.closest('[data-card]').outerHTML = card(e); count();
-    try { await run(sb.rpc('cb_check_in', { p_entry: id, p_state: now })); if (q) { $('#ciQ').value = ''; $('#ciQ').oninput(); $('#ciQ').focus(); } }
-    catch (er) { Object.assign(e, before); toast(errMsg(er), 6000); renderCheckIn(d, shown); }
+    try { await run(sb.rpc('cb_check_in', { p_entry: id, p_state: now })); if (q && now === 'in') { $('#ciQ').value = ''; $('#ciQ').oninput(); $('#ciQ').focus(); } }
+    catch (er) { e.checked_in_at = before; toast(errMsg(er), 6000); renderCheckIn(d, shown); }
   };
-  $$('#ciPrint').forEach(b => b.onclick = () => printLineup(d, shown));
-  const ro = $('#ciReopen'); if (ro) ro.onclick = async () => { if (!confirm('Reopen check-in? The sign-off is removed and teachers can change who is here again.')) return; try { await run(sb.rpc('cb_reopen_check_in', { p_day: d.day_id }), 'Check-in reopened'); await loadAll(); render(); } catch (er) { toast(errMsg(er), 6000); } };
-  const sg = $('#ciSign'); if (sg) sg.onclick = () => signOff(d);
+  $('#ciPrint').onclick = () => printLineup(d, shown);
 }
-// A teacher signs off check-in with their name and a finger signature
-function signOff(d) {
-  const left = entriesOf(d.day_id).filter(e => !e.checked_in_at && !e.no_show).length;
-  openDlg(`<form id="soForm" class="dlg"><div class="dlg-head"><div><h3>Sign off check-in</h3><p class="hint">${esc(d.location)} · ${esc(fmtDate(d.grading_date))}</p></div><button type="button" class="x" data-close>Close</button></div>
-    <p>${left ? `<b>${left}</b> student${left === 1 ? ' isn\'t' : 's aren\'t'} checked in and will be marked as no-show${left === 1 ? '' : 's'}.` : 'Everyone is checked in or marked a no-show.'}</p>
-    <div class="field"><label for="soName">Teacher's name</label><input id="soName" autocomplete="name" placeholder="Your full name"></div>
-    <div class="field"><span class="label">Signature</span><canvas class="sigpad" id="soPad"></canvas><div class="row" style="justify-content:space-between"><span class="hint">Sign with your finger or a stylus.</span><button type="button" class="btn sm" id="soClear">Clear</button></div></div>
-    <p class="err" id="soErr" hidden style="color:var(--danger);margin:0"></p>
-    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" id="soGo" type="submit">Sign off</button></div></form>`);
-  const c = $('#soPad'), ctx = c.getContext('2d'); let drawn = false, down = false;
-  const fit = () => { const r = c.getBoundingClientRect(); c.width = Math.round(r.width * 2); c.height = Math.round(r.height * 2); ctx.scale(2, 2); ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'; };
-  fit();
-  const pt = ev => { const r = c.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
-  c.onpointerdown = ev => { down = true; c.setPointerCapture(ev.pointerId); const [x, y] = pt(ev); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + .1, y + .1); ctx.stroke(); drawn = true; };
-  c.onpointermove = ev => { if (!down) return; const [x, y] = pt(ev); ctx.lineTo(x, y); ctx.stroke(); };
-  c.onpointerup = c.onpointercancel = () => { down = false; };
-  $('#soClear').onclick = () => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height); ctx.restore(); drawn = false; };
-  $('#soName').focus();
-  $('#soForm').onsubmit = async ev => {
-    ev.preventDefault();
-    const err = m => { $('#soErr').textContent = m; $('#soErr').hidden = false; };
-    if (!$('#soName').value.trim()) return err('Type your name.');
-    if (!drawn) return err('Sign in the box.');
-    // A smaller copy of the signature to keep
-    const out = document.createElement('canvas'); out.width = 600; out.height = Math.round(600 * c.height / c.width);
-    out.getContext('2d').drawImage(c, 0, 0, out.width, out.height);
-    $('#soGo').disabled = true; $('#soGo').textContent = 'Signing off…'; $('#soErr').hidden = true;
-    try {
-      const r = await run(sb.rpc('cb_sign_off', { p_day: d.day_id, p_name: $('#soName').value.trim(), p_sig: out.toDataURL('image/png') }));
-      toast(`Signed off: ${r.checked_in} here, ${r.no_shows} no-show${r.no_shows === 1 ? '' : 's'}`, 6000);
-      dlg.close(); await loadAll(); render();
-    } catch (er) { err(errMsg(er)); $('#soGo').disabled = false; $('#soGo').textContent = 'Sign off'; }
-  };
-}
-// The line-up sheet for examiners: students in age order (youngest first), who's here, boxes for results and notes, and the sign-off
+// The line-up sheet for examiners: students in age order (youngest first), who's here, and boxes for results and notes
 function printLineup(d, shown) {
-  const es = sortEntries(shown.filter(e => !e.no_show), 'age'), gone = shown.filter(e => e.no_show);
+  const es = sortEntries(shown, 'age');
   const w = window.open('', '_blank'); if (!w) return toast('Allow pop-ups to print.');
   const box = '<span style="display:inline-block;width:14px;height:14px;border:1.5px solid #333;vertical-align:middle"></span>';
-  w.document.write(`<!doctype html><title>Line-up ${esc(d.location)} ${esc(d.grading_date)}</title><style>body{font:13px Arial,sans-serif;margin:20px;color:#111}h2{margin:0 0 4px}p{margin:0 0 10px;color:#444}table{width:100%;border-collapse:collapse}td,th{border:1px solid #888;padding:6px;text-align:left;vertical-align:middle}th{background:#eee}td.c{text-align:center;white-space:nowrap}.sig{display:flex;gap:30px;margin-top:22px}.sig div{flex:1}.line{border-bottom:1px solid #333;height:46px;display:flex;align-items:flex-end}.line img{height:44px}small{color:#555}@media print{body{margin:10mm}tr{page-break-inside:avoid}}</style>
+  w.document.write(`<!doctype html><title>Line-up ${esc(d.location)} ${esc(d.grading_date)}</title><style>body{font:13px Arial,sans-serif;margin:20px;color:#111}h2{margin:0 0 4px}p{margin:0 0 10px;color:#444}table{width:100%;border-collapse:collapse}td,th{border:1px solid #888;padding:6px;text-align:left;vertical-align:middle}th{background:#eee}td.c{text-align:center;white-space:nowrap}small{color:#555}@media print{body{margin:10mm}tr{page-break-inside:avoid}}</style>
     <h2>Line-up · ${esc(d.location)} ${esc(progLabel(d.programme || state.programme))} grading</h2>
-    <p>${esc(fmtDate(d.grading_date))}${d.start_time ? ' · ' + esc(fmtTime(d.start_time)) : ''}${dayFilt.belt ? ' · ' + esc(dayFilt.belt) : ''} · ${es.length} student${es.length === 1 ? '' : 's'}, youngest first${gone.length ? ` · ${gone.length} no-show${gone.length === 1 ? '' : 's'} listed at the end` : ''}</p>
+    <p>${esc(fmtDate(d.grading_date))}${d.start_time ? ' · ' + esc(fmtTime(d.start_time)) : ''}${dayFilt.belt ? ' · ' + esc(dayFilt.belt) : ''} · ${es.length} student${es.length === 1 ? '' : 's'}, youngest first · ${es.filter(e => e.checked_in_at).length} here</p>
     <table><tr><th>#</th><th>Name</th><th>Age</th><th>From</th><th>To</th><th>Here</th><th>Pass</th><th>Dist.</th><th>Re-test</th><th style="width:26%">Examiner notes</th></tr>
-    ${es.map((e, i) => { const s = student(e.member_key); return `<tr><td>${i + 1}</td><td><b>${esc(e.full_name)}</b>${s && s.location !== d.location ? `<br><small>${esc(s.location)}</small>` : ''}</td><td>${yrs(s) ?? ''}</td><td>${esc(short(e.belt_from))}</td><td>${esc(short(toText(e)))}</td><td class="c">${e.checked_in_at ? '&#10003;' : box}</td><td class="c">${e.result === 'pass' ? '&#10003;' : box}</td><td class="c">${e.result === 'distinction' ? '&#10003;' : box}</td><td class="c">${e.result === 'retest' ? '&#10003;' : box}</td><td></td></tr>`; }).join('')}
-    ${gone.map(e => `<tr style="color:#777"><td></td><td>${esc(e.full_name)}</td><td>${yrs(student(e.member_key)) ?? ''}</td><td>${esc(short(e.belt_from))}</td><td>${esc(short(toText(e)))}</td><td colspan="5">No-show</td></tr>`).join('')}</table>
-    <div class="sig"><div><div class="line">${d.signed_off_sig ? `<img src="${esc(d.signed_off_sig)}" alt="">` : ''}</div><small>Check-in signed off by ${d.signed_off_at ? `<b>${esc(d.signed_off_name || '')}</b>, ${esc(whenText(d.signed_off_at))}` : '(teacher)'}</small></div>
-      <div><div class="line"></div><small>Examiner</small></div><div><div class="line"></div><small>Examiner</small></div></div>`);
+    ${es.map((e, i) => { const s = student(e.member_key); return `<tr${e.checked_in_at ? '' : ' style="color:#666"'}><td>${i + 1}</td><td><b>${esc(e.full_name)}</b>${s && s.location !== d.location ? `<br><small>${esc(s.location)}</small>` : ''}</td><td>${yrs(s) ?? ''}</td><td>${esc(short(e.belt_from))}</td><td>${esc(short(toText(e)))}</td><td class="c">${e.checked_in_at ? '&#10003;' : box}</td><td class="c">${e.result === 'pass' ? '&#10003;' : box}</td><td class="c">${e.result === 'distinction' ? '&#10003;' : box}</td><td class="c">${e.result === 'retest' ? '&#10003;' : box}</td><td></td></tr>`; }).join('')}</table>`);
   w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
 }
 // Results on a tablet: one card per student, three big buttons
@@ -1113,7 +1062,7 @@ function renderResults(d, es) {
   const v = $('#view-day');
   v.innerHTML = `<div class="view-head"><div><button class="x" id="backDay" style="padding:0">‹ Back to the day</button><h2>Results · ${esc(d.location)} ${esc(fmtDate(d.grading_date))}</h2></div><span class="hint" id="resCount"></span></div>
     <p class="hint">Tap a result; it saves straight away. Tap it again to clear it.</p>
-    ${es.map(e => `<div class="rescard"><div class="row" style="flex-wrap:nowrap">${swatch(e.belt_from)}<div class="main" style="flex:1;min-width:0"><div class="name" style="font-size:18px">${esc(e.full_name)}</div><div class="meta">${esc(ageText(student(e.member_key)))} · ${esc(short(e.belt_from))} to ${esc(short(toText(e)))}${e.no_show ? ' · <span style="color:var(--danger)">No-show</span>' : ''}</div></div></div>
+    ${es.map(e => `<div class="rescard"><div class="row" style="flex-wrap:nowrap">${swatch(e.belt_from)}<div class="main" style="flex:1;min-width:0"><div class="name" style="font-size:18px">${esc(e.full_name)}</div><div class="meta">${esc(ageText(student(e.member_key)))} · ${esc(short(e.belt_from))} to ${esc(short(toText(e)))}${!e.checked_in_at && es.some(x => x.checked_in_at) ? ' · <span style="color:var(--danger)">Not checked in</span>' : ''}</div></div></div>
       <div class="res" data-entry="${e.entry_id}">${Object.entries(RESULT).map(([k, t]) => `<button type="button" data-r="${k}" aria-pressed="${e.result === k}">${t}</button>`).join('')}</div></div>`).join('')}`;
   const count = () => { const n = state.entries.filter(x => x.day_id === d.day_id && x.result).length; $('#resCount').textContent = `${n} of ${es.length} done`; };
   count();
