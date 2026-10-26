@@ -654,8 +654,9 @@ function openStudent(key) {
       <dt>Belt</dt><dd>${swatch(s.belt)} ${esc(s.belt)}, grading to <b>${esc(sNext(s))}</b>${s.up_belt && s.up_belt !== s.next_belt ? ` (or ${esc(withProg(s.up_belt, s.up_programme))} when moving up)` : ''}</dd>
       <dt>Last grading</dt><dd>${s.promoted_on ? esc(fmtDate(s.promoted_on)) + ` (${s.weeks_at_belt} weeks ago)` : 'Not in EFC'}${overdue(s) ? ' <span class="tag bad">Overdue</span>' : ''}</dd>
       <dt>Classes since</dt><dd><b>${s.classes}</b> of ${s.classes_needed} needed ${s.enough_classes ? '<span class="tag ok">Enough</span>' : `<span class="tag warn">${s.classes_needed - s.classes} more</span>`}</dd>
-      <dt>Parent</dt><dd>${esc([s.guardian_name, s.phone].filter(Boolean).join(' · ') || '—')}</dd>
+      ${contactRows(s)}
     </dl>
+    ${canGrade() ? '<div class="row"><button class="btn sm" id="editContact">Edit mobile or email</button></div>' : ''}
     ${canApprove() ? `<form id="apForm" class="section"><h3>Instructor</h3>
       <div class="row"><button type="button" class="btn ${s.approval === 'ready' ? 'primary' : ''}" id="apReady">Ready to grade</button><button type="button" class="btn ${s.approval === 'not_yet' ? 'danger' : ''}" id="apNot">Not yet</button>${s.approval ? '<button type="button" class="btn sm" id="apClear">Clear</button>' : ''}</div>
       <div class="field"><label for="apNote">What to work on (goes in the "not yet" message)</label><textarea id="apNote" rows="2" placeholder="e.g. Keep practising your pattern at home.">${esc(s.approval_note || '')}</textarea></div>
@@ -675,6 +676,32 @@ function openStudent(key) {
   const n = $('#apNot'); if (n) n.onclick = () => decide('not_yet');
   const c = $('#apClear'); if (c) c.onclick = () => decide(null);
   const t = $('#apText'); if (t) t.onclick = () => composeTexts('not_ready', [{ member_key: key, entry_id: null, s, e: null, d: null }]);
+  const ec = $('#editContact'); if (ec) ec.onclick = () => editContact(key, () => openStudent(key));
+}
+// Parent, mobile and email rows for the student and grading-day screens
+function contactRows(s) {
+  return `<dt>Parent</dt><dd>${esc(s.guardian_name || '—')}</dd>
+      <dt>Mobile</dt><dd>${s.phone ? `<a href="tel:${esc(String(s.phone).replace(/[^\d+]/g, ''))}">${esc(s.phone)}</a>` : '<span style="color:var(--danger)">None</span>'}</dd>
+      <dt>Email</dt><dd style="word-break:break-all">${s.email ? esc(s.email) : '<span style="color:var(--danger)">None</span>'}</dd>`;
+}
+// Change a student's mobile and email (kept even when EFC updates); then carry on where staff were
+function editContact(key, after) {
+  const s = student(key) || state.all.students.find(x => x.member_key === key); if (!s) return;
+  openDlg(`<form id="ecForm" class="dlg"><div class="dlg-head"><div><h3>Mobile and email</h3><p class="hint">${esc(s.full_name)}${s.guardian_name ? ' · parent ' + esc(s.guardian_name) : ''}</p></div><button type="button" class="x" data-close>Close</button></div>
+    <div class="field"><label for="ecPhone">Mobile (for texts)</label><input id="ecPhone" type="tel" inputmode="tel" autocomplete="off" value="${esc(s.phone || '')}" placeholder="0412 345 678"></div>
+    <div class="field"><label for="ecEmail">Email (for booking and payment emails)</label><input id="ecEmail" type="email" inputmode="email" autocomplete="off" value="${esc(s.email || '')}" placeholder="name@example.com"></div>
+    <p class="hint">Saved here only: update EFC too if it's wrong there. The nightly EFC update won't overwrite what you type.</p>
+    <p class="err" id="ecErr" hidden style="color:var(--danger);margin:0"></p>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" id="ecCancel">Cancel</button><button class="btn primary" id="ecGo" type="submit">Save</button></div></form>`);
+  $('#ecCancel').onclick = () => { if (after) after(); else dlg.close(); };
+  $('#ecPhone').focus();
+  $('#ecForm').onsubmit = async ev => {
+    ev.preventDefault(); $('#ecGo').disabled = true; $('#ecGo').textContent = 'Saving…'; $('#ecErr').hidden = true;
+    try {
+      await run(sb.rpc('cb_set_contact', { p_member: key, p_phone: $('#ecPhone').value, p_email: $('#ecEmail').value }), 'Contact details saved');
+      await loadAll(); render(); if (after) after(); else dlg.close();
+    } catch (er) { $('#ecErr').textContent = errMsg(er); $('#ecErr').hidden = false; $('#ecGo').disabled = false; $('#ecGo').textContent = 'Save'; }
+  };
 }
 
 /* ---------------- Texts (invites, congratulations, not yet) ---------------- */
@@ -693,11 +720,14 @@ function composeTexts(kind, people) {
     <div class="field"><label for="txTpl">Message</label><textarea id="txTpl" rows="4">${esc(tpl)}</textarea>
       <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {photo} {distinction} {note}. Change the saved wording in Settings.</p></div>
     <div class="field"><span class="label">Preview for ${esc(people[0].s ? people[0].s.full_name : people[0].e.full_name)}</span><div class="card" style="box-shadow:none;border:1px solid var(--line)" id="txPrev"></div><p class="hint" id="txLen"></p></div>
-    <ul class="list" id="txList" style="max-height:240px;overflow:auto">${people.map((p, i) => { const ph = p.s && p.s.phone; return `<li><label class="item" style="cursor:pointer;min-height:48px"><input type="checkbox" data-i="${i}" ${ph ? 'checked' : 'disabled'}><div class="main"><div class="name">${esc((p.s && p.s.full_name) || p.e.full_name)}</div><div class="meta">${ph ? esc(ph) : '<span style="color:var(--danger)">No mobile in EFC</span>'}</div></div></label></li>`; }).join('')}</ul>
+    <ul class="list" id="txList" style="max-height:240px;overflow:auto">${people.map((p, i) => { const ph = p.s && p.s.phone; return `<li><label class="item" style="cursor:pointer;min-height:48px"><input type="checkbox" data-i="${i}" ${ph ? 'checked' : 'disabled'}><div class="main"><div class="name">${esc((p.s && p.s.full_name) || p.e.full_name)}</div><div class="meta">${ph ? esc(ph) : `<span style="color:var(--danger)">No mobile</span>${canGrade() ? ` <button type="button" class="btn sm" data-addph="${i}">Add mobile</button>` : ''}`}</div></div></label></li>`; }).join('')}</ul>
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" id="txGo" type="submit">Send</button></div>
   </form>`);
   const upd = () => { $('#txPrev').textContent = preview(people[0]); smsInfo($$('#txList input:checked').map(c => preview(people[+c.dataset.i]))); const n = $$('#txList input:checked').length; $('#txGo').textContent = `Send ${n} text${n === 1 ? '' : 's'}`; $('#txGo').disabled = !n; };
   $('#txTpl').oninput = upd; $$('#txList input').forEach(c => c.onchange = upd); upd();
+  // Add a missing mobile, then come back to these texts (with the new number)
+  $$('#txList [data-addph]').forEach(b => b.onclick = ev => { ev.preventDefault(); const p = people[+b.dataset.addph];
+    editContact(p.member_key, () => composeTexts(kind, people.map(x => ({ ...x, s: student(x.member_key) || x.s })))); });
   $('#txForm').onsubmit = async ev => {
     ev.preventDefault();
     const items = $$('#txList input:checked').map(c => { const p = people[+c.dataset.i]; return { member_key: p.member_key, entry_id: p.entry_id, body: preview(p) }; });
@@ -920,8 +950,9 @@ function openEntry(id) {
       <dt>Fee</dt><dd>${money(beltOf(e.belt_from).fee) || 'Not set'} ${e.paid ? `<span class="tag ok">Paid ${esc(PAID_HOW[e.paid_how] || '')}</span>` : '<span class="tag warn">Unpaid</span>'}</dd>
       <dt>Result</dt><dd>${e.result ? RESULT[e.result] : '—'}</dd>
       <dt>Photo</dt><dd>${e.photo_path ? `Taken${sentTo('photo', e.entry_id) ? ', texted to the family' : ''}` : e.photo_removed_at ? 'Removed (photos are kept 30 days)' : 'Not yet'}</dd>
-      ${s ? `<dt>Parent</dt><dd>${esc([s.guardian_name, s.phone].filter(Boolean).join(' · ') || '—')}</dd>` : ''}
+      ${s ? contactRows(s) : ''}
     </dl>
+    ${s && canGrade() ? '<div class="row"><button class="btn sm" id="editContact">Edit mobile or email</button></div>' : ''}
     <div class="section"><h3>Booking link</h3><p class="hint" style="word-break:break-all">${esc(bookingLink(e))}</p><div class="row"><button class="btn sm" id="copyLink">Copy link</button>${canGrade() && !e.result && !(e.booked_at && e.paid) ? '<button class="btn sm" id="newLink">Issue new link</button>' : ''}</div>
       ${e.late_ok_until && new Date(e.late_ok_until) > new Date() ? `<p class="hint">Late booking allowed until ${esc(whenText(e.late_ok_until))}.</p>` : bookingShut(d) && !e.booked_at ? '<p class="hint">Bookings have closed for this day. Issue a new link to let them book or pay late (it works for 48 hours; the old link stops working).</p>' : ''}</div>
     ${e.photo_path ? `<div class="section"><h3>Photo link</h3><p class="hint" style="word-break:break-all">${esc(photoLink(e))}</p><div class="row"><button class="btn sm" id="copyPhoto">Copy link</button></div></div>` : ''}
@@ -947,6 +978,7 @@ function openEntry(id) {
   };
   const cp = $('#copyPhoto'); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(photoLink(e)); toast('Link copied'); } catch (er) { toast('Press and hold the link to copy it.'); } };
   const rp = $('#recordPay'); if (rp) rp.onclick = () => recordPayment(e);
+  const ec = $('#editContact'); if (ec) ec.onclick = () => editContact(e.member_key, () => openEntry(id));
   const p = $('#paidBtn'); if (p) p.onclick = async () => { try { await run(sb.rpc('cb_set_paid', { p_entry: e.entry_id, p_paid: !e.paid }), e.paid ? 'Marked unpaid' : 'Marked paid'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
   const bh = $('#byHandDone'); if (bh) bh.onclick = async () => { try { await run(sb.from('cb_entries').update({ efc_by_hand_done_at: new Date().toISOString() }).eq('entry_id', e.entry_id), 'Ticked off'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };
   const mb = $('#markBooked'); if (mb) mb.onclick = async () => { try { await run(sb.from('cb_entries').update({ booked_at: new Date().toISOString(), booking_error: null }).eq('entry_id', e.entry_id), 'Marked booked'); await loadAll(); render(); openEntry(id); } catch (er) { toast(errMsg(er), 6000); } };

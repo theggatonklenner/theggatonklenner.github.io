@@ -31,6 +31,7 @@ await db.exec(read(join(ROOT, 'supabase/coloured-belts-4.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-5.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-6.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-7.sql')));
+await db.exec(read(join(ROOT, 'supabase/coloured-belts-8.sql')));
 await db.exec(`insert into prep_roles (email, role) values ('tate@ama.test', 'admin') on conflict do nothing; delete from prep_roles where email <> 'tate@ama.test'; insert into prep_roles (email, role) values ('coach@ama.test', 'instructor'), ('desk@ama.test', 'attendance');`);
 // EFC students (made up): Sam and Kim have enough classes; Alex is overdue; Jo is at another school
 await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_name, phone, location, programme, belt, promoted_on, attended_since_promoted, efc_reference) values
@@ -139,6 +140,15 @@ try {
   await page.click('#readyList [data-key="efc:m1"]'); await page.waitForSelector('#apReady');
   await page.click('#apReady'); await toastSays(page, 'Marked ready');
   ok((await q(`select status, belt from cb_approvals where member_key = 'efc:m1'`))[0]?.status === 'ready', 'an instructor marks a student ready (for their current belt)');
+  await settle(page);
+  // Staff fix a mobile and email
+  await page.click('#editContact'); await page.waitForSelector('#ecForm');
+  await page.fill('#ecPhone', '123'); await page.click('#ecGo'); await page.waitForSelector('#ecErr:not([hidden])');
+  ok((await page.textContent('#ecErr')).includes("doesn't look right"), 'a wrong mobile number is refused');
+  await page.fill('#ecPhone', '+61 483 896 150'); await page.fill('#ecEmail', 'Pat@Example.com'); await page.click('#ecGo'); await page.waitForSelector('#apReady');
+  const mc = (await q(`select phone, email, contact_edited_by from efc_members where member_key = 'efc:m1'`))[0];
+  ok(mc.phone === '0483896150' && mc.email === 'pat@example.com' && mc.contact_edited_by === 'tate@ama.test' && (await page.textContent('#dlg')).includes('0483896150'), 'staff change a student\'s mobile and email (tidied up), and the student screen shows them');
+  await q(`update efc_members set phone = '0412 345 678' where member_key = 'efc:m1'`);
   await settle(page); await page.click('#dlg [data-close]');
   await page.click('#readyList [data-key="efc:m2"]'); await page.waitForSelector('#apNot');
   await page.fill('#apNote', 'Practise your first pattern at home.'); await page.click('#apNot'); await toastSays(page, 'not yet');
