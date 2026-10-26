@@ -270,6 +270,11 @@ try {
   ok((await page.textContent('#view-bbc')).includes('Kim Ng') && (await page.textContent('#view-bbc')).includes('asked for by tate@ama.test') && new URL(page.url()).pathname.endsWith('/black-belt-club'), 'the invitation comes up on the Black Belt Club invitations list (its own page)');
   await page.check('#view-bbc [data-written="efc:m2"]'); await toastSays(page, 'written');
   ok(!!(await q(`select bbc_written_at from efc_members where member_key = 'efc:m2'`))[0].bbc_written_at && await until(async () => (await page.textContent('#view-bbc')).includes('No invitations to write') && await page.isHidden('#bbcCount')), 'ticking it off records that it was written');
+  // Another staff member asks for an invitation on their device: it shows here without reloading
+  await page.evaluate(() => applyLive({ table: 'efc_members', eventType: 'UPDATE', new: { member_key: 'efc:m1', full_name: 'Sam Lee', guardian_name: 'Pat Lee', phone: '0412 345 678', bbc_invited_at: new Date().toISOString(), bbc_invited_by: 'coach@ama.test' } }));
+  ok(await until(async () => (await page.textContent('#view-bbc')).includes('Sam Lee') && (await page.textContent('#bbcCount')) === '1'), 'an invitation asked for on another device comes up straight away, without reloading');
+  await page.evaluate(() => applyLive({ table: 'efc_members', eventType: 'UPDATE', new: { member_key: 'efc:m1', full_name: 'Sam Lee', guardian_name: 'Pat Lee', phone: '0412 345 678', bbc_seen_at: new Date().toISOString() } }));
+  ok(await until(async () => (await page.textContent('#view-bbc')).includes('No invitations to write')), '...and goes when it is cancelled');
   await page.click('.tab[data-view="days"]'); await page.click(`#view-days [data-day="${dayId}"]`); await page.click('#resultsBtn'); await page.waitForSelector('.res');
   if (SHOTS) { await page.setViewportSize({ width: 390, height: 844 }); await shot(page, 'cb-results-phone'); await page.setViewportSize({ width: 1100, height: 900 }); }
   await page.click('#backDay'); await page.waitForSelector('#csvPassed');

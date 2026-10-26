@@ -1077,7 +1077,12 @@ const bbcInviteBtn = s => !s || s.black_belt_club || !canApprove() ? '' : `<butt
 function wireBbcInvite(root, after) {
   root.querySelectorAll('[data-bbcinv]').forEach(b => b.onclick = async () => {
     b.disabled = true;
-    try { await run(sb.rpc('cb_bbc_invite', { p_member: b.dataset.bbcinv, p_on: b.dataset.on === '1' }), b.dataset.on === '1' ? 'Added to Black Belt Club invitations to write' : 'Invitation cancelled'); await loadAll(); after(); }
+    const on = b.dataset.on === '1', key = b.dataset.bbcinv, s = student(key) || {};
+    try {
+      await run(sb.rpc('cb_bbc_invite', { p_member: key, p_on: on }), on ? 'Added to Black Belt Club invitations to write' : 'Invitation cancelled');
+      patchStudent(key, on ? { bbc_invited_at: s.bbc_invited_at || new Date().toISOString(), bbc_invited_by: s.bbc_invited_by || state.me } : { bbc_invited_at: null, bbc_invited_by: null, bbc_written_at: null, bbc_written_by: null });
+      after();
+    }
     catch (er) { toast(errMsg(er), 6000); b.disabled = false; }
   });
 }
@@ -1205,10 +1210,10 @@ function renderBbc() {
       <div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(s.location)} · ${esc(ageText(s))} · ${esc(progs(s.member_key))}${s.guardian_name ? ' · parent ' + esc(s.guardian_name) : ''} · asked for by ${esc(s.bbc_invited_by || 'staff')}, ${esc(when(s.bbc_invited_at))}</div></div><span class="tags"><span class="tag bbcinv">To write</span></span></label></li>`).join('') : '<li class="empty">No invitations to write.</li>'}</ul>
     ${done.length ? `<h3>Written</h3><ul class="list">${done.map(s => `<li><div class="item" style="cursor:default"><div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(s.location)} · written ${esc(when(s.bbc_written_at))} by ${esc(s.bbc_written_by || 'staff')}${s.black_belt_club ? ' · <b>joined</b>' : ''}</div></div>${canApprove() ? `<button class="btn sm" data-unwritten="${esc(s.member_key)}">Undo</button>` : ''}</div></li>`).join('')}</ul>` : ''}`;
   $$('[data-written]').forEach(c => c.onchange = async () => {
-    try { await run(sb.rpc('cb_bbc_written', { p_member: c.dataset.written, p_on: true }), 'Ticked off: invitation written'); await loadAll(); render(); }
+    try { await run(sb.rpc('cb_bbc_written', { p_member: c.dataset.written, p_on: true }), 'Ticked off: invitation written'); patchStudent(c.dataset.written, { bbc_written_at: new Date().toISOString(), bbc_written_by: state.me }); render(); }
     catch (e) { c.checked = false; toast(errMsg(e), 6000); }
   });
-  $$('[data-unwritten]').forEach(b => b.onclick = async () => { try { await run(sb.rpc('cb_bbc_written', { p_member: b.dataset.unwritten, p_on: false })); await loadAll(); render(); } catch (e) { toast(errMsg(e), 6000); } });
+  $$('[data-unwritten]').forEach(b => b.onclick = async () => { try { await run(sb.rpc('cb_bbc_written', { p_member: b.dataset.unwritten, p_on: false })); patchStudent(b.dataset.unwritten, { bbc_written_at: null, bbc_written_by: null }); render(); } catch (e) { toast(errMsg(e), 6000); } });
 }
 function renderEfc() {
   const v = $('#view-efc');
@@ -1486,9 +1491,47 @@ async function start() {
   // The address they opened (or were sent back with from 404.html as ?p=...)
   const asked = new URLSearchParams(location.search).get('p') || (location.pathname.startsWith(APP_BASE) ? location.pathname.slice(APP_BASE.length) : '');
   applyPath(asked.replace(/^index\.html$/, ''));
-  state.loaded = true;
+  state.loaded = true; state.loadedAt = Date.now();
   setAddress(true);
   render();
+  goLive();
+}
+/* ---------------- Live updates: other staff's changes show up without reloading ---------------- */
+let liveTimer = null, reloadTimer = null;
+// Redraw soon, but not while someone is typing in a search box or field on the page
+function liveRender() {
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(() => {
+    const a = document.activeElement;
+    if (a && a.closest && a.closest('.view') && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes(a.type)))) return liveRender();
+    render();
+  }, 300);
+}
+const quietReload = (ms = 1200) => { clearTimeout(reloadTimer); reloadTimer = setTimeout(async () => { try { await loadAll(); state.loadedAt = Date.now(); liveRender(); } catch (e) { /* try again next change */ } }, ms); };
+// Change every program row for a student (from a change here or from another device)
+function patchStudent(key, f) { state.all.students.forEach(s => { if (s.member_key === key) Object.assign(s, f); }); }
+const studentFields = m => ({ full_name: m.full_name, guardian_name: m.guardian_name, phone: m.phone || m.guardian_phone || null, email: m.email || m.guardian_email || null,
+  black_belt_club: !!(m.bbc_seen_at && Date.parse(m.bbc_seen_at) > Date.now() - 3 * 86400000),
+  bbc_invited_at: m.bbc_invited_at || null, bbc_invited_by: m.bbc_invited_by || null, bbc_written_at: m.bbc_written_at || null, bbc_written_by: m.bbc_written_by || null });
+function applyLive(p) {
+  const list = { cb_entries: ['entries', 'entry_id'], cb_days: ['days', 'day_id'] }[p.table];
+  if (list) {
+    const [k, id] = list, arr = state.all[k], key = (p.new && p.new[id]) || (p.old && p.old[id]), i = arr.findIndex(x => x[id] === key);
+    if (p.eventType === 'DELETE') { if (i >= 0) arr.splice(i, 1); }
+    else if (i >= 0) Object.assign(arr[i], p.new); else arr.push(p.new);
+    applyProgramme(); liveRender();
+  } else if (p.table === 'efc_members' && p.new && p.new.member_key) {
+    if (state.all.students.some(s => s.member_key === p.new.member_key)) { patchStudent(p.new.member_key, studentFields(p.new)); liveRender(); }
+  } else quietReload();   // ready / not yet, messages, settings: fetch everything again
+}
+function goLive() {
+  try {
+    sb.channel('cb-live').on('postgres_changes', { event: '*', schema: 'public' }, p => {
+      if (['cb_entries', 'cb_days', 'efc_members', 'cb_approvals', 'cb_messages', 'cb_belts', 'cb_settings'].includes(p.table)) applyLive(p);
+    }).subscribe();
+  } catch (e) { console.warn(e); }
+  // Back on the app after a while (a phone or iPad that was asleep): catch up
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - (state.loadedAt || 0) > 60000) quietReload(0); });
 }
 $('#siForm').onsubmit = async e => {
   e.preventDefault(); $('#siGo').disabled = true;
