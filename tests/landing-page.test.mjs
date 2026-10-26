@@ -60,6 +60,7 @@ async function context() {
   return ctx;
 }
 const LANDING = pathToFileURL(join(here, '../index.html')).href;
+const shot = async (page, n) => { if (process.env.SHOT_DIR) await page.screenshot({ path: join(process.env.SHOT_DIR, n + '.png'), fullPage: true }); };
 const names = async page => page.$$eval('#apps a.item .name', ns => ns.map(n => n.firstChild.textContent.trim()));   // real apps (not "Coming soon")
 async function signIn(page, email) {
   await page.goto(LANDING); await page.waitForSelector('#signIn:not([hidden])');
@@ -72,6 +73,7 @@ try {
   let ctx = await context(), page = await ctx.newPage();
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(LANDING); await page.waitForSelector('#signIn:not([hidden])');
+  await shot(page, 'landing-signin');
   ok(await page.isHidden('#apps') && (await page.$$('#apps .item')).length === 0, 'signed out, it asks you to sign in and shows no apps');
   await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'wrong'); await page.click('#siGo');
   await page.waitForSelector('#siMsg:not([hidden])');
@@ -80,7 +82,7 @@ try {
   let n = await names(page);
   ok(['Gradings', 'TV Display', 'Tablet Display', 'TV Remote', 'Play on this screen', 'Clipboard', 'Staff logins', 'Supabase'].every(x => n.includes(x)), 'an admin sees every app (' + n.join(', ') + ')');
   ok((await page.textContent('#who')) === 'tate@ama.test', 'it shows who is signed in');
-  await page.reload(); await page.waitForSelector('#apps:not([hidden])');
+  await page.reload(); await page.waitForSelector('#apps:not([hidden])'); await shot(page, 'landing-apps');
   ok((await names(page)).length === n.length, 'it remembers the sign-in');
   await page.click('#signOut'); await page.waitForSelector('#signIn:not([hidden])');
   ok(true, 'Sign out goes back to the sign-in');
@@ -104,7 +106,7 @@ try {
   console.log('\nWelcome page');
   ctx = await context(); page = await ctx.newPage(); page.on('pageerror', e => errors.push(e.message));
   const W = pathToFileURL(join(here, '../welcome/index.html')).href;
-  await page.goto(W + '#token_hash=hash-invite-new@ama.test&type=invite');
+  await page.goto(W + '#token_hash=hash-invite-new@ama.test&type=invite'); await page.waitForTimeout(400); await shot(page, 'welcome');
   await page.waitForSelector('#setPw:not([hidden])', { timeout: 6000 }).catch(() => {});
   ok(await page.isVisible('#setPw') && (await page.textContent('#spFor')).includes('new@ama.test') && (await page.textContent('#spFor')).includes('Black Belt Gradings'), 'the link from the email opens "Choose your password", with their apps');
   ok(!page.url().includes('token_hash'), 'the code is taken out of the address bar');
