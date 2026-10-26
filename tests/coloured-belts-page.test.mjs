@@ -36,6 +36,7 @@ await db.exec(read(join(ROOT, 'supabase/coloured-belts-9.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-10.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-11.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-12.sql')));
+await db.exec(read(join(ROOT, 'supabase/coloured-belts-14.sql')));
 await db.exec(`insert into prep_roles (email, role) values ('tate@ama.test', 'admin') on conflict do nothing; delete from prep_roles where email <> 'tate@ama.test'; insert into prep_roles (email, role) values ('coach@ama.test', 'instructor'), ('desk@ama.test', 'attendance');`);
 // EFC students (made up): Sam and Kim have enough classes; Alex is overdue; Jo is at another school
 await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_name, phone, location, programme, belt, promoted_on, attended_since_promoted, efc_reference) values
@@ -280,6 +281,14 @@ try {
   ok((await page.textContent('#view-bbc')).includes('Kim Ng') && (await page.textContent('#view-bbc')).includes('Asked for by tate@ama.test') && new URL(page.url()).pathname.endsWith('/black-belt-club'), 'the invitation comes up on the Black Belt Club invitations list (its own page)');
   await page.click('#view-bbc [data-written="efc:m2"]'); await toastSays(page, 'written');
   ok(!!(await q(`select bbc_written_at from efc_members where member_key = 'efc:m2'`))[0].bbc_written_at && await until(async () => (await page.textContent('#view-bbc')).includes('No invitations to write') && await page.isHidden('#bbcCount')), 'ticking it off records that it was written');
+  // Two weeks later Kim still hasn't joined: a follow-up text to the parent
+  await q(`update efc_members set bbc_written_at = now() - interval '15 days' where member_key = 'efc:m2'`);
+  await page.evaluate(() => { patchStudent('efc:m2', { bbc_written_at: new Date(Date.now() - 15 * 86400000).toISOString() }); render(); });
+  ok(await until(async () => (await page.textContent('#view-bbc')).includes('Follow up') && (await page.textContent('#bbcCount')) === '1'), 'two weeks after the card, someone who hasn\'t joined comes up to follow up');
+  await page.click('#bbcFollow'); await page.waitForSelector('#txPrev');
+  ok((await page.textContent('#txPrev')).includes("Kim's Black Belt Club invitation") && (await page.textContent('#txPrev')).includes('Hi Jo'), 'with a ready-to-send text to the parent');
+  await page.click('#txGo');
+  ok(await until(() => fnCalls.some(c => c.kind === 'bbc_followup' && c.items[0].member_key === 'efc:m2')) && await until(async () => !(await page.textContent('#view-bbc')).includes('Follow up')), 'once texted, they leave the follow-up list');
   // Another staff member asks for an invitation on their device: it shows here without reloading
   await page.evaluate(() => applyLive({ table: 'efc_members', eventType: 'UPDATE', new: { member_key: 'efc:m1', full_name: 'Sam Lee', guardian_name: 'Pat Lee', phone: '0412 345 678', bbc_invited_at: new Date().toISOString(), bbc_invited_by: 'coach@ama.test' } }));
   ok(await until(async () => (await page.textContent('#view-bbc')).includes('Sam Lee') && (await page.textContent('#bbcCount')) === '1'), 'an invitation asked for on another device comes up straight away, without reloading');
@@ -400,7 +409,7 @@ try {
   await until(async () => (await q(`select classes_needed from cb_belts where programme = 'Taekwondo' and belt = 'White Belt'`))[0].classes_needed === 30); await page.waitForSelector('#saveBelts:not([disabled])'); await settle(page);
   ok((await q(`select fee, classes_needed from cb_belts where programme = 'Taekwondo' and belt = 'Yellow Belt'`))[0].fee == 55 && (await q(`select classes_needed from cb_belts where programme = 'Taekwondo' and belt = 'White Belt'`))[0].classes_needed === 30, 'each belt has its own classes needed, weeks between and fee');
   ok((await q(`select enough_classes from cb_students where member_key = 'efc:m2'`))[0].enough_classes === false, 'changing classes needed changes who is eligible (Kim has 26 of 30)');
-  ok((await page.$$('#msgForm textarea[data-col]')).length === 8, 'Settings has all eight texts: invitation, reminder to book, day reminder, fee reminder, congratulations, grading photos, re-test, not yet');
+  ok((await page.$$('#msgForm textarea[data-col]')).length === 9, 'Settings has all nine texts: invitation, reminder to book, day reminder, fee reminder, congratulations, grading photos, fail, not yet, Black Belt Club follow-up');
   await page.fill('#tpl_reminder', 'See you at {school} on {date}!');
   await page.fill('#sHook', 'https://example.com/x'); await page.click('#saveMsgs');
   ok((await toastSays(page, 'script.google.com')).includes('script.google.com'), 'the booking sheet must be a Google Apps Script web app address');

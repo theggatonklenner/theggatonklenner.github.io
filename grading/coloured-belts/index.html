@@ -657,12 +657,13 @@ function editContact(key, after) {
 }
 
 /* ---------------- Texts (invites, congratulations, not yet) ---------------- */
-const KIND_NAME = { invite: 'Invitations', not_booked: 'Reminder to book', reminder: 'Grading day reminder', unpaid: 'Fee reminder', congrats: 'Congratulations', photo: 'Grading photos', retest: 'Fail message', not_ready: 'Not yet messages' };
-const KIND_TPL = { invite: 'invite_text', not_booked: 'not_booked_text', reminder: 'reminder_text', unpaid: 'unpaid_text', congrats: 'congrats_text', photo: 'photo_text', retest: 'retest_text', not_ready: 'not_ready_text' };
+const KIND_NAME = { invite: 'Invitations', not_booked: 'Reminder to book', reminder: 'Grading day reminder', unpaid: 'Fee reminder', congrats: 'Congratulations', photo: 'Grading photos', retest: 'Fail message', not_ready: 'Not yet messages', bbc_followup: 'Black Belt Club follow-up' };
+const KIND_TPL = { invite: 'invite_text', not_booked: 'not_booked_text', reminder: 'reminder_text', unpaid: 'unpaid_text', congrats: 'congrats_text', photo: 'photo_text', retest: 'retest_text', not_ready: 'not_ready_text', bbc_followup: 'bbc_followup_text' };
 // Settings: each message, in the order they're used
 const KIND_HELP = { invite: 'Sent from a grading day to students marked ready. Include {link}.', not_booked: 'For families invited but not booked yet. Include {link}.',
   reminder: 'For booked families, a day or two before.', unpaid: 'For booked families whose fee isn\'t marked paid.', congrats: 'After results: everyone who passed.', photo: 'After photos are taken on the grading day. Include {photo}: each family\'s link to their photo.',
-  retest: 'After results: a kind message for anyone who failed.', not_ready: 'From Who\'s ready, for a student marked not yet. {note} is the instructor\'s note.' };
+  retest: 'After results: a kind message for anyone who failed.', not_ready: 'From Who\'s ready, for a student marked not yet. {note} is the instructor\'s note.',
+  bbc_followup: 'From Cards to write, two weeks after a Black Belt Club card is written, for anyone who hasn\'t joined.' };
 // people: [{ member_key, entry_id, s, e, d }]
 function composeTexts(kind, people) {
   const tpl = state.settings[KIND_TPL[kind]] || '';
@@ -1146,22 +1147,31 @@ function printDay(d, es) {
 /* ---------------- Black Belt Club invitations to write ---------------- */
 // One row per student (they can be in several programs), across every program
 function bbcPeople() { const seen = new Map(); state.all.students.forEach(s => { if (!seen.has(s.member_key)) seen.set(s.member_key, s); }); return [...seen.values()]; }
+// Black Belt Club follow-ups: card written 14+ days ago, not joined, and no follow-up text since the card
+const FOLLOW_DAYS = 14;
+const bbcFollowedUp = s => state.messages.some(m => m.kind === 'bbc_followup' && m.member_key === s.member_key && (m.status === 'sent' || m.status === 'test') && (!s.bbc_written_at || String(m.sent_at) >= String(s.bbc_written_at)));
+const bbcFollowUps = () => bbcPeople().filter(s => s.bbc_written_at && !s.black_belt_club && Date.parse(s.bbc_written_at) <= Date.now() - FOLLOW_DAYS * 86400000 && !bbcFollowedUp(s))
+  .sort((a, b) => String(a.bbc_written_at).localeCompare(String(b.bbc_written_at)));
 const bbcToWrite = () => bbcPeople().filter(s => s.bbc_invited_at && !s.bbc_written_at && !s.black_belt_club).sort((a, b) => String(a.bbc_invited_at).localeCompare(String(b.bbc_invited_at)));
 function renderBbc() {
-  const v = $('#view-bbc'), todo = bbcToWrite();
+  const v = $('#view-bbc'), todo = bbcToWrite(), follow = bbcFollowUps();
   const done = bbcPeople().filter(s => s.bbc_written_at).sort((a, b) => String(b.bbc_written_at).localeCompare(String(a.bbc_written_at))).slice(0, 40);
   const when = iso => new Date(iso).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
   const progs = key => [...new Set(state.all.students.filter(x => x.member_key === key).map(x => progLabel(x.programme)))].join(', ');
   v.innerHTML = `<div class="view-head"><div><h2>Cards to write</h2><p class="sub">Black Belt Club invitation cards teachers have asked for. Tick each one once it's written.</p></div></div>
     <ul class="list">${todo.length ? todo.map(s => `<li><label class="item" style="${beltVar(s.belt, s.programme)}"><input type="checkbox" data-written="${esc(s.member_key)}" ${canApprove() ? '' : 'disabled'}>
       <div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(s.location)}, ${esc(ageText(s))}, ${esc(progs(s.member_key))}${s.guardian_name ? ', parent ' + esc(s.guardian_name) : ''}</div><div class="meta">Asked for by ${esc(s.bbc_invited_by || 'staff')}, ${esc(when(s.bbc_invited_at))}</div></div></label></li>`).join('') : '<li class="empty">No invitations to write.</li>'}</ul>
-    ${done.length ? `<h3>Written</h3><ul class="list">${done.map(s => `<li><div class="item plain"><div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(s.location)}, written ${esc(when(s.bbc_written_at))} by ${esc(s.bbc_written_by || 'staff')}</div></div><div class="side">${s.black_belt_club ? '<span class="tag bbc">Joined</span>' : ''}${canApprove() ? `<button class="btn sm" data-unwritten="${esc(s.member_key)}">Undo</button>` : ''}</div></div></li>`).join('')}</ul>` : ''}`;
+    ${follow.length ? `<div class="section-title"><div><h3>Follow up</h3><p class="hint">Cards written ${FOLLOW_DAYS} or more days ago, not joined yet.</p></div>${canApprove() ? `<button class="btn primary" id="bbcFollow">Text ${follow.length} parent${follow.length === 1 ? '' : 's'}</button>` : ''}</div>
+      <ul class="list">${follow.map(s => `<li><button class="item" style="${beltVar(s.belt, s.programme)}" data-key="${esc(s.member_key)}" data-prog="${esc(s.programme || 'Taekwondo')}"><div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(s.location)}${s.guardian_name ? ', parent ' + esc(s.guardian_name) : ''}${s.phone ? '' : ', <span class="bad-text">no mobile</span>'}</div></div><div class="side"><span class="classes">${Math.floor((Date.now() - Date.parse(s.bbc_written_at)) / 86400000)}<small> days</small></span></div></button></li>`).join('')}</ul>` : ''}
+    ${done.length ? `<h3>Written</h3><ul class="list">${done.map(s => `<li><div class="item plain"><div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(s.location)}, written ${esc(when(s.bbc_written_at))} by ${esc(s.bbc_written_by || 'staff')}${bbcFollowedUp(s) && !s.black_belt_club ? ', followed up' : ''}</div></div><div class="side">${s.black_belt_club ? '<span class="tag bbc">Joined</span>' : ''}${canApprove() ? `<button class="btn sm" data-unwritten="${esc(s.member_key)}">Undo</button>` : ''}</div></div></li>`).join('')}</ul>` : ''}`;
   $$('[data-written]').forEach(c => c.onchange = async () => {
     const key = c.dataset.written;
     patchStudent(key, { bbc_written_at: new Date().toISOString(), bbc_written_by: state.me }); render();
     try { await run(sb.rpc('cb_bbc_written', { p_member: key, p_on: true }), 'Ticked off: card written'); }
     catch (e) { patchStudent(key, { bbc_written_at: null, bbc_written_by: null }); render(); toast(errMsg(e), 6000); }
   });
+  const fb = $('#bbcFollow'); if (fb) fb.onclick = () => composeTexts('bbc_followup', follow.map(s => ({ member_key: s.member_key, entry_id: null, s, e: null, d: null })));
+  $$('#view-bbc [data-key]').forEach(b => b.onclick = () => openStudent(b.dataset.key, b.dataset.prog));
   $$('[data-unwritten]').forEach(b => b.onclick = async () => { try { await run(sb.rpc('cb_bbc_written', { p_member: b.dataset.unwritten, p_on: false })); patchStudent(b.dataset.unwritten, { bbc_written_at: null, bbc_written_by: null }); render(); } catch (e) { toast(errMsg(e), 6000); } });
 }
 function renderEfc() {
@@ -1362,6 +1372,8 @@ function renderDash() {
   const ready = st.filter(s => s.approval === 'ready' && !openDayFor(s.member_key));
   const months = {}; results.forEach(e => { const k = dayOf(e.day_id).grading_date.slice(0, 7); months[k] = months[k] || { n: 0, p: 0, r: 0 }; months[k].n++; if (e.result !== 'retest') months[k].p++; });
   es.filter(e => e.paid).forEach(e => { const k = dayOf(e.day_id).grading_date.slice(0, 7); months[k] = months[k] || { n: 0, p: 0, r: 0 }; months[k].r += fee(e); });
+  // Black Belt Club cards written (every program, each student once) and how many joined
+  const cards = bbcPeople().filter(s => s.bbc_written_at && inSchool(s.location)), joined = cards.filter(s => s.black_belt_club);
   const mname = k => new Date(k + '-01T00:00:00').toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
   v.innerHTML = `<div class="view-head"><h2>Dashboard</h2><select id="dashSchool" aria-label="School" style="width:auto">${['', ...SCHOOLS].map(s => `<option value="${s}"${s === school ? ' selected' : ''}>${s || 'All schools'}</option>`).join('')}</select></div>
     <div class="figures">
@@ -1369,7 +1381,8 @@ function renderDash() {
       <div><b>${ready.length}</b><span>marked ready, not on a grading day</span></div>
       <div><b>${results.length ? Math.round(passes.length / results.length * 100) + '%' : '0'}</b><span>passed (${passes.length} of ${results.length})</span></div>
       <div><b>${money(revenue) || '$0'}</b><span>grading fees paid</span></div>
-      <div class="${od.length ? 'alert' : ''}"><b>${od.length}</b><span>overdue for a grading</span></div></div>
+      <div class="${od.length ? 'alert' : ''}"><b>${od.length}</b><span>overdue for a grading</span></div>
+      <div><b>${cards.length ? Math.round(joined.length / cards.length * 100) + '%' : '0'}</b><span>Black Belt Club cards that joined (${joined.length} of ${cards.length})</span></div></div>
     <h3>Each month</h3>${Object.keys(months).length ? `<div class="scroll"><table class="grid"><thead><tr><th>Month</th><th>Graded</th><th>Passed</th><th>Pass rate</th><th>Fees paid</th></tr></thead><tbody>${Object.keys(months).sort().reverse().map(k => `<tr><td>${esc(mname(k))}</td><td>${months[k].n}</td><td>${months[k].p}</td><td>${months[k].n ? Math.round(months[k].p / months[k].n * 100) + '%' : ''}</td><td>${money(months[k].r)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="hint">No results yet.</p>'}
     <div><h3>Overdue for a grading</h3><p class="hint" style="margin-top:4px">On their belt at least twice as long as usual and not on a grading day. A long gap often means a student is about to drop off.</p></div>
     ${od.length ? `<ul class="list">${od.sort((a, b) => b.weeks_at_belt - a.weeks_at_belt).slice(0, 50).map(s => `<li><button class="item" style="${beltVar(s.belt, s.programme)}" data-key="${esc(s.member_key)}" data-prog="${esc(s.programme || 'Taekwondo')}"><div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${isAll() ? esc(progLabel(s.programme)) + ', ' : ''}${esc(short(s.belt))}, ${esc(s.location)}</div></div><div class="side"><span class="classes">${s.weeks_at_belt} weeks</span><span class="hint">${s.classes} classes</span></div></button></li>`).join('')}</ul>` : '<p class="hint">No one is overdue.</p>'}`;
@@ -1464,7 +1477,7 @@ const quietReload = (ms = 1200) => { clearTimeout(reloadTimer); reloadTimer = se
 // Change every program row for a student (from a change here or from another device)
 function patchStudent(key, f) { state.all.students.forEach(s => { if (s.member_key === key) Object.assign(s, f); }); bbcBadge(); }
 // The number on the Cards to write tab
-function bbcBadge() { const b = $('#bbcCount'); if (!b || !state.all) return; const n = bbcToWrite().length; b.hidden = !n; b.textContent = n; }
+function bbcBadge() { const b = $('#bbcCount'); if (!b || !state.all) return; const n = bbcToWrite().length + bbcFollowUps().length; b.hidden = !n; b.textContent = n; }
 const studentFields = m => ({ full_name: m.full_name, guardian_name: m.guardian_name, phone: m.phone || m.guardian_phone || null, email: m.email || m.guardian_email || null,
   black_belt_club: !!(m.bbc_seen_at && Date.parse(m.bbc_seen_at) > Date.now() - 3 * 86400000),
   bbc_invited_at: m.bbc_invited_at || null, bbc_invited_by: m.bbc_invited_by || null, bbc_written_at: m.bbc_written_at || null, bbc_written_by: m.bbc_written_by || null });
