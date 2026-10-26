@@ -59,9 +59,10 @@ const signed = [], removedFiles = [], oldPhotos = [];
 const hooks = [];
 let hookStatus = 200;
 // Stripe stand-in: Checkout sessions are created here and can be marked paid
-const stripeCalls = [], stripeSessions = {};
+const stripeCalls = [], stripeSessions = {}, sheetRows = [];
 let nextSess = 1;
 const http = async (url, opts) => {
+  if (url.startsWith('https://script.google.com/')) { const b = JSON.parse(opts.body); sheetRows.push(b); return new Response(JSON.stringify(b.key === 'sheet-key' ? { ok: true } : { ok: false, error: 'Wrong key' }), { status: 200 }); }
   if (url.startsWith('https://hooks.zapier.com/')) { hooks.push(JSON.parse(opts.body)); return new Response('{"status":"success"}', { status: hookStatus }); }
   if (url.startsWith('https://api.stripe.com/v1/checkout/sessions')) {
     stripeCalls.push({ url, method: opts.method, body: opts.body ? decodeURIComponent(opts.body) : '', auth: opts.headers.Authorization });
@@ -213,6 +214,23 @@ const e4 = t.cb_entries.find(e => e.entry_id === 'e4');
 ok(r.body.paid && e4.paid_how === 'card', 'coming back from Stripe, the page checks with Stripe and shows it paid (even before the webhook)');
 ok(!e4.booked_at && e4.booking_error && r.body.booking_failed, '...and if the Zap fails, it stays paid and the page says the booking needs doing (staff see the error)');
 hookStatus = 200;
+
+
+console.log('\nBooking sheet (Google Sheets, then a Zap books from new rows)');
+const TOKEN5 = 'f'.repeat(64);
+t.cb_entries.push({ entry_id: 'e5', day_id: 'd1', member_key: 'efc:m1', full_name: 'Sam Lee', belt_from: 'Yellow Belt', belt_to: 'Orange Belt', token: TOKEN5, booked_at: null, booking_error: null, result: null, paid: false, paid_how: null });
+t.cb_settings[0].booking_webhook = 'https://script.google.com/macros/s/AKfycbx-Test_123/exec'; t.cb_settings[0].booking_key = 'wrong';
+r = await call({ action: 'book', token: TOKEN5 });
+const e5 = t.cb_entries.find(e => e.entry_id === 'e5');
+ok(r.status === 502 && !e5.booked_at && /Wrong key/.test(e5.booking_error), 'if the sheet\'s script has a different key, it is not marked booked and staff see why');
+t.cb_settings[0].booking_key = 'sheet-key';
+r = await call({ action: 'book', token: TOKEN5 });
+const row = sheetRows[sheetRows.length - 1];
+ok(r.body.booked && e5.booked_at && row.key === 'sheet-key' && row.member_id === 'm1' && row.session_id === 'sess-1' && row.location_id === 'f39cf2f5-a3e0-47bc-97cc-bc05c9b2bc58' && row.date === '2026-11-14' && row.student === 'Sam Lee', 'Book adds a row to the booking sheet with everything the Zap needs (member, session, school, date)');
+t.cb_settings[0].booking_webhook = 'https://script.google.com/macros/s/x/exec/../evil'; e5.booked_at = null;
+r = await call({ action: 'book', token: TOKEN5 });
+ok(r.body.ok === false && /isn't set up/.test(r.body.error), 'only a real Apps Script web app address (or Zapier hook) is used');
+t.cb_settings[0].booking_webhook = 'https://hooks.zapier.com/hooks/catch/1/abc/';
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

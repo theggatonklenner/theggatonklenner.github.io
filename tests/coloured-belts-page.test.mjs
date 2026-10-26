@@ -326,9 +326,11 @@ try {
   ok((await page.$$('#msgForm textarea[data-col]')).length === 8, 'Settings has all eight texts: invitation, reminder to book, day reminder, fee reminder, congratulations, grading photos, re-test, not yet');
   await page.fill('#tpl_reminder', 'See you at {school} on {date}!');
   await page.fill('#sHook', 'https://example.com/x'); await page.click('#saveMsgs');
-  ok((await toastSays(page, 'hooks.zapier.com')).includes('hooks.zapier.com'), 'the booking Zap must be a Zapier hook address');
-  await page.fill('#sHook', 'https://hooks.zapier.com/hooks/catch/1/abc/'); await page.click('#saveMsgs'); await toastSays(page, 'Saved');
-  ok((await q(`select booking_webhook from cb_settings`))[0].booking_webhook.startsWith('https://hooks.zapier.com/') && (await q(`select reminder_text from cb_settings`))[0].reminder_text === 'See you at {school} on {date}!', 'the booking Zap and wording are saved');
+  ok((await toastSays(page, 'script.google.com')).includes('script.google.com'), 'the booking sheet must be a Google Apps Script web app address');
+  const bkey = (await q(`select booking_key from cb_settings`))[0].booking_key;
+  ok(/^[0-9a-f]{32}$/.test(bkey) && (await page.textContent('#sKey')) === bkey, 'Settings shows the key to paste into the booking sheet script');
+  await page.fill('#sHook', 'https://script.google.com/macros/s/AKfycbx-Test_123/exec'); await page.click('#saveMsgs'); await toastSays(page, 'Saved');
+  ok((await q(`select booking_webhook from cb_settings`))[0].booking_webhook === 'https://script.google.com/macros/s/AKfycbx-Test_123/exec' && (await q(`select reminder_text from cb_settings`))[0].reminder_text === 'See you at {school} on {date}!', 'the booking sheet address and wording are saved');
   await page.click('.tab[data-view="dash"]');
   const dash = await page.textContent('#view-dash');
   ok(dash.includes('50%') && dash.includes('1 of 2') && dash.includes('$55') && dash.includes('Alex Kim'), 'the dashboard shows the pass rate (a re-test is not a pass), grading fees paid and overdue students');

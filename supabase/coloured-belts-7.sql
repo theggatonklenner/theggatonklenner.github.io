@@ -38,3 +38,7 @@ begin
   end if;
   update cb_entries set paid = p_paid, paid_at = case when p_paid then now() end, paid_how = case when p_paid then coalesce(paid_how, 'desk') end where entry_id = p_entry;
 end $$;
+
+-- ---------- Booking sheet: bookings go to a Google Sheet (Apps Script), and a Zap books them from new rows ----------
+-- The key the sheet's script checks, so only this app can add bookings (shown in Settings to paste into the script)
+alter table public.cb_settings add column if not exists booking_key text not null default replace(gen_random_uuid()::text, '-', '');

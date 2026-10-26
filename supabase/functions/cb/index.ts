@@ -5,7 +5,8 @@
 // (booking links are opened by families who aren't signed in; staff actions check who is signed in).
 // Uses the same GoHighLevel secrets as Black Belt Prep's "ghl" function (Edge Functions > Secrets):
 //   GHL_TOKEN, GHL_LOCATION_ID, and optional GHL_TEST = "1" to log texts without sending them.
-// Booking: the Zapier "Catch Hook" address saved in the app's Settings (cb_settings.booking_webhook). Pressing Book
+// Booking: the address saved in the app's Settings (cb_settings.booking_webhook): a Google Apps Script web app that adds
+// the booking to a Google Sheet (tools/booking-sheet.gs; a Zap books from each new row), or a Zapier "Catch Hook". Pressing Book
 // sends it { member_id, efc_ref, date, session_id, location_id, location, student, belt_to, programme } and your Zap books
 // that EFC session with Zapier's "EFC Aquila: Book Session" (member = member_id, session = session_id, location = location_id, date).
 // Card payments (optional): STRIPE_SECRET_KEY (the same one the polo shirts use) and a Stripe webhook to
@@ -98,16 +99,23 @@ export async function handle(req, db, env = {}, http = fetch) {
     if (!r.ok) throw new Error((j.error && j.error.message) || `Stripe said ${r.status}`);
     return j;
   };
-  // Send the booking to the Zap, which books the EFC session
+  // Send the booking to the booking sheet (or a Zapier hook); a Zap then books the EFC session
   const bookEntry = async (e, d) => {
-    const { data: st } = await db.from('cb_settings').select('booking_webhook').eq('id', 1).maybeSingle();
+    const { data: st } = await db.from('cb_settings').select('booking_webhook, booking_key').eq('id', 1).maybeSingle();
     const hook = st && st.booking_webhook;
-    if (!hook || !/^https:\/\/hooks\.zapier\.com\//.test(hook)) return { ok: false, notSetUp: true, why: 'Online booking is not set up (no booking Zap in Settings)' };
+    const sheet = !!hook && /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(hook);
+    if (!hook || !(sheet || /^https:\/\/hooks\.zapier\.com\//.test(hook))) return { ok: false, notSetUp: true, why: 'Online booking is not set up (no booking sheet in Settings)' };
     const { data: m } = await db.from('efc_members').select('efc_reference').eq('member_key', e.member_key).maybeSingle();
     const payload = { member_id: e.member_key.startsWith('efc:') ? e.member_key.slice(4) : null, efc_ref: (m && m.efc_reference) || null, date: d.grading_date, session_id: d.efc_session_id || null,
-      location_id: EFC_LOCATIONS[d.location] || null, location: d.location, student: e.full_name, belt_to: e.belt_to, programme: d.programme || 'Taekwondo', paid: !!e.paid, paid_how: e.paid_how || null };
+      location_id: EFC_LOCATIONS[d.location] || null, location: d.location, student: e.full_name, belt_to: e.belt_to, programme: d.programme || 'Taekwondo', paid: !!e.paid, paid_how: e.paid_how || null,
+      ...(sheet ? { key: (st && st.booking_key) || '' } : {}) };
     let okHook = false, why = '';
-    try { const r = await http(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); okHook = r.ok; if (!r.ok) why = 'Zapier said ' + r.status; }
+    try {
+      // Google answers a script with a redirect to its reply ({ ok: true } when the row was added)
+      const r = await http(hook, { method: 'POST', headers: { 'Content-Type': sheet ? 'text/plain' : 'application/json' }, body: JSON.stringify(payload), redirect: 'follow' });
+      if (!sheet) { okHook = r.ok; if (!r.ok) why = 'Zapier said ' + r.status; }
+      else { const j = await r.json().catch(() => ({})); okHook = r.ok && j.ok === true; if (!okHook) why = 'The booking sheet said ' + (j.error || r.status); }
+    }
     catch (err) { why = String(err && err.message || err); }
     if (!okHook) { await db.from('cb_entries').update({ booking_error: why.slice(0, 300) }).eq('entry_id', e.entry_id); return { ok: false, why }; }
     e.booked_at = new Date().toISOString();

@@ -1260,8 +1260,9 @@ function renderSettings() {
     <form id="msgForm" class="card"><h3>Messages</h3>
       <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {photo} {distinction} {note}. You can still change the wording before each send.</p>
       ${Object.keys(KIND_TPL).map(k => `<div class="field"><label for="tpl_${k}">${esc(KIND_NAME[k].replace(/ messages$/, ''))}</label><textarea id="tpl_${k}" data-col="${KIND_TPL[k]}" rows="3">${esc(st[KIND_TPL[k]] || '')}</textarea><p class="hint">${esc(KIND_HELP[k])}</p></div>`).join('')}
-      <div class="field"><label for="sHook">Booking Zap (Zapier Catch Hook address)</label><input type="url" id="sHook" value="${esc(st.booking_webhook || '')}" placeholder="https://hooks.zapier.com/hooks/catch/...">
-        <p class="hint">Make a Zap: trigger "Webhooks by Zapier: Catch Hook", action "EFC Aquila: Book Session" with Location = location_id, Date = date, Member ID = member_id, Session = session_id (use "Custom" for each). Turn it on and paste the hook address here. It runs when a family pays by card or presses Book.</p></div>
+      <div class="field"><label for="sHook">Booking sheet (Google Apps Script web app address)</label><input type="url" id="sHook" value="${esc(st.booking_webhook || '')}" placeholder="https://script.google.com/macros/s/.../exec">
+        <p class="hint">When a family pays by card or presses Book, the booking is added as a row to your Google Sheet, and a Zap (Google Sheets "New Spreadsheet Row" to EFC Aquila "Book Session") books the EFC session. Set it up with <a href="https://github.com/theggatonklenner/theggatonklenner.github.io/blob/main/tools/booking-sheet.gs" target="_blank" rel="noopener">the booking sheet script</a>, then paste its web app address here. A Zapier Catch Hook address also works.</p>
+        <div class="row" style="align-items:center"><span class="hint">Key for the script:</span><code id="sKey" style="user-select:all">${esc(st.booking_key || 'run coloured-belts-7.sql')}</code><button type="button" class="btn sm" id="copyKey">Copy key</button></div></div>
       <div class="row"><button class="btn primary" type="submit" id="saveMsgs">Save</button><button class="btn" type="button" id="checkTexts">Check texting</button></div></form>`;
   $('#beltForm').onsubmit = async e => {
     e.preventDefault(); $('#saveBelts').disabled = true;
@@ -1276,11 +1277,12 @@ function renderSettings() {
   $('#msgForm').onsubmit = async e => {
     e.preventDefault();
     const hook = $('#sHook').value.trim();
-    if (hook && !/^https:\/\/hooks\.zapier\.com\//.test(hook)) return toast('The booking Zap address should start with https://hooks.zapier.com/', 6000);
+    if (hook && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(hook) && !/^https:\/\/hooks\.zapier\.com\//.test(hook)) return toast('The booking sheet address should look like https://script.google.com/macros/s/.../exec (or a Zapier hook address)', 7000);
     const tpl = {}; $$('#msgForm textarea[data-col]').forEach(t => { if (t.value.trim()) tpl[t.dataset.col] = t.value.trim(); });
     try { await run(sb.from('cb_settings').update({ ...tpl, booking_webhook: hook || null, updated_at: new Date().toISOString() }).eq('id', 1), 'Saved'); await loadAll(); }
     catch (er) { toast(errMsg(er), 6000); }
   };
+  $('#copyKey').onclick = async () => { try { await navigator.clipboard.writeText(st.booking_key || ''); toast('Key copied'); } catch (e) { toast('Press and hold the key to copy it.'); } };
   $('#checkTexts').onclick = async () => { try { const r = await fnCall({ action: 'check' }); toast(r.ready ? (r.testing ? 'Texting is in test mode (logged, not sent).' : 'Texting is set up.') : 'Texting is not set up: add GHL_TOKEN and GHL_LOCATION_ID in Supabase.', 6000); } catch (e) { toast(errMsg(e), 6000); } };
 }
 
