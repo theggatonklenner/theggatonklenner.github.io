@@ -1298,6 +1298,8 @@ function renderSettings() {
     <form id="msgForm" class="card"><h3>Messages</h3>
       <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {photo} {distinction} {note}. You can still change the wording before each send.</p>
       ${Object.keys(KIND_TPL).map(k => `<div class="field"><label for="tpl_${k}">${esc(KIND_NAME[k].replace(/ messages$/, ''))}</label><textarea id="tpl_${k}" data-col="${KIND_TPL[k]}" rows="3">${esc(st[KIND_TPL[k]] || '')}</textarea><p class="hint">${esc(KIND_HELP[k])}</p></div>`).join('')}
+      <div class="field"><label for="sBring">What to bring (booking and payment emails)</label><textarea id="sBring" rows="4">${esc(st.email_bring || 'Full long-sleeve uniform\nBelt\nDrink bottle')}</textarea>
+        <p class="hint">One item per line. Shown as a checklist in the emails families get when they book or pay.</p></div>
       <div class="field"><label for="sPhone">Phone number for families</label><input type="tel" id="sPhone" value="${esc(st.contact_phone || '(02) 9569 1943')}">
         <p class="hint">Shown when a booking link has expired or bookings have closed ("Please call us on ...").</p></div>
       <div class="field"><label for="sHook">Booking sheet (Google Apps Script web app address)</label><input type="url" id="sHook" value="${esc(st.booking_webhook || '')}" placeholder="https://script.google.com/macros/s/.../exec">
@@ -1319,7 +1321,7 @@ function renderSettings() {
     const hook = $('#sHook').value.trim();
     if (hook && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(hook) && !/^https:\/\/hooks\.zapier\.com\//.test(hook)) return toast('The booking sheet address should look like https://script.google.com/macros/s/.../exec (or a Zapier hook address)', 7000);
     const tpl = {}; $$('#msgForm textarea[data-col]').forEach(t => { if (t.value.trim()) tpl[t.dataset.col] = t.value.trim(); });
-    try { await run(sb.from('cb_settings').update({ ...tpl, booking_webhook: hook || null, contact_phone: $('#sPhone').value.trim() || '(02) 9569 1943', updated_at: new Date().toISOString() }).eq('id', 1), 'Saved'); await loadAll(); }
+    try { await run(sb.from('cb_settings').update({ ...tpl, booking_webhook: hook || null, contact_phone: $('#sPhone').value.trim() || '(02) 9569 1943', ...($('#sBring').value.trim() ? { email_bring: $('#sBring').value.trim() } : {}), updated_at: new Date().toISOString() }).eq('id', 1), 'Saved'); await loadAll(); }
     catch (er) { toast(errMsg(er), 6000); }
   };
   $('#copyKey').onclick = async () => { try { await navigator.clipboard.writeText(st.booking_key || ''); toast('Key copied'); } catch (e) { toast('Press and hold the key to copy it.'); } };

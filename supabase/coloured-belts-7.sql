@@ -62,3 +62,7 @@ alter table public.cb_messages add column if not exists email text;
 alter table public.cb_messages drop constraint if exists cb_messages_kind_check;
 alter table public.cb_messages add constraint cb_messages_kind_check
   check (kind in ('invite', 'not_booked', 'reminder', 'unpaid', 'congrats', 'retest', 'not_ready', 'photo', 'email_booked', 'email_paid'));
+-- What to bring, in the booking and payment emails (one item per line; edit in Settings)
+alter table public.cb_settings add column if not exists email_bring text not null default 'Full long-sleeve uniform
+Belt
+Drink bottle';

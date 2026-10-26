@@ -85,6 +85,61 @@ export async function signatureOk(body, header, secret, now = Date.now()) {
   return sigs.some(s => s.length === want.length && [...s].reduce((d, c, i) => d | (c.charCodeAt(0) ^ want.charCodeAt(i)), 0) === 0);
 }
 
+// The booking and payment emails: a branded layout that works in email apps (tables and inline styles only)
+const LOGO = 'https://theggatonklenner.github.io/icons/ama-id-cards.png';
+const BRING = 'Full long-sleeve uniform\nBelt\nDrink bottle';
+export function buildEmail(kind, v) {
+  const esc = x => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const paid = kind === 'email_paid';
+  const green = '#04794b', ink = '#16211b', muted = '#5a6b61', line = '#dfe7e2', soft = '#f3f6f4';
+  const subject = paid ? `Payment received: ${v.kid}'s grading on ${v.when}` : `Grading booked: ${v.kid}, ${v.when}`;
+  const heading = paid ? 'Payment received. You\'re booked in!' : 'You\'re booked in!';
+  const intro = paid ? `Thank you, we've received your payment for ${v.kid}'s grading. Here are the details for the day.` : `${v.kid} is booked in to grade. Here are the details for the day.`;
+  const rows = [['Student', v.student], ['Grading for', v.belt], ['Date', v.when], ...(v.time ? [['Time', v.time]] : []), ['Where', `AMA ${v.school}`],
+    ...(paid ? [['Paid', `${v.amount != null && v.amount !== '' ? '$' + Number(v.amount).toFixed(2) : 'Yes'}${v.how ? ' (' + v.how + ')' : ''}`]] : [])];
+  const bring = String(v.bring || BRING).split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  const tel = String(v.phone || '').replace(/[^\d+]/g, '');
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><title>${esc(subject)}</title></head>
+<body style="margin:0;padding:0;background:${soft};">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${esc(intro)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${soft};"><tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid ${line};font-family:Arial,Helvetica,sans-serif;color:${ink};">
+  <tr><td style="background:${green};padding:20px 24px;">
+    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+      <td style="padding-right:14px;"><img src="${LOGO}" width="56" height="56" alt="AMA" style="display:block;border-radius:50%;background:#ffffff;"></td>
+      <td style="color:#ffffff;font-size:13px;letter-spacing:1px;text-transform:uppercase;font-weight:bold;">Australian Martial Arts Academy<br><span style="font-size:12px;font-weight:normal;letter-spacing:0;text-transform:none;opacity:.9;">${esc(v.school)}</span></td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="padding:28px 24px 8px;">
+    <h1 style="margin:0 0 10px;font-size:24px;line-height:1.25;color:${ink};">${esc(heading)}</h1>
+    <p style="margin:0;font-size:16px;line-height:1.5;color:${muted};">Hi ${esc(v.parent)},<br>${esc(intro)}</p>
+  </td></tr>
+  <tr><td style="padding:16px 24px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${soft};border-radius:12px;">
+      ${rows.map(([k, x], i) => `<tr><td style="padding:12px 16px;font-size:14px;color:${muted};width:38%;${i ? `border-top:1px solid ${line};` : ''}">${esc(k)}</td><td style="padding:12px 16px;font-size:15px;font-weight:bold;color:${ink};${i ? `border-top:1px solid ${line};` : ''}">${esc(x)}</td></tr>`).join('')}
+    </table>
+  </td></tr>
+  ${v.receipt ? `<tr><td align="center" style="padding:4px 24px 12px;"><a href="${esc(v.receipt)}" style="display:inline-block;background:${green};color:#ffffff;text-decoration:none;font-weight:bold;font-size:15px;padding:12px 22px;border-radius:10px;">View your receipt</a></td></tr>` : ''}
+  <tr><td style="padding:12px 24px 4px;">
+    <h2 style="margin:0 0 10px;font-size:17px;color:${ink};">What to bring</h2>
+    <table role="presentation" cellpadding="0" cellspacing="0">
+      ${bring.map(b => `<tr><td valign="top" style="padding:4px 10px 4px 0;color:${green};font-size:16px;font-weight:bold;">&#10003;</td><td style="padding:4px 0;font-size:15px;line-height:1.45;color:${ink};">${esc(b)}</td></tr>`).join('')}
+    </table>
+  </td></tr>
+  <tr><td style="padding:20px 24px 26px;">
+    <p style="margin:0;font-size:15px;line-height:1.5;color:${muted};">Please arrive 15 minutes early. Good luck, ${esc(v.kid)}! Family and friends are welcome to come and watch.</p>
+  </td></tr>
+  <tr><td style="background:${soft};border-top:1px solid ${line};padding:16px 24px;font-size:13px;line-height:1.5;color:${muted};">
+    Questions? Call us on ${tel ? `<a href="tel:${esc(tel)}" style="color:${green};font-weight:bold;text-decoration:none;">${esc(v.phone)}</a>` : esc(v.phone || 'the front desk')}.<br>AMA ${esc(v.school)}
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>`;
+  const text = [`Hi ${v.parent},`, intro, ...rows.map(([k, x]) => `${k}: ${x}`), ...(v.receipt ? [`Your receipt: ${v.receipt}`] : []),
+    'What to bring:', ...bring.map(b => '- ' + b), 'Please arrive 15 minutes early.', `Questions? Call us on ${v.phone || 'the front desk'}.`, `AMA ${v.school}`].join('\n');
+  return { subject, html, text };
+}
+
 async function entryByToken(db, token) {
   if (!tokenOk(token)) return null;
   const { data: e } = await db.from('cb_entries').select('entry_id, day_id, member_key, full_name, belt_from, belt_to, token, booked_at, booking_error, result, paid, paid_how, late_ok_until').eq('token', token).maybeSingle();
@@ -129,23 +184,18 @@ export async function handle(req, db, env = {}, http = fetch) {
       const { data: m } = await db.from('efc_members').select('member_key, full_name, guardian_name, phone, guardian_phone, email, guardian_email').eq('member_key', e.member_key).maybeSingle();
       const email = m && [m.email, m.guardian_email].find(v => v && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v));
       if (!email) return;
-      const parent = first(m.guardian_name) || 'there', kid = first(e.full_name);
+      const { data: cs } = await db.from('cb_settings').select('contact_phone, email_bring').eq('id', 1).maybeSingle();
       const when = new Date(d.grading_date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
       const t = d.start_time ? String(d.start_time).slice(0, 5).split(':').map(Number) : null;
-      const time = t ? ` at ${((t[0] + 11) % 12) + 1}:${String(t[1]).padStart(2, '0')}${t[0] < 12 ? 'am' : 'pm'}` : '';
-      const lines = kind === 'email_paid'
-        ? [`Hi ${parent},`, `Thank you, we've received your payment${extra.amount ? ` of $${Number(extra.amount).toFixed(2)}` : ''} for ${kid}'s grading.`,
-           `${kid} is booked to grade for their ${e.belt_to} at AMA ${d.location} on ${when}${time}. Please arrive 15 minutes early in a clean uniform.`,
-           ...(extra.receipt ? [`Your receipt: ${extra.receipt}`] : []), `AMA ${d.location}`]
-        : [`Hi ${parent},`, `${kid} is booked to grade for their ${e.belt_to} at AMA ${d.location} on ${when}${time}.`, 'Please arrive 15 minutes early in a clean uniform.', `AMA ${d.location}`];
-      const subject = kind === 'email_paid' ? `Payment received: ${kid}'s grading on ${when}` : `Grading booked: ${kid}, ${when}`;
-      const esc = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-      const html = lines.map(l => `<p>${esc(l).replace(/(https:\/\/\S+)/g, '<a href="$1">$1</a>')}</p>`).join('');
-      const log = (status, more = {}) => db.from('cb_messages').insert({ entry_id: e.entry_id, member_key: e.member_key, kind, email, body: subject + '\n\n' + lines.join('\n\n'), status, sent_by: 'automatic', ...more });
+      const HOW = { card: 'card', cash: 'cash', eftpos: 'EFTPOS', transfer: 'bank transfer', other: '' };
+      const { subject, html, text } = buildEmail(kind, { parent: first(m.guardian_name) || 'there', kid: first(e.full_name), student: e.full_name, belt: e.belt_to, school: d.location,
+        when, time: t ? `${((t[0] + 11) % 12) + 1}:${String(t[1]).padStart(2, '0')}${t[0] < 12 ? 'am' : 'pm'}` : '', amount: extra.amount, how: HOW[e.paid_how] || '',
+        receipt: extra.receipt || null, phone: (cs && cs.contact_phone) || '(02) 9569 1943', bring: cs && cs.email_bring });
+      const log = (status, more = {}) => db.from('cb_messages').insert({ entry_id: e.entry_id, member_key: e.member_key, kind, email, body: subject + '\n\n' + text, status, sent_by: 'automatic', ...more });
       try {
         const cid = await contactFor({ ...m, email }, phoneE164(m.phone || m.guardian_phone));
         if (!cid) throw new Error('Could not find or add the contact');
-        await ghl('/conversations/messages', { method: 'POST', body: JSON.stringify({ type: 'Email', contactId: cid, subject, html, message: lines.join('\n\n') }) }, '2021-04-15');
+        await ghl('/conversations/messages', { method: 'POST', body: JSON.stringify({ type: 'Email', contactId: cid, subject, html, message: text }) }, '2021-04-15');
         await log('sent');
       } catch (er) { await log('failed', { error: String(er.message || er).slice(0, 500) }); }
     } catch (er) { console.error(er); }
@@ -218,8 +268,9 @@ export async function handle(req, db, env = {}, http = fetch) {
 
     // ---- Families (no sign-in): the booking link ----
     if (body.action === 'info' || body.action === 'book' || body.action === 'pay') {
-      const { data: cs } = await db.from('cb_settings').select('contact_phone').eq('id', 1).maybeSingle();
+      const { data: cs } = await db.from('cb_settings').select('contact_phone, email_bring').eq('id', 1).maybeSingle();
       const phone = (cs && cs.contact_phone) || '(02) 9569 1943';
+      const bring = String((cs && cs.email_bring) || BRING).split(/\r?\n/).map(x => x.trim()).filter(Boolean);
       let x = await entryByToken(db, body.token);
       if (!x) return json({ ok: false, phone, error: `This link isn't valid any more. Please call us on ${phone}.` }, 404);
       let { e, d } = x;
@@ -240,7 +291,7 @@ export async function handle(req, db, env = {}, http = fetch) {
       const info = { ok: true, first: first(e.full_name), belt_to: e.belt_to, date: d.grading_date, time: d.start_time ? String(d.start_time).slice(0, 5) : null,
         school: d.location, fee, booked: !!e.booked_at, paid: !!e.paid, paid_how: e.paid ? (e.paid_how || 'desk') : null, closed: d.closed || !!e.result,
         card: !!(env.STRIPE_SECRET_KEY && fee > 0), booking_failed: !!(e.paid && !e.booked_at && e.booking_error),
-        book_by: late ? e.late_ok_until : (d.book_by || null), booking_closed: shut, phone, receipt };
+        book_by: late ? e.late_ok_until : (d.book_by || null), booking_closed: shut, phone, receipt, bring };
       const shutMsg = `Bookings for this grading have closed. Please call us on ${phone}.`;
       if (body.action === 'info') return json(info);
       if (body.action === 'book') {
