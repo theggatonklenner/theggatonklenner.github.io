@@ -291,7 +291,7 @@ t.cb_settings[0].booking_webhook = 'https://hooks.zapier.com/hooks/catch/1/abc/'
 t.cb_entries.push({ entry_id: 'e8', day_id: 'd1', member_key: 'efc:m1', full_name: 'Sam Lee', belt_from: 'Yellow Belt', belt_to: 'Orange Belt', token: TOKEN8, booked_at: null, booking_error: null, result: null, paid: false, paid_how: null });
 r = await call({ action: 'book', token: TOKEN8 }, null, GHL_ENV);
 let mail = ghlCalls.filter(c => c.url.endsWith('/conversations/messages') && c.body.type === 'Email');
-ok(r.body.booked && mail.length === 1 && /Grading booked: Sam/.test(mail[0].body.subject) && /Hi Pat/.test(mail[0].body.html) && /Orange Belt/.test(mail[0].body.html) && /Saturday 14 November 2026 at 10:00am/.test(mail[0].body.html), 'booking emails the family a confirmation (date, time, school, belt) through GoHighLevel');
+ok(r.body.booked && mail.length === 1 && /Grading booked: Sam/.test(mail[0].body.subject) && /Hi Pat/.test(mail[0].body.html) && /Orange Belt/.test(mail[0].body.html) && /Saturday 14 November 2026/.test(mail[0].body.html) && /10:00am/.test(mail[0].body.html) && /What to bring/.test(mail[0].body.html) && /Full long-sleeve uniform/.test(mail[0].body.html) && /Drink bottle/.test(mail[0].body.message), 'booking emails the family a confirmation (date, time, school, belt, what to bring) through GoHighLevel, as HTML with a plain-text version');
 ok(t.cb_messages.some(m => m.kind === 'email_booked' && m.entry_id === 'e8' && m.email === 'pat@example.test' && m.status === 'sent'), '...and it is logged');
 t.cb_belts[0].fee = 55;
 r = await call({ action: 'record_payment', entry_id: 'e8', how: 'cash' }, 'tok-grader', GHL_ENV);
