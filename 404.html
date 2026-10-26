@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Page Not Found</title>
+<script>
+  // GitHub Pages shows this page for any address that isn't a file. Apps with their own addresses
+  // (e.g. /grading/coloured-belts/grading-days) are sent back to their page, which opens the right screen.
+  (function () {
+    var apps = ['/grading/coloured-belts/'];
+    for (var i = 0; i < apps.length; i++) {
+      var p = location.pathname, base = apps[i];
+      if (p.indexOf(base) === 0 && p.length > base.length && !/\.[a-z0-9]+$/i.test(p)) {
+        location.replace(base + '?p=' + encodeURIComponent(p.slice(base.length).replace(/\/+$/, '')) + location.hash);
+        return;
+      }
+    }
+  })();
+</script>
+<style>
+  body { margin: 0; font: 16px/1.5 Inter, -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif; background: #070a08; color: #e8efe9; }
+  main { max-width: 480px; margin: 18vh auto 0; padding: 0 16px; }
+  h1 { font-size: 26px; margin: 0 0 8px; color: #fff; }
+  p { color: #8fa697; margin: 0 0 16px; }
+  a { color: #ffd200; font-weight: 700; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Page not found</h1>
+  <p>That page doesn't exist. It may have moved.</p>
+  <a href="/">Go to the AMA Toolkit</a>
+</main>
+</body>
+</html>

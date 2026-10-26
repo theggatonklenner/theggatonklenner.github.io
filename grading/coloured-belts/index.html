@@ -6,6 +6,8 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#04794b">
 <title>Coloured Belt Grading</title>
+<!-- Every screen has its own address (/grading/coloured-belts/grading-days ...); the site's 404.html sends those back here -->
+<base href="/grading/coloured-belts/">
 <link rel="icon" href="../../icons/black-belt-prep.png">
 <link rel="apple-touch-icon" href="../../icons/black-belt-prep.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,21 +17,26 @@
 <script src="../../config.js"></script>
 <script src="../../hub-signin.js"></script>
 <style>
-  /* Same look as the other AMA Toolkit apps */
+  /* Same look as AMA ID Cards: app bar, one view at a time, tab bar at the bottom on phones. */
   :root {
     --bg: #f3f6f4; --surface: #ffffff; --fg: #16211b; --muted: #5a6b61; --line: #dfe7e2;
-    --accent: #04794b; --on-accent: #ffffff; --accent-soft: #e3f2ea; --gold: #f2d500; --on-gold: #1d1d1d;
-    --danger: #b3261e; --danger-soft: #fbe9e7; --warn: #8a4f00; --warn-soft: #fdf1df; --info: #1f5fa8; --info-soft: #e6eefa; --hover: #eef5f1;
+    --accent: #04794b; --on-accent: #ffffff; --accent-soft: #e3f2ea;
+    --gold: #f2d500; --on-gold: #1d1d1d; --belt: #141414;
+    --danger: #b3261e; --danger-soft: #fbe9e7; --ok: #04794b; --warn: #8a4f00; --warn-soft: #fdf0dc;
+    --info: #3a4181; --info-soft: #e8eaf8; --hover: #eef5f1;
     --shadow: 0 1px 2px rgba(16,33,27,.06), 0 4px 14px rgba(16,33,27,.06);
     --font-display: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
     --font-body: "Source Sans 3", "Segoe UI", Arial, sans-serif;
+    --tabbar-h: 64px;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0e1612; --surface: #16211b; --fg: #e6efe9; --muted: #93a79b; --line: #26352c;
-      --accent: #3fbf7f; --on-accent: #06150d; --accent-soft: #1b3326; --gold: #e8d23a; --on-gold: #1d1d1d;
-      --danger: #f2867d; --danger-soft: #3a1d1b; --warn: #f0b45a; --warn-soft: #3a2a12; --info: #8db8f0; --info-soft: #18263a; --hover: #1c2b23;
+      --accent: #3fbf7f; --on-accent: #06150d; --accent-soft: #1b3326;
+      --gold: #e8d23a; --on-gold: #1d1d1d; --belt: #e6efe9;
+      --danger: #f2867d; --danger-soft: #3a1d1a; --ok: #5cd394; --warn: #f0b45a; --warn-soft: #3a2c14;
+      --info: #9aa3ea; --info-soft: #1f2340; --hover: #1c2b23;
       --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.25);
       color-scheme: dark;
     }
@@ -40,101 +47,341 @@
   [hidden] { display: none !important; }
   button, input, select, textarea { font: inherit; color: inherit; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  input[type=checkbox] { accent-color: var(--accent); width: 20px; height: 20px; flex: none; }
+  input[type=checkbox], input[type=radio] { accent-color: var(--accent); width: 20px; height: 20px; flex: none; }
 
-  .appbar { position: sticky; top: 0; z-index: 20; background: var(--surface); border-bottom: 1px solid var(--line); padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 0; }
-  .appbar-inner { max-width: 980px; margin: 0 auto; display: flex; align-items: center; gap: 10px; padding-bottom: 8px; }
+  /* App bar */
+  .appbar { position: sticky; top: 0; z-index: 20; background: var(--surface); border-bottom: 1px solid var(--line);
+    padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px; }
+  .appbar-inner { max-width: 820px; margin: 0 auto; display: flex; align-items: center; gap: 10px; }
   .home-btn { flex: none; width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line); display: inline-flex; align-items: center; justify-content: center; color: var(--muted); text-decoration: none; }
   .home-btn:hover { color: var(--accent); border-color: var(--accent); }
   .home-btn svg { width: 20px; height: 20px; }
   .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; min-width: 0; }
-  .brand h1 { font-family: var(--font-display); font-weight: 700; font-size: 22px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tabs { max-width: 980px; margin: 0 auto; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
-  .tab { border: 0; background: none; padding: 10px 12px; font-weight: 600; color: var(--muted); border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
-  .tab[aria-selected=true] { color: var(--accent); border-bottom-color: var(--accent); }
+  .brand img { width: 34px; height: 34px; border-radius: 8px; }
+  .brand h1 { font-family: var(--font-display); font-weight: 700; font-size: 22px; margin: 0; letter-spacing: .01em; white-space: nowrap; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); padding: 5px 10px; border-radius: 999px; background: var(--bg); white-space: nowrap; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; border: 0; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .pill[data-kind="ok"] .dot { background: var(--ok); }
 
-  main { max-width: 980px; margin: 0 auto; padding: 16px 16px 48px; display: flex; flex-direction: column; gap: 14px; }
-  h2 { font-family: var(--font-display); font-weight: 700; font-size: 24px; margin: 0; }
+  /* Tabs */
+  .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--surface); border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: repeat(5, 1fr); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .tab { border: 0; background: none; padding: 8px 2px 9px; height: var(--tabbar-h); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; }
+  .tab svg { width: 24px; height: 24px; }
+  .tab[aria-selected="true"] { color: var(--accent); }
+  @media (min-width: 900px) {
+    .tabbar { position: sticky; top: 61px; bottom: auto; border-top: 0; border-bottom: 1px solid var(--line); display: flex; justify-content: center; gap: 4px; padding: 0 16px; }
+    .tab { flex-direction: row; height: 48px; padding: 0 18px; font-size: 15px; gap: 8px; border-bottom: 2px solid transparent; }
+    .tab[aria-selected="true"] { border-bottom-color: var(--accent); }
+    .tab svg { width: 20px; height: 20px; }
+  }
+
+  /* Views */
+  main { max-width: 820px; margin: 0 auto; padding: 16px 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 24px); }
+  @media (min-width: 900px) { main { padding-bottom: 48px; } }
+  .view { display: flex; flex-direction: column; gap: 14px; }
+  h2 { font-family: var(--font-display); font-weight: 700; font-size: 24px; margin: 0; letter-spacing: .01em; }
   h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 0; }
   .view-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-  .muted { color: var(--muted); } .small { font-size: 14px; }
-  .hint { font-size: 14px; color: var(--muted); margin: 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 14px; }
   .card { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .empty { text-align: center; padding: 28px 16px; color: var(--muted); }
+
+  /* Controls */
   label, .label { font-size: 13px; font-weight: 600; color: var(--muted); }
-  .field { display: flex; flex-direction: column; gap: 5px; }
-  input[type=text], input[type=email], input[type=password], input[type=search], input[type=date], input[type=time], input[type=number], input[type=url], select, textarea { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
-  textarea { resize: vertical; }
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 8px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font-weight: 600; cursor: pointer; text-decoration: none; }
+  .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  input[type=text], input[type=email], input[type=password], input[type=date], input[type=search], input[type=number], input[type=tel], textarea, select {
+    width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 16px; }
+  textarea { resize: vertical; line-height: 1.4; min-height: 0; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 16px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--surface); font-weight: 600; font-size: 15px; cursor: pointer; white-space: nowrap; text-decoration: none; }
+  .btn:hover { background: var(--hover); }
+  .btn:disabled { opacity: .5; cursor: default; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   .btn.danger { color: var(--danger); }
-  .btn.sm { min-height: 36px; padding: 4px 12px; font-size: 14px; white-space: nowrap; }
-  .btn:disabled { opacity: .55; cursor: default; }
+  .btn.danger-solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .btn.ghost { border-color: transparent; background: none; }
+  .btn.big { min-height: 54px; font-size: 17px; width: 100%; }
+  .btn.sm { min-height: 36px; padding: 6px 12px; font-size: 14px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+  .row > .grow { flex: 1 1 0; min-width: 0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .hint { font-size: 14px; color: var(--muted); margin: 0; }
+  .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .check { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 400; color: var(--fg); min-height: 40px; cursor: pointer; }
 
+  /* Segmented control */
+  .seg { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 3px; gap: 3px; overflow-x: auto; }
+  .seg button { flex: 1 0 auto; border: 0; background: none; border-radius: 9px; padding: 8px 10px; font-weight: 600; font-size: 14px; color: var(--muted); cursor: pointer; line-height: 1.2; }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: var(--shadow); }
+  .seg button small { display: block; font-weight: 400; font-size: 12px; }
+
+  /* Lists */
   .list { list-style: none; margin: 0; padding: 0; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
-  .list li + li { border-top: 1px solid var(--line); }
-  .item { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: none; border: 0; text-align: left; cursor: pointer; min-height: 60px; }
+  .list > li { border-top: 1px solid var(--line); }
+  .list > li:first-child { border-top: 0; }
+  .item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; background: none; border: 0; text-align: left; cursor: pointer; min-height: 60px; }
   button.item:hover { background: var(--hover); }
-  .who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-  .who strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .meta { font-size: 13px; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  .tags { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
-  .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); white-space: nowrap; }
-  .tag.ok { background: var(--accent-soft); color: var(--accent); } .tag.warn { background: var(--warn-soft); color: var(--warn); }
-  .tag.bad { background: var(--danger-soft); color: var(--danger); } .tag.info { background: var(--info-soft); color: var(--info); }
-  .belt { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0,0,0,.25); vertical-align: -1px; flex: none; }
-  .empty { text-align: center; color: var(--muted); padding: 30px 16px; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-  .stat { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); padding: 14px; }
-  .stat b { display: block; font-family: var(--font-display); font-size: 30px; line-height: 1.1; }
-  .stat span { font-size: 13px; color: var(--muted); }
-  table { width: 100%; border-collapse: collapse; font-size: 15px; }
-  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-  th { font-size: 13px; color: var(--muted); font-weight: 600; }
-  td input[type=number] { min-height: 38px; width: 90px; }
-  .auth { max-width: 380px; margin: 10vh auto 0; }
-  .banner { background: var(--warn-soft); color: var(--warn); border-radius: 12px; padding: 10px 14px; font-size: 14px; }
+  .item .main { flex: 1 1 auto; min-width: 0; }
+  .item .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .meta { font-size: 14px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); white-space: nowrap; vertical-align: 1px; }
+  .tag.ok { background: var(--accent-soft); color: var(--ok); }
+  .tag.warn { background: var(--warn-soft); color: var(--warn); }
+  .tag.bad { background: var(--danger-soft); color: var(--danger); }
+  .tag.info { background: var(--info-soft); color: var(--info); }
+  .tag.gold { background: var(--gold); color: var(--on-gold); }
 
-  /* Results on a tablet: big buttons */
-  .res { display: flex; gap: 8px; flex-wrap: wrap; }
-  .res button { min-height: 54px; min-width: 110px; flex: 1; border-radius: 12px; border: 2px solid var(--line); background: var(--surface); font-weight: 700; font-size: 17px; cursor: pointer; }
-  .res button[aria-pressed=true][data-r=pass] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-  .res button[aria-pressed=true][data-r=distinction] { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
-  .res button[aria-pressed=true][data-r=retest] { background: var(--danger); border-color: var(--danger); color: #fff; }
-  .rescard { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  /* Attendance buttons */
+  .att { display: flex; gap: 4px; flex: none; }
+  .att button { width: 44px; height: 40px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); font-weight: 700; font-size: 15px; color: var(--muted); cursor: pointer; }
+  .att button[aria-pressed="true"][data-s="present"] { background: var(--ok); border-color: var(--ok); color: var(--on-accent); }
+  .att button[aria-pressed="true"][data-s="absent"]  { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .att button[aria-pressed="true"][data-s="excused"] { background: var(--info); border-color: var(--info); color: #fff; }
+  .att .pay { margin-left: 6px; border-style: dashed; }
+  .att .pay[aria-pressed="true"] { background: var(--gold); border: 1px solid var(--gold); color: var(--on-gold); }
+  .att .pay:disabled { opacity: .35; cursor: default; }
+  .counts { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; color: var(--muted); }
+  /* Quick check-in */
+  .ci-search { font-size: 20px !important; min-height: 56px !important; padding: 10px 16px !important; border-radius: 14px !important; }
+  .ci-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .ci-big { font-family: var(--font-display); font-size: 34px; font-weight: 700; line-height: 1; }
+  .ci-row { display: flex; align-items: center; gap: 10px; padding: 0 10px 0 0; }
+  .ci-row .item { min-height: 64px; }
+  .ci-row .go { flex: none; min-width: 108px; min-height: 48px; border-radius: 12px; border: 0; background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 16px; cursor: pointer; }
+  .ci-btns { display: flex; gap: 6px; flex: none; }
+  .ci-btns .go { min-width: 0; padding: 0 12px; line-height: 1.1; }
+  .ci-btns .go.paid { background: var(--gold); color: var(--on-gold); }
+  .ci-btns .go.unpaid { background: var(--surface); color: var(--accent); border: 1.5px solid var(--accent); }
+  .ci-btns .go small { display: block; font-size: 12px; font-weight: 600; }
+  .ci-row .x { flex: none; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 18px; cursor: pointer; }
+  .ci-row .pay { flex: none; width: 44px; height: 40px; border-radius: 9px; border: 1px dashed var(--line); background: var(--surface); font-weight: 700; color: var(--muted); cursor: pointer; }
+  .ci-row .pay[aria-pressed="true"] { background: var(--gold); border: 1px solid var(--gold); color: var(--on-gold); }
+  .ci-here .name::before { content: "✓ "; color: var(--ok); }
+  .owes { display: inline-block; margin-top: 3px; font-size: 13px; font-weight: 700; color: var(--danger); background: var(--danger-soft); border-radius: 8px; padding: 2px 8px; white-space: normal; }
+  .counts b { color: var(--fg); }
+  .sess-cells { display: flex; gap: 3px; }
+  .cell { width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--bg); color: var(--muted); }
+  .cell.present { background: var(--ok); color: var(--on-accent); }
+  .cell.absent  { background: var(--danger); color: #fff; }
+  .cell.excused { background: var(--info); color: #fff; }
 
-  dialog { border: 0; padding: 0; background: var(--surface); color: var(--fg); border-radius: 16px; width: min(640px, calc(100% - 24px)); max-height: calc(100dvh - 24px); box-shadow: var(--shadow); }
-  dialog::backdrop { background: rgba(0,0,0,.45); }
-  @media (max-width: 600px) { dialog { margin: auto 0 0; width: 100%; max-width: 100%; border-radius: 16px 16px 0 0; } }
-  .dlg { padding: 16px; display: flex; flex-direction: column; gap: 14px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
-  .dlg-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-  .section { border-top: 1px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; gap: 10px; }
-  .x { border: 0; background: none; color: var(--accent); font-weight: 600; cursor: pointer; padding: 6px; }
-  dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 15px; }
-  dl.kv dt { color: var(--muted); }
-  dl.kv dd { margin: 0; }
-  #toast { inset: auto; position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); margin: 0; border: 0; width: max-content;
-    background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 15px; max-width: calc(100% - 32px); box-shadow: var(--shadow); z-index: 50; }
+  /* Selection bar */
+  .selbar { position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); z-index: 19;
+    background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -4px 14px rgba(0,0,0,.08); padding: 10px 16px; }
+  .selbar-inner { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+  .selbar .acts { display: grid; grid-template-columns: repeat(auto-fit, minmax(68px, 1fr)); gap: 6px; }
+  .selbar .acts .btn { padding: 8px 4px; font-size: 14px; }
+  @media (min-width: 900px) { .selbar { bottom: 0; } }
+  body.selecting main { padding-bottom: calc(var(--tabbar-h) + 150px); }
+
+  /* Stats */
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  @media (min-width: 640px) { .stats { grid-template-columns: repeat(3, 1fr); } }
+  .stat { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); padding: 14px; display: flex; flex-direction: column; gap: 2px; border: 0; text-align: left; cursor: pointer; }
+  .stat .n { font-family: var(--font-display); font-size: 32px; font-weight: 700; line-height: 1.05; }
+  .stat .l { font-size: 14px; color: var(--muted); }
+  .stat.warn .n { color: var(--warn); }
+  .stat.bad .n { color: var(--danger); }
+  .belt-rule { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--belt) 0 46%, var(--gold) 46% 50%, var(--belt) 50% 100%); }
+
+  /* Detail sections */
+  .kv { display: grid; grid-template-columns: minmax(110px, 38%) 1fr; gap: 6px 12px; margin: 0; font-size: 15px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; overflow-wrap: anywhere; }
+  .section { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+  table.grid { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.grid th, table.grid td { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+  table.grid th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  table.grid td.num, table.grid th.num { text-align: right; }
+  .scroll { overflow-x: auto; }
+  .preview { max-height: 40vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+  .preview table { margin: 0; }
+  .preview .skip td { color: var(--muted); }
+
+  /* Dialogs */
+  dialog { border: 0; border-radius: 18px; background: var(--surface); color: var(--fg); padding: 18px; width: min(560px, calc(100% - 24px)); max-width: none; max-height: calc(100dvh - 24px); overflow: auto; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+  dialog::backdrop { background: rgba(10, 20, 15, .5); }
+  dialog form, dialog .body { display: flex; flex-direction: column; gap: 12px; }
+  dialog p { margin: 0; }
+  .dlg-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .dlg-head .x { min-height: 36px; padding: 4px 10px; }
+  .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; position: sticky; bottom: -18px; background: var(--surface); padding: 10px 0 0; margin-top: 4px; }
+  @media (max-width: 640px) {
+    dialog.sheet { margin: auto 0 0; width: 100%; max-height: 92dvh; border-radius: 18px 18px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+    .dlg-actions { bottom: calc(-18px - env(safe-area-inset-bottom, 0px)); }
+    .dlg-actions .btn { flex: 1 1 auto; }
+  }
+  .checklist { max-height: 40vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 4px 12px; }
+  .checklist .check { border-bottom: 1px solid var(--line); }
+  .checklist .check:last-child { border-bottom: 0; }
+
+  #toast { inset: auto; position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 14px);
+    z-index: 50; background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 15px; max-width: calc(100% - 32px); box-shadow: var(--shadow);
+    margin: 0; border: 0; overflow: visible; width: max-content; }
   #toast[hidden] { display: none; }
+  body.selecting #toast { bottom: calc(var(--tabbar-h) + 140px); }
+  @media (min-width: 900px) { #toast { bottom: 24px; } }
+  .auth { max-width: 380px; margin: 12vh auto 0; padding: 0 16px; }
+  .banner { border-radius: 12px; padding: 12px 14px; background: var(--warn-soft); color: var(--warn); font-size: 15px; display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+
+  /* What each role can see */
+  body:not(.can-admin)      .need-admin,
+  body:not(.can-attendance) .need-attendance { display: none !important; }
+  @media (prefers-reduced-motion: no-preference) { .btn, .tab, .item, .att button { transition: background .12s, color .12s; } }
+  /* ---------- AMA dark theme (matches the AMA dashboard): near-black green, gold accents, Inter ---------- */
+  :root, :root:not([data-x]) {
+    --bg: #070a08; --surface: #0d1511; --surface2: #0b120e; --fg: #e8efe9; --muted: #8fa697; --dim: #6f8a79; --line: #1d3326; --line2: #243f2e;
+    --accent: #ffd200; --on-accent: #070a08; --accent-soft: rgba(255,210,0,.08); --gold: #ffd200; --on-gold: #070a08; --green: #1B7A3D; --belt: #000;
+    --danger: #ff8f7a; --danger-soft: rgba(255,143,122,.10); --ok: #6fd39a; --warn: #ffd200; --warn-soft: rgba(255,210,0,.08);
+    --info: #9fc4ad; --info-soft: rgba(159,196,173,.10); --hover: rgba(255,210,0,.04); --shadow: none;
+    --font-display: Inter, -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif; --font-body: Inter, -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif;
+    color-scheme: dark;
+  }
+  body { background: var(--bg); color: var(--fg); -webkit-font-smoothing: antialiased; }
+  a { color: var(--gold); }
+  input[type=checkbox], input[type=radio] { accent-color: var(--gold); }
+  /* App bar and tabs */
+  .appbar { background: rgba(7,10,8,.94); border-bottom: 1px solid var(--line); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+  .brand img { width: 40px; height: 40px; border-radius: 0; object-fit: contain; }
+  .brand > div { min-width: 0; }
+  .brand small { display: block; font-size: 9.5px; letter-spacing: .18em; text-transform: uppercase; color: #9fc4ad; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 420px) { .brand small { letter-spacing: .1em; font-size: 8.5px; } .pill { max-width: 30vw; } }
+  .row > .btn.grow { white-space: normal; line-height: 1.2; text-align: center; }
+  .brand h1 { font-size: 20px; font-weight: 800; letter-spacing: -.01em; color: #fff; }
+  .home-btn { border-color: var(--line2); color: var(--muted); background: var(--surface2); }
+  .home-btn:hover { color: var(--gold); border-color: var(--gold); }
+  .pill { background: var(--surface2); border: 1px solid var(--line2); color: var(--muted); }
+  .pill[data-kind="ok"] .dot { background: var(--gold); }
+  .tabbar { background: rgba(11,18,14,.97); border-top: 1px solid var(--line); }
+  .tab { color: var(--dim); }
+  .tab[aria-selected="true"] { color: var(--gold); }
+  @media (min-width: 900px) { .tabbar { border-bottom: 1px solid var(--line); } .tab[aria-selected="true"] { border-bottom-color: var(--gold); } }
+  /* Headings: big white titles, small gold-free uppercase section labels with a rule */
+  h2 { font-weight: 800; font-size: 26px; letter-spacing: -.01em; color: #fff; }
+  h3 { font-weight: 700; font-size: 16px; color: #fff; }
+  .view > h3, .view > .row > h3 { display: flex; align-items: center; gap: 10px; font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); margin-top: 8px; }
+  .view > h3::after, .view > .row > h3::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .section > h3, details > summary b { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  label, .label { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+  .hint, .muted { color: var(--dim); }
+  /* Cards, lists and the dashboard hero */
+  .card, .list, .stat { background: var(--surface); border: 1px solid var(--line); box-shadow: none; }
+  .card { border-radius: 16px; }
+  .list { border-radius: 16px; }
+  .list > li { border-top-color: var(--line); }
+  #view-dashboard > .card:first-of-type { position: relative; overflow: hidden; border-radius: 20px; background: radial-gradient(120% 140% at 85% 0, #14492c 0, #0b2a1a 45%, #080f0b 100%); }
+  #view-dashboard > .card:first-of-type::after { content: ""; position: absolute; right: -70px; top: -70px; width: 240px; height: 240px; border-radius: 50%; background: radial-gradient(circle, rgba(255,210,0,.14) 0, rgba(255,210,0,0) 70%); pointer-events: none; }
+  #view-dashboard > .card:first-of-type > * { position: relative; z-index: 1; }
+  #view-dashboard > .card:first-of-type h3 { font-size: 22px; font-weight: 800; }
+  .item .name { color: #fff; font-weight: 700; }
+  .item .meta { color: var(--muted); font-size: 13px; }
+  button.item:hover, label.item:hover { background: var(--hover); }
+  .empty { color: var(--dim); }
+  /* Stat tiles */
+  .stat { border-radius: 14px; padding: 14px 12px 12px; min-height: 92px; color: var(--fg); }
+  .stat:hover { border-color: var(--line2); }
+  .stat .n { font-size: 30px; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .stat.warn { border-color: rgba(255,210,0,.45); } .stat.warn .n { color: var(--gold); }
+  .stat.bad { border-color: rgba(255,143,122,.45); } .stat.bad .n { color: var(--danger); }
+  .belt-rule { background: linear-gradient(90deg, #000 0 46%, var(--gold) 46% 50%, #000 50% 100%); border: 1px solid var(--line2); }
+  /* Buttons */
+  .btn { background: var(--surface2); border: 1px solid var(--line2); color: var(--fg); border-radius: 10px; font-weight: 700; font-size: 14px; }
+  .btn:hover { background: var(--surface2); border-color: var(--gold); }
+  .btn.primary { background: var(--gold); border-color: var(--gold); color: #070a08; font-weight: 800; }
+  .btn.primary:hover { background: #ffdc33; }
+  .btn.sm { border-radius: 999px; font-size: 12.5px; min-height: 34px; padding: 6px 13px; }
+  .btn.ghost { background: none; border-color: transparent; color: var(--gold); }
+  .btn.danger { color: var(--danger); }
+  .btn.danger-solid { background: var(--danger); border-color: var(--danger); color: #070a08; }
+  /* Segmented control: gold when picked */
+  .seg { background: transparent; border: 1px solid var(--line2); border-radius: 10px; padding: 0; gap: 0; }
+  .seg button { border-radius: 0; color: var(--muted); font-weight: 700; font-size: 13px; padding: 9px 12px; }
+  .seg button + button { border-left: 1px solid var(--line2); }
+  .seg button[aria-pressed="true"] { background: var(--gold); color: #070a08; box-shadow: none; }
+  .seg button small { color: inherit; opacity: .8; }
+  /* Tags: outlined pills, filled green for done */
+  .tag { background: transparent; border: 1px solid var(--line2); color: var(--muted); font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; padding: 3px 8px; }
+  .tag.ok { background: var(--green); border-color: var(--green); color: #fff; }
+  .tag.warn { border-color: var(--gold); color: var(--gold); }
+  .tag.bad { border-color: var(--danger); color: var(--danger); }
+  .tag.info { border-color: var(--line2); color: #cfe0d5; }
+  .tag.gold { background: var(--gold); border-color: var(--gold); color: #070a08; }
+  .owes { background: rgba(255,143,122,.10); color: var(--danger); }
+  /* Fields */
+  input[type=text], input[type=email], input[type=password], input[type=date], input[type=search], input[type=number], input[type=tel], input[type=url], textarea, select {
+    background: var(--surface2); border: 1px solid var(--line2); color: var(--fg); font-size: 15px; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--gold); }
+  input::placeholder, textarea::placeholder { color: var(--dim); }
+  /* Attendance */
+  .att button, .ci-row .x, .ci-row .pay { background: var(--surface2); border-color: var(--line2); color: var(--muted); }
+  .att button[aria-pressed="true"][data-s="present"] { background: var(--green); border-color: var(--green); color: #fff; }
+  .att button[aria-pressed="true"][data-s="absent"] { background: var(--danger); border-color: var(--danger); color: #070a08; }
+  .att button[aria-pressed="true"][data-s="excused"] { background: #2e4a3a; border-color: #2e4a3a; color: #e8efe9; }
+  .cell { background: var(--surface2); color: var(--dim); border: 1px solid var(--line); }
+  .cell.present { background: var(--green); border-color: var(--green); color: #fff; }
+  .cell.absent { background: var(--danger); border-color: var(--danger); color: #070a08; }
+  .cell.excused { background: #2e4a3a; color: #e8efe9; }
+  .ci-row .go { background: var(--green); color: #fff; }
+  .ci-btns .go.paid { background: var(--gold); color: #070a08; }
+  .ci-btns .go.unpaid { background: transparent; color: var(--fg); border: 1.5px solid var(--line2); }
+  .ci-here .name::before { color: var(--ok); }
+  /* Tables, banners, dialogs, toast */
+  table.grid th { color: var(--dim); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
+  table.grid th, table.grid td, .kv, .section, .checklist .check { border-color: var(--line); }
+  .preview, .checklist { border-color: var(--line2); }
+  .banner { background: rgba(255,210,0,.06); border: 1px solid rgba(255,210,0,.35); color: var(--fg); }
+  dialog { background: var(--surface); border: 1px solid var(--line2); color: var(--fg); box-shadow: 0 10px 50px rgba(0,0,0,.6); }
+  dialog::backdrop { background: rgba(0,0,0,.65); }
+  .dlg-actions { background: var(--surface); }
+  .selbar { background: var(--surface); border-top-color: var(--line2); }
+  #toast { background: var(--gold); color: #070a08; font-weight: 700; }
+  details > summary { cursor: pointer; }
+
+  /* ---------- Coloured belt grading: same look as Black Belt Prep, plus its own pieces ---------- */
+  .tabbar { grid-template-columns: repeat(var(--tabs, 5), 1fr); }
+  @media (min-width: 900px) { .tabbar { top: 65px; } }
+  .filters { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .grid2 { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .stat { cursor: default; }
+  .tags { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; flex: none; max-width: 55%; }
+  .belt { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(255,255,255,.25); vertical-align: -1px; flex: none; }
+  .item .meta span + span { margin-left: 0; }
+  .dlg { display: flex; flex-direction: column; gap: 14px; padding: 0; }
+  .x { border: 0; background: none; color: var(--gold); font-weight: 700; cursor: pointer; padding: 6px; font: inherit; }
+  .back { border: 0; background: none; color: var(--gold); font-weight: 700; cursor: pointer; padding: 0; font: inherit; font-size: 14px; }
+  .res { display: flex; gap: 8px; flex-wrap: wrap; }
+  .res button { min-height: 56px; min-width: 110px; flex: 1; border-radius: 12px; border: 1px solid var(--line2); background: var(--surface2); color: var(--fg); font-weight: 800; font-size: 17px; cursor: pointer; }
+  .res button[aria-pressed=true][data-r=pass] { background: var(--green); border-color: var(--green); color: #fff; }
+  .res button[aria-pressed=true][data-r=distinction] { background: var(--gold); border-color: var(--gold); color: #070a08; }
+  .res button[aria-pressed=true][data-r=retest] { background: var(--danger); border-color: var(--danger); color: #070a08; }
+  .rescard { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  td input[type=number] { min-height: 38px; width: 90px; }
+  .brand > div { min-width: 0; } .brand h1 { overflow: hidden; text-overflow: ellipsis; }
+  .rescard .name { font-weight: 800; color: #fff; } .rescard .meta { color: var(--muted); font-size: 14px; }
+  @media (max-width: 480px) { .brand h1 { font-size: 17px; } #signOut { padding: 4px 10px; } }
+  .stats { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 </style>
 </head>
 <body>
 <header class="appbar">
   <div class="appbar-inner">
-    <a class="home-btn" href="../" aria-label="Back to Grading" title="Grading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h5v-6h4v6h5V9.5"/></svg></a>
-    <div class="brand"><h1>Coloured Belt Grading</h1></div>
+    <a class="home-btn" href="/grading/" aria-label="Back to Grading" title="Grading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h5v-6h4v6h5V9.5"/></svg></a>
+    <div class="brand"><img src="/icons/ama-logo.png" alt=""><div><small>Australian Martial Arts Academy</small><h1>Coloured Belt Grading</h1></div></div>
     <button class="btn sm" id="signOut" hidden>Sign out</button>
   </div>
-  <nav class="tabs" id="tabs" role="tablist" hidden>
-    <button class="tab" role="tab" data-view="ready" aria-selected="true">Who's ready</button>
-    <button class="tab" role="tab" data-view="days">Grading days</button>
-    <button class="tab" role="tab" data-view="efc">Update EFC</button>
-    <button class="tab" role="tab" data-view="dash">Dashboard</button>
-    <button class="tab" role="tab" data-view="settings" data-admin>Settings</button>
-  </nav>
 </header>
+<nav class="tabbar" id="tabs" role="tablist" hidden>
+  <button class="tab" role="tab" data-view="ready" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg>Who's ready</button>
+  <button class="tab" role="tab" data-view="days" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M9 2.5v3M15 2.5v3M4 9.5h16"/><path d="M9 14h2M13 14h2M9 17h2"/></svg>Grading days</button>
+  <button class="tab" role="tab" data-view="efc" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M8.5 13l2.5 2.5 4.5-5"/></svg>Update EFC</button>
+  <button class="tab" role="tab" data-view="dash" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</button>
+  <button class="tab" role="tab" data-view="settings" data-admin aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
+</nav>
 
 <main>
   <section id="signIn" class="card auth" hidden>
@@ -157,7 +404,7 @@
   <section id="view-settings" class="view" hidden></section>
 </main>
 
-<dialog id="dlg"></dialog>
+<dialog id="dlg" class="sheet"></dialog>
 <div id="toast" role="status" popover="manual" hidden></div>
 
 <script>
@@ -169,6 +416,7 @@ const HUB = { sb, url: CFG.SUPABASE_URL, key: CFG.SUPABASE_KEY, form: '#siForm' 
 if (window.AmaHub) { AmaHub.mount(HUB); AmaHub.recheck(HUB); }
 
 const SCHOOLS = ['Marrickville', 'Sydenham', 'Concord', 'West', 'Sylvania'];
+const APP_BASE = '/grading/coloured-belts/';
 const RESULT = { pass: 'Pass', distinction: 'Distinction', retest: 'Re-test' };
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -208,7 +456,7 @@ const entriesOf = id => state.entries.filter(e => e.day_id === id);
 const dayBelts = d => (d && d.belts && d.belts.length) ? d.belts : null;   // null: every belt
 const forDay = (d, s) => s.location === d.location && (!dayBelts(d) || dayBelts(d).includes(s.belt));
 const beltsText = d => dayBelts(d) ? dayBelts(d).slice().sort((a, b) => (beltOf(a).sort || 0) - (beltOf(b).sort || 0)).map(short).join(', ') : 'All belts';
-const bookingLink = e => new URL('book/#t=' + e.token, location.href.replace(/[#?].*$/, '').replace(/index\.html$/, '')).href;
+const bookingLink = e => location.origin + APP_BASE + 'book/#t=' + e.token;
 // Messages: fill in a template
 function fill(tpl, v) {
   return String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => v[k] != null ? v[k] : '').replace(/\s+([.,!])/g, '$1').replace(/ {2,}/g, ' ').trim();
@@ -246,10 +494,33 @@ async function loadAll() {
 }
 function render() {
   $$('#tabs .tab').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.view === (state.view === 'day' ? 'days' : state.view))); b.hidden = b.dataset.admin !== undefined && !isAdmin(); });
+  $('#tabs').style.setProperty('--tabs', $$('#tabs .tab:not([hidden])').length);
+  document.title = ({ ready: "Who's ready", days: 'Grading days', day: 'Grading day', efc: 'Update EFC', dash: 'Dashboard', settings: 'Settings' }[state.view] || '') + ' · Coloured Belt Grading';
   $$('.view').forEach(v => v.hidden = v.id !== 'view-' + state.view);
   ({ ready: renderReady, days: renderDays, day: renderDay, efc: renderEfc, dash: renderDash, settings: renderSettings })[state.view]();
 }
-function go(view, day) { state.view = view; if (day) state.day = day; state.resultsMode = false; render(); window.scrollTo(0, 0); }
+/* Addresses: /grading/coloured-belts/ready, /grading-days, /grading-days/<id>, /grading-days/<id>/results, /update-efc, /dashboard, /settings */
+const PATHS = { ready: 'ready', days: 'grading-days', efc: 'update-efc', dash: 'dashboard', settings: 'settings' };
+function pathOf() { return state.view === 'day' ? `grading-days/${state.day}${state.resultsMode ? '/results' : ''}` : PATHS[state.view]; }
+function fromPath(p) {
+  const seg = String(p || '').replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+  if (seg[0] === 'grading-days' && seg[1]) return { view: 'day', day: seg[1], results: seg[2] === 'results' };
+  const view = Object.keys(PATHS).find(k => PATHS[k] === seg[0]);
+  return { view: view || null };
+}
+function setAddress(replace) {
+  const url = APP_BASE + pathOf();
+  if (location.pathname === url && !location.search) return;
+  try { history[replace ? 'replaceState' : 'pushState'](null, '', url); } catch (e) { /* ignore */ }
+}
+function go(view, day, results) { state.view = view; if (day) state.day = day; state.resultsMode = !!results; setAddress(); render(); window.scrollTo(0, 0); }
+function applyPath(p) {
+  const r = fromPath(p);
+  if (!r.view || (r.view === 'settings' && !isAdmin())) return false;
+  state.view = r.view; if (r.day) state.day = r.day; state.resultsMode = !!r.results;
+  return true;
+}
+window.addEventListener('popstate', () => { if (!state.loaded) return; if (applyPath(location.pathname.slice(APP_BASE.length))) render(); });
 $$('#tabs .tab').forEach(b => b.onclick = () => go(b.dataset.view));
 
 /* ---------------- Who's ready ---------------- */
@@ -284,7 +555,7 @@ function drawReady() {
     .sort((a, b) => a.location.localeCompare(b.location) || a.belt_sort - b.belt_sort || a.full_name.localeCompare(b.full_name));
   $('#readyCount').textContent = `${list.length} student${list.length === 1 ? '' : 's'}`;
   $('#readyList').innerHTML = list.length ? list.slice(0, 400).map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}
-      <div class="who"><strong>${esc(s.full_name)}</strong><span class="meta"><span>${esc(s.location)}</span><span>·</span><span>${esc(short(s.belt))} to ${esc(short(s.next_belt))}</span><span>·</span><span>${s.weeks_at_belt ?? '?'} weeks on this belt</span></span></div>
+      <div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta"><span>${esc(s.location)}</span><span>·</span><span>${esc(short(s.belt))} to ${esc(short(s.next_belt))}</span><span>·</span><span>${s.weeks_at_belt ?? '?'} weeks on this belt</span></div></div>
       <span class="tags">${readyTags(s)}</span></button></li>`).join('') + (list.length > 400 ? `<li class="empty">Showing the first 400. Narrow it down with the filters.</li>` : '')
     : '<li class="empty">No one matches.</li>';
   $$('#readyList [data-key]').forEach(b => b.onclick = () => openStudent(b.dataset.key));
@@ -306,7 +577,7 @@ function openStudent(key) {
       ${s.approval ? `<p class="hint">Marked ${s.approval === 'ready' ? 'ready' : 'not yet'} by ${esc(s.decided_by || 'staff')}.</p>` : ''}
       ${s.approval === 'not_yet' ? '<div class="row"><button type="button" class="btn" id="apText">Text the parent a kind message</button></div>' : ''}
     </form>` : `<p class="hint">${s.approval ? 'Marked ' + (s.approval === 'ready' ? 'ready' : 'not yet') : 'Not decided yet'}</p>`}
-    ${hist.length ? `<div class="section"><h3>Gradings</h3><ul class="list">${hist.map(x => `<li><div class="item" style="cursor:default"><div class="who"><strong>${esc(fmtDate(x.d.grading_date))}</strong><span class="meta">${esc(x.d.location)} · to ${esc(x.e.belt_to)}</span></div><span class="tags">${x.e.result ? `<span class="tag ${x.e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[x.e.result]}</span>` : x.e.booked_at ? '<span class="tag ok">Booked</span>' : x.e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Added</span>'}</span></div></li>`).join('')}</ul></div>` : ''}
+    ${hist.length ? `<div class="section"><h3>Gradings</h3><ul class="list">${hist.map(x => `<li><div class="item" style="cursor:default"><div class="main"><div class="name">${esc(fmtDate(x.d.grading_date))}</div><div class="meta">${esc(x.d.location)} · to ${esc(x.e.belt_to)}</div></div><span class="tags">${x.e.result ? `<span class="tag ${x.e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[x.e.result]}</span>` : x.e.booked_at ? '<span class="tag ok">Booked</span>' : x.e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Added</span>'}</span></div></li>`).join('')}</ul></div>` : ''}
   </div>`);
   const decide = async status => {
     try {
@@ -337,7 +608,7 @@ function composeTexts(kind, people) {
     <div class="field"><label for="txTpl">Message</label><textarea id="txTpl" rows="4">${esc(tpl)}</textarea>
       <p class="hint">Fills in: {parent} {first} {next} {school} {date} {time} {link} {distinction} {note}. Change the saved wording in Settings.</p></div>
     <div class="field"><span class="label">Preview for ${esc(people[0].s ? people[0].s.full_name : people[0].e.full_name)}</span><div class="card" style="box-shadow:none;border:1px solid var(--line)" id="txPrev"></div></div>
-    <ul class="list" id="txList" style="max-height:240px;overflow:auto">${people.map((p, i) => { const ph = p.s && p.s.phone; return `<li><label class="item" style="cursor:pointer;min-height:48px"><input type="checkbox" data-i="${i}" ${ph ? 'checked' : 'disabled'}><div class="who"><strong>${esc((p.s && p.s.full_name) || p.e.full_name)}</strong><span class="meta">${ph ? esc(ph) : '<span style="color:var(--danger)">No mobile in EFC</span>'}</span></div></label></li>`; }).join('')}</ul>
+    <ul class="list" id="txList" style="max-height:240px;overflow:auto">${people.map((p, i) => { const ph = p.s && p.s.phone; return `<li><label class="item" style="cursor:pointer;min-height:48px"><input type="checkbox" data-i="${i}" ${ph ? 'checked' : 'disabled'}><div class="main"><div class="name">${esc((p.s && p.s.full_name) || p.e.full_name)}</div><div class="meta">${ph ? esc(ph) : '<span style="color:var(--danger)">No mobile in EFC</span>'}</div></div></label></li>`; }).join('')}</ul>
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" id="txGo" type="submit">Send</button></div>
   </form>`);
   const upd = () => { $('#txPrev').textContent = preview(people[0]); const n = $$('#txList input:checked').length; $('#txGo').textContent = `Send ${n} text${n === 1 ? '' : 's'}`; $('#txGo').disabled = !n; };
@@ -371,7 +642,7 @@ function renderDays() {
   const up = state.days.filter(d => !d.closed && d.grading_date >= today()).sort((a, b) => a.grading_date.localeCompare(b.grading_date));
   const past = state.days.filter(d => !up.includes(d));
   const row = d => { const es = entriesOf(d.day_id), n = k => es.filter(k).length;
-    return `<li><button class="item" data-day="${d.day_id}"><div class="who"><strong>${esc(fmtDate(d.grading_date))}${d.start_time ? ' · ' + fmtTime(d.start_time) : ''}</strong><span class="meta"><span>${esc(d.location)}</span><span>·</span><span>${esc(beltsText(d))}</span>${d.efc_session ? `<span>·</span><span>${esc(d.efc_session)}</span>` : ''}</span></div>
+    return `<li><button class="item" data-day="${d.day_id}"><div class="main"><div class="name">${esc(fmtDate(d.grading_date))}${d.start_time ? ' · ' + fmtTime(d.start_time) : ''}</div><div class="meta"><span>${esc(d.location)}</span><span>·</span><span>${esc(beltsText(d))}</span>${d.efc_session ? `<span>·</span><span>${esc(d.efc_session)}</span>` : ''}</div></div>
       <span class="tags"><span class="tag">${es.length} students</span>${es.length ? `<span class="tag info">${n(e => e.invited_at)} invited</span><span class="tag ok">${n(e => e.booked_at)} booked</span>` : ''}${n(e => e.result) ? `<span class="tag ok">${n(e => e.result)} results</span>` : ''}${d.closed ? '<span class="tag">Finished</span>' : ''}</span></button></li>`; };
   v.innerHTML = `<div class="view-head"><h2>Grading days</h2>${canGrade() ? '<button class="btn primary sm" id="newDay">New grading day</button>' : ''}</div>
     <h3>Coming up</h3><ul class="list">${up.length ? up.map(row).join('') : '<li class="empty">No grading days coming up.</li>'}</ul>
@@ -435,9 +706,9 @@ function renderDay() {
       <p class="hint">${d.start_time ? fmtTime(d.start_time) + ' · ' : ''}${esc(beltsText(d))} · ${esc(d.efc_session || 'No EFC session named')}${d.notes ? ' · ' + esc(d.notes) : ''}</p></div>
       ${canGrade() ? '<button class="btn sm" id="editDay">Edit</button>' : ''}</div>
     <div class="stats">
-      <div class="stat"><b>${es.length}</b><span>students</span></div><div class="stat"><b>${n(e => e.invited_at)}</b><span>invited</span></div>
-      <div class="stat"><b>${n(e => e.booked_at)}</b><span>booked in EFC</span></div><div class="stat"><b>${n(e => e.paid)}</b><span>paid</span></div>
-      <div class="stat"><b>${passed.length}</b><span>passed</span></div></div>
+      <div class="stat"><span class="n">${es.length}</span><span class="l">students</span></div><div class="stat"><span class="n">${n(e => e.invited_at)}</span><span class="l">invited</span></div>
+      <div class="stat"><span class="n">${n(e => e.booked_at)}</span><span class="l">booked in EFC</span></div><div class="stat"><span class="n">${n(e => e.paid)}</span><span class="l">paid</span></div>
+      <div class="stat"><span class="n">${passed.length}</span><span class="l">passed</span></div></div>
     ${canGrade() && !d.closed ? `<div class="card"><h3>Students</h3><div class="row">
         <button class="btn" id="addReady">Add everyone marked ready (${esc(d.location)}, ${esc(beltsText(d))})</button><button class="btn" id="addOne">Add a student</button>
         <button class="btn primary" id="sendInv" ${notInvited.length ? '' : 'disabled'}>Invite ${notInvited.length || ''}</button></div>
@@ -446,11 +717,11 @@ function renderDay() {
           <button class="btn sm" id="sendReminder" ${booked.length ? '' : 'disabled'}>Grading day reminder${booked.length ? ' (' + booked.length + ')' : ''}</button>
           <button class="btn sm" id="sendUnpaid" ${unpaid.length ? '' : 'disabled'}>Fee reminder${unpaid.length ? ' (' + unpaid.length + ')' : ''}</button></div></div>` : ''}
     <ul class="list" id="entryList">${es.length ? es.map(e => `<li><button class="item" data-entry="${e.entry_id}">${swatch(e.belt_from)}
-        <div class="who"><strong>${esc(e.full_name)}</strong><span class="meta">${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}${e.booking_error ? ' · <span style="color:var(--danger)">Booking failed</span>' : ''}</span></div>
+        <div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}${e.booking_error ? ' · <span style="color:var(--danger)">Booking failed</span>' : ''}</div></div>
         <span class="tags">${e.result ? `<span class="tag ${e.result === 'retest' ? 'bad' : 'ok'}">${RESULT[e.result]}</span>` : ''}${e.booked_at ? '<span class="tag ok">Booked</span>' : e.invited_at ? '<span class="tag info">Invited</span>' : '<span class="tag">Not invited</span>'}${e.paid ? '<span class="tag ok">Paid</span>' : e.booked_at ? '<span class="tag warn">Unpaid</span>' : ''}</span></button></li>`).join('') : '<li class="empty">No students on this day yet.</li>'}</ul>
     ${es.length ? `<div class="card"><h3>Getting ready</h3>
       <p class="hint">New belts and certificates needed (everyone not marked re-test${n(e => e.result) ? '' : ', until results are in'}). EFC doesn't hold belt sizes, so check sizes against the list.</p>
-      <table><thead><tr><th>Belt</th><th>Belts</th><th>Certificates</th></tr></thead><tbody>${Object.entries(needs).sort((a, b) => (beltOf(a[0]).sort || 99) - (beltOf(b[0]).sort || 99)).map(([b, c]) => `<tr><td>${esc(b)}</td><td>${c}</td><td>${c}</td></tr>`).join('')}</tbody></table>
+      <table class="grid"><thead><tr><th>Belt</th><th>Belts</th><th>Certificates</th></tr></thead><tbody>${Object.entries(needs).sort((a, b) => (beltOf(a[0]).sort || 99) - (beltOf(b[0]).sort || 99)).map(([b, c]) => `<tr><td>${esc(b)}</td><td>${c}</td><td>${c}</td></tr>`).join('')}</tbody></table>
       <div class="row"><button class="btn" id="printList">Print the day's list</button><button class="btn" id="csvAll">Certificates CSV (everyone)</button></div></div>` : ''}
     ${es.length && canGrade() ? `<div class="card"><h3>On the day</h3><div class="row">
       <button class="btn primary" id="resultsBtn">Enter results</button>
@@ -469,7 +740,7 @@ function renderDay() {
   on('#sendReminder', () => composeTexts('reminder', people(booked)));
   on('#sendUnpaid', () => composeTexts('unpaid', people(unpaid)));
   on('#sendRetest', () => composeTexts('retest', people(toRetest)));
-  on('#resultsBtn', () => { state.resultsMode = true; render(); window.scrollTo(0, 0); });
+  on('#resultsBtn', () => go('day', d.day_id, true));
   on('#csvPassed', () => certCsv(d, passed));
   on('#csvAll', () => certCsv(d, es.filter(e => e.result !== 'retest')));
   on('#printList', () => printDay(d, es));
@@ -492,7 +763,7 @@ function pickStudent(d) {
     <input type="search" id="psQ" placeholder="Search name" aria-label="Search name"><ul class="list" id="psList" style="max-height:50vh;overflow:auto"></ul></div>`);
   const draw = () => { const q = $('#psQ').value.trim().toLowerCase();
     const l = state.students.filter(s => forDay(d, s) && (!q || s.full_name.toLowerCase().includes(q))).slice(0, 60);
-    $('#psList').innerHTML = l.map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}<div class="who"><strong>${esc(s.full_name)}</strong><span class="meta">${esc(short(s.belt))} to ${esc(short(s.next_belt))}</span></div><span class="tags">${readyTags(s)}</span></button></li>`).join('') || '<li class="empty">No one matches.</li>';
+    $('#psList').innerHTML = l.map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}<div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(short(s.belt))} to ${esc(short(s.next_belt))}</div></div><span class="tags">${readyTags(s)}</span></button></li>`).join('') || '<li class="empty">No one matches.</li>';
     $$('#psList [data-key]').forEach(b => b.onclick = () => addStudents(d, [student(b.dataset.key)])); };
   $('#psQ').oninput = draw; draw(); $('#psQ').focus();
 }
@@ -524,11 +795,11 @@ function renderResults(d, es) {
   const v = $('#view-day');
   v.innerHTML = `<div class="view-head"><div><button class="x" id="backDay" style="padding:0">‹ Back to the day</button><h2>Results · ${esc(d.location)} ${esc(fmtDate(d.grading_date))}</h2></div><span class="hint" id="resCount"></span></div>
     <p class="hint">Tap a result; it saves straight away. Tap it again to clear it.</p>
-    ${es.map(e => `<div class="rescard"><div class="row" style="justify-content:space-between">${swatch(e.belt_from)}<div class="who"><strong style="font-size:18px">${esc(e.full_name)}</strong><span class="meta">${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}</span></div></div>
+    ${es.map(e => `<div class="rescard"><div class="row" style="flex-wrap:nowrap">${swatch(e.belt_from)}<div class="main" style="flex:1;min-width:0"><div class="name" style="font-size:18px">${esc(e.full_name)}</div><div class="meta">${esc(short(e.belt_from))} to ${esc(short(e.belt_to))}</div></div></div>
       <div class="res" data-entry="${e.entry_id}">${Object.entries(RESULT).map(([k, t]) => `<button type="button" data-r="${k}" aria-pressed="${e.result === k}">${t}</button>`).join('')}</div></div>`).join('')}`;
   const count = () => { const n = state.entries.filter(x => x.day_id === d.day_id && x.result).length; $('#resCount').textContent = `${n} of ${es.length} done`; };
   count();
-  $('#backDay').onclick = () => { state.resultsMode = false; render(); };
+  $('#backDay').onclick = () => go('day', d.day_id);
   $$('.res[data-entry] button').forEach(b => b.onclick = async () => {
     const box = b.parentElement, id = box.dataset.entry, e = state.entries.find(x => x.entry_id === id);
     const val = e.result === b.dataset.r ? null : b.dataset.r;
@@ -552,7 +823,7 @@ function printDay(d, es) {
   const w = window.open('', '_blank'); if (!w) return toast('Allow pop-ups to print.');
   w.document.write(`<!doctype html><title>${esc(d.location)} grading ${esc(d.grading_date)}</title><style>body{font:14px Arial,sans-serif;margin:24px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #999;padding:6px;text-align:left}</style>
     <h2>${esc(d.location)} coloured belt grading · ${esc(fmtDate(d.grading_date))} ${esc(fmtTime(d.start_time))}</h2>
-    <table><tr><th>Name</th><th>From</th><th>To</th><th>Booked</th><th>Paid</th><th>Result</th></tr>${es.map(e => `<tr><td>${esc(e.full_name)}</td><td>${esc(e.belt_from)}</td><td>${esc(e.belt_to)}</td><td>${e.booked_at ? 'Yes' : ''}</td><td>${e.paid ? 'Yes' : ''}</td><td>${e.result ? RESULT[e.result] : ''}</td></tr>`).join('')}</table>`);
+    <table class="grid"><tr><th>Name</th><th>From</th><th>To</th><th>Booked</th><th>Paid</th><th>Result</th></tr>${es.map(e => `<tr><td>${esc(e.full_name)}</td><td>${esc(e.belt_from)}</td><td>${esc(e.belt_to)}</td><td>${e.booked_at ? 'Yes' : ''}</td><td>${e.paid ? 'Yes' : ''}</td><td>${e.result ? RESULT[e.result] : ''}</td></tr>`).join('')}</table>`);
   w.document.close(); w.focus(); w.print();
 }
 
@@ -565,8 +836,8 @@ function renderEfc() {
   v.innerHTML = `<div class="view-head"><h2>Update EFC</h2></div>
     <p class="hint">EFC is the master for belts. Promote each of these students in EFC, then tick them off. The next EFC update brings the new belt back here.</p>
     <ul class="list">${todo.length ? todo.map(({ e, d }) => `<li><label class="item" style="cursor:pointer"><input type="checkbox" data-efc="${e.entry_id}" ${canGrade() ? '' : 'disabled'}>
-      <div class="who"><strong>${esc(e.full_name)}</strong><span class="meta">${esc(d.location)} · ${esc(fmtDate(d.grading_date))} · ${esc(e.belt_from)} to <b>${esc(e.belt_to)}</b>${e.result === 'distinction' ? ' · distinction' : ''}</span></div></label></li>`).join('') : '<li class="empty">Nothing to update in EFC.</li>'}</ul>
-    ${done.length ? `<h3>Recently done</h3><ul class="list">${done.map(e => `<li><div class="item" style="cursor:default"><div class="who"><strong>${esc(e.full_name)}</strong><span class="meta">${esc(e.belt_to)} · ${esc(e.efc_done_by || '')}</span></div>${canGrade() ? `<button class="btn sm" data-undo="${e.entry_id}">Undo</button>` : ''}</div></li>`).join('')}</ul>` : ''}`;
+      <div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(d.location)} · ${esc(fmtDate(d.grading_date))} · ${esc(e.belt_from)} to <b>${esc(e.belt_to)}</b>${e.result === 'distinction' ? ' · distinction' : ''}</div></div></label></li>`).join('') : '<li class="empty">Nothing to update in EFC.</li>'}</ul>
+    ${done.length ? `<h3>Recently done</h3><ul class="list">${done.map(e => `<li><div class="item" style="cursor:default"><div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(e.belt_to)} · ${esc(e.efc_done_by || '')}</div></div>${canGrade() ? `<button class="btn sm" data-undo="${e.entry_id}">Undo</button>` : ''}</div></li>`).join('')}</ul>` : ''}`;
   $$('[data-efc]').forEach(c => c.onchange = async () => {
     try { await run(sb.from('cb_entries').update({ efc_done: true, efc_done_at: new Date().toISOString(), efc_done_by: state.me }).eq('entry_id', c.dataset.efc), 'Ticked off'); await loadAll(); render(); }
     catch (e) { c.checked = false; toast(errMsg(e), 6000); }
@@ -591,14 +862,14 @@ function renderDash() {
   const mname = k => new Date(k + '-01T00:00:00').toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
   v.innerHTML = `<div class="view-head"><h2>Dashboard</h2><select id="dashSchool" aria-label="School" style="width:auto"><option value="">All schools</option>${SCHOOLS.map(s => `<option${s === school ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
     <div class="stats">
-      <div class="stat"><b>${st.filter(eligible).length}</b><span>with enough classes</span></div>
-      <div class="stat"><b>${ready.length}</b><span>marked ready, not on a grading day</span></div>
-      <div class="stat"><b>${results.length ? Math.round(passes.length / results.length * 100) + '%' : '—'}</b><span>pass rate (${passes.length} of ${results.length})</span></div>
-      <div class="stat"><b>${money(revenue) || '$0'}</b><span>grading fees paid</span></div>
-      <div class="stat"><b style="color:${od.length ? 'var(--danger)' : 'inherit'}">${od.length}</b><span>overdue for a grading</span></div></div>
-    <div class="card"><h3>Each month</h3>${Object.keys(months).length ? `<table><thead><tr><th>Month</th><th>Graded</th><th>Passed</th><th>Pass rate</th><th>Fees paid</th></tr></thead><tbody>${Object.keys(months).sort().reverse().map(k => `<tr><td>${esc(mname(k))}</td><td>${months[k].n}</td><td>${months[k].p}</td><td>${months[k].n ? Math.round(months[k].p / months[k].n * 100) + '%' : '—'}</td><td>${money(months[k].r)}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No results yet.</p>'}</div>
+      <div class="stat"><span class="n">${st.filter(eligible).length}</span><span class="l">with enough classes</span></div>
+      <div class="stat"><span class="n">${ready.length}</span><span class="l">marked ready, not on a grading day</span></div>
+      <div class="stat"><span class="n">${results.length ? Math.round(passes.length / results.length * 100) + '%' : '—'}</span><span class="l">pass rate (${passes.length} of ${results.length})</span></div>
+      <div class="stat"><span class="n">${money(revenue) || '$0'}</span><span class="l">grading fees paid</span></div>
+      <div class="stat"><span class="n" style="color:${od.length ? 'var(--danger)' : 'inherit'}">${od.length}</span><span class="l">overdue for a grading</span></div></div>
+    <div class="card"><h3>Each month</h3>${Object.keys(months).length ? `<table class="grid"><thead><tr><th>Month</th><th>Graded</th><th>Passed</th><th>Pass rate</th><th>Fees paid</th></tr></thead><tbody>${Object.keys(months).sort().reverse().map(k => `<tr><td>${esc(mname(k))}</td><td>${months[k].n}</td><td>${months[k].p}</td><td>${months[k].n ? Math.round(months[k].p / months[k].n * 100) + '%' : '—'}</td><td>${money(months[k].r)}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No results yet.</p>'}</div>
     <div class="card"><h3>Overdue for a grading</h3><p class="hint">On their belt at least twice as long as usual, and not on a grading day. A long gap is often a sign a student is about to drop off.</p>
-      ${od.length ? `<ul class="list">${od.sort((a, b) => b.weeks_at_belt - a.weeks_at_belt).slice(0, 50).map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}<div class="who"><strong>${esc(s.full_name)}</strong><span class="meta">${esc(s.location)} · ${esc(short(s.belt))} · ${s.weeks_at_belt} weeks · ${s.classes} classes</span></div></button></li>`).join('')}</ul>` : '<p class="hint">No one is overdue.</p>'}</div>`;
+      ${od.length ? `<ul class="list">${od.sort((a, b) => b.weeks_at_belt - a.weeks_at_belt).slice(0, 50).map(s => `<li><button class="item" data-key="${esc(s.member_key)}">${swatch(s.belt)}<div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(s.location)} · ${esc(short(s.belt))} · ${s.weeks_at_belt} weeks · ${s.classes} classes</div></div></button></li>`).join('')}</ul>` : '<p class="hint">No one is overdue.</p>'}</div>`;
   $('#dashSchool').onchange = () => { v.dataset.school = $('#dashSchool').value; renderDash(); };
   $$('#view-dash [data-key]').forEach(b => b.onclick = () => openStudent(b.dataset.key));
 }
@@ -609,7 +880,7 @@ function renderSettings() {
   v.innerHTML = `<div class="view-head"><h2>Settings</h2></div>
     <form id="beltForm" class="card"><h3>Each belt</h3>
       <p class="hint">Classes needed since their last grading (from EFC), the usual weeks between gradings (twice this is "overdue"), and the grading fee shown in invitations. EFC charges the fee through the grading session.</p>
-      <div style="overflow-x:auto"><table><thead><tr><th>Belt</th><th>Grades to</th><th>Classes needed</th><th>Weeks between</th><th>Fee ($)</th></tr></thead><tbody>
+      <div style="overflow-x:auto"><table class="grid"><thead><tr><th>Belt</th><th>Grades to</th><th>Classes needed</th><th>Weeks between</th><th>Fee ($)</th></tr></thead><tbody>
       ${state.belts.map(b => `<tr data-belt="${esc(b.belt)}"><td>${swatch(b.belt)} ${esc(short(b.belt))}</td><td>${esc(short(b.next_belt))}</td>
         <td><input type="number" min="0" max="500" name="classes" value="${b.classes_needed}" aria-label="${esc(b.belt)} classes needed"></td>
         <td><input type="number" min="0" max="104" name="weeks" value="${b.weeks_between}" aria-label="${esc(b.belt)} weeks between"></td>
@@ -661,6 +932,11 @@ async function start() {
   catch (e) { showOnly('#noAccess'); $('#noAccessText').textContent = /cb_|does not exist|schema cache/i.test(errMsg(e)) ? 'Coloured belt grading isn\'t set up in Supabase yet: run supabase/coloured-belts.sql in the SQL Editor.' : errMsg(e); return; }
   showOnly(null); $('#tabs').hidden = false;
   if (!has('instructor', 'grading')) state.view = 'days';   // payments staff: grading days (paid)
+  // The address they opened (or were sent back with from 404.html as ?p=...)
+  const asked = new URLSearchParams(location.search).get('p') || (location.pathname.startsWith(APP_BASE) ? location.pathname.slice(APP_BASE.length) : '');
+  applyPath(asked.replace(/^index\.html$/, ''));
+  state.loaded = true;
+  setAddress(true);
   render();
 }
 $('#siForm').onsubmit = async e => {
