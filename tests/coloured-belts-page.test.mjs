@@ -35,6 +35,7 @@ await db.exec(read(join(ROOT, 'supabase/coloured-belts-8.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-9.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-10.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-11.sql')));
+await db.exec(read(join(ROOT, 'supabase/coloured-belts-12.sql')));
 await db.exec(`insert into prep_roles (email, role) values ('tate@ama.test', 'admin') on conflict do nothing; delete from prep_roles where email <> 'tate@ama.test'; insert into prep_roles (email, role) values ('coach@ama.test', 'instructor'), ('desk@ama.test', 'attendance');`);
 // EFC students (made up): Sam and Kim have enough classes; Alex is overdue; Jo is at another school
 await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_name, phone, location, programme, belt, promoted_on, attended_since_promoted, efc_reference) values
@@ -259,9 +260,17 @@ try {
   ok((await page.textContent('#resCount')).includes('2 of 2'), 'it counts how many are done');
   // A teacher writes Kim a Black Belt Club invitation (Sam is already in the club)
   ok(!(await page.$('.rescard:has-text("Sam Lee") [data-bbcinv]')), 'no Black Belt Club invite button for someone already in the club');
-  await page.click('.rescard:has-text("Kim Ng") [data-bbcinv]'); await toastSays(page, 'Marked invited');
+  await page.click('.rescard:has-text("Kim Ng") [data-bbcinv]'); await toastSays(page, 'invitations to write');
   const bbcInv = (await q(`select bbc_invited_at, bbc_invited_by from efc_members where member_key = 'efc:m2'`))[0];
-  ok(bbcInv.bbc_invited_at && bbcInv.bbc_invited_by === 'tate@ama.test' && await until(async () => (await page.textContent('.rescard:has-text("Kim Ng") [data-bbcinv]').catch(() => '')).includes('Invited')), 'staff mark a student invited to Black Belt Club from the results screen');
+  ok(bbcInv.bbc_invited_at && bbcInv.bbc_invited_by === 'tate@ama.test' && await until(async () => (await page.textContent('.rescard:has-text("Kim Ng") [data-bbcinv]').catch(() => '')).includes('asked for')), 'a teacher asks for a Black Belt Club invitation from the results screen');
+  // It comes up on the Black Belt Club invitations list for whoever writes them
+  await page.click('#backDay'); await page.waitForSelector('#csvPassed');
+  ok(await until(async () => (await page.textContent('#bbcCount').catch(() => '')) === '1'), 'the BBC invites tab shows how many are waiting to be written');
+  await page.click('.tab[data-view="bbc"]'); await page.waitForSelector('#view-bbc h2');
+  ok((await page.textContent('#view-bbc')).includes('Kim Ng') && (await page.textContent('#view-bbc')).includes('asked for by tate@ama.test') && new URL(page.url()).pathname.endsWith('/black-belt-club'), 'the invitation comes up on the Black Belt Club invitations list (its own page)');
+  await page.check('#view-bbc [data-written="efc:m2"]'); await toastSays(page, 'written');
+  ok(!!(await q(`select bbc_written_at from efc_members where member_key = 'efc:m2'`))[0].bbc_written_at && await until(async () => (await page.textContent('#view-bbc')).includes('No invitations to write') && await page.isHidden('#bbcCount')), 'ticking it off records that it was written');
+  await page.click('.tab[data-view="days"]'); await page.click(`#view-days [data-day="${dayId}"]`); await page.click('#resultsBtn'); await page.waitForSelector('.res');
   if (SHOTS) { await page.setViewportSize({ width: 390, height: 844 }); await shot(page, 'cb-results-phone'); await page.setViewportSize({ width: 1100, height: 900 }); }
   await page.click('#backDay'); await page.waitForSelector('#csvPassed');
   const dl = page.waitForEvent('download'); await page.click('#csvPassed'); const file = await dl;
