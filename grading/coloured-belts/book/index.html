@@ -179,7 +179,7 @@ function show(r) {
   $('#school').textContent = r.school ? `AMA ${r.school}` : 'Grading booking';
   $('#info').hidden = false;
   $('#title').innerHTML = `${esc(r.first)}'s grading for <span class="belt">${esc(r.belt_to)}</span>`;
-  const facts = [['date', 'Date', day], ...(r.time ? [['time', 'Time', fmtTime(r.time) + ', arrive 15 min early']] : []), ['where', 'Where', `AMA ${r.school}`]];
+  const facts = [['date', 'Date', day], ...(r.time ? [['time', 'Time', fmtTime(r.time) + ' (arrive 15 mins early)']] : []), ['where', 'Where', `AMA ${r.school}`]];
   if (done) facts.unshift(['belt', 'Grading for', `${r.first}: ${r.belt_to}`]);
   if (fee && r.paid) facts.push(['fee', 'Fee', `${fee} paid${HOW[r.paid_how] ? ' ' + HOW[r.paid_how] : ''}`]);
   $('#details').innerHTML = facts.map(([i, k, v]) => `<li>${ICON[i]}<div><small>${esc(k)}</small><strong>${esc(v)}</strong></div></li>`).join('');
