@@ -592,7 +592,7 @@ function render() {
   const pb = $('#progBar'); pb.hidden = state.programmes.length < 2;
   $('#progSel').innerHTML = `<option value="${ALL}"${isAll() ? ' selected' : ''}>All programs</option>` + state.programmes.map(x => `<option value="${esc(x.programme)}"${x.programme === state.programme ? ' selected' : ''}>${esc(x.label)}</option>`).join('');
   $('#progSel').onchange = e => setProgramme(e.target.value);
-  const bc = bbcToWrite().length; $('#bbcCount').hidden = !bc; $('#bbcCount').textContent = bc;
+  bbcBadge();
   $$('#tabs .tab').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.view === (state.view === 'day' ? 'days' : state.view))); b.hidden = b.dataset.admin !== undefined && !isAdmin(); });
   $('#tabs').style.setProperty('--tabs', $$('#tabs .tab:not([hidden])').length);
   document.title = ({ ready: "Who's ready", days: 'Grading days', day: 'Grading day', efc: 'Update EFC', bbc: 'Cards to write', dash: 'Dashboard', settings: 'Settings' }[state.view] || '') + ' · ' + progLabel(state.programme) + ' Gradings';
@@ -1078,12 +1078,12 @@ function wireBbcInvite(root, after) {
   root.querySelectorAll('[data-bbcinv]').forEach(b => b.onclick = async () => {
     b.disabled = true;
     const on = b.dataset.on === '1', key = b.dataset.bbcinv, s = student(key) || {};
-    try {
-      await run(sb.rpc('cb_bbc_invite', { p_member: key, p_on: on }), on ? 'Added to Black Belt Club invitations to write' : 'Invitation cancelled');
-      patchStudent(key, on ? { bbc_invited_at: s.bbc_invited_at || new Date().toISOString(), bbc_invited_by: s.bbc_invited_by || state.me } : { bbc_invited_at: null, bbc_invited_by: null, bbc_written_at: null, bbc_written_by: null });
-      after();
-    }
-    catch (er) { toast(errMsg(er), 6000); b.disabled = false; }
+    const before = { bbc_invited_at: s.bbc_invited_at || null, bbc_invited_by: s.bbc_invited_by || null, bbc_written_at: s.bbc_written_at || null, bbc_written_by: s.bbc_written_by || null };
+    // Show it straight away (the number on Cards to write too), then save
+    patchStudent(key, on ? { bbc_invited_at: s.bbc_invited_at || new Date().toISOString(), bbc_invited_by: s.bbc_invited_by || state.me } : { bbc_invited_at: null, bbc_invited_by: null, bbc_written_at: null, bbc_written_by: null });
+    after();
+    try { await run(sb.rpc('cb_bbc_invite', { p_member: key, p_on: on }), on ? 'Card to write: the team can see it on Cards to write' : 'Card cancelled'); }
+    catch (er) { patchStudent(key, before); after(); toast(errMsg(er), 6000); }
   });
 }
 // Results on a tablet: one card per student, two big buttons (pass or fail)
@@ -1210,8 +1210,10 @@ function renderBbc() {
       <div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(s.location)} · ${esc(ageText(s))} · ${esc(progs(s.member_key))}${s.guardian_name ? ' · parent ' + esc(s.guardian_name) : ''} · asked for by ${esc(s.bbc_invited_by || 'staff')}, ${esc(when(s.bbc_invited_at))}</div></div><span class="tags"><span class="tag bbcinv">To write</span></span></label></li>`).join('') : '<li class="empty">No invitations to write.</li>'}</ul>
     ${done.length ? `<h3>Written</h3><ul class="list">${done.map(s => `<li><div class="item" style="cursor:default"><div class="main"><div class="name">${esc(s.full_name)}</div><div class="meta">${esc(s.location)} · written ${esc(when(s.bbc_written_at))} by ${esc(s.bbc_written_by || 'staff')}${s.black_belt_club ? ' · <b>joined</b>' : ''}</div></div>${canApprove() ? `<button class="btn sm" data-unwritten="${esc(s.member_key)}">Undo</button>` : ''}</div></li>`).join('')}</ul>` : ''}`;
   $$('[data-written]').forEach(c => c.onchange = async () => {
-    try { await run(sb.rpc('cb_bbc_written', { p_member: c.dataset.written, p_on: true }), 'Ticked off: invitation written'); patchStudent(c.dataset.written, { bbc_written_at: new Date().toISOString(), bbc_written_by: state.me }); render(); }
-    catch (e) { c.checked = false; toast(errMsg(e), 6000); }
+    const key = c.dataset.written;
+    patchStudent(key, { bbc_written_at: new Date().toISOString(), bbc_written_by: state.me }); render();
+    try { await run(sb.rpc('cb_bbc_written', { p_member: key, p_on: true }), 'Ticked off: card written'); }
+    catch (e) { patchStudent(key, { bbc_written_at: null, bbc_written_by: null }); render(); toast(errMsg(e), 6000); }
   });
   $$('[data-unwritten]').forEach(b => b.onclick = async () => { try { await run(sb.rpc('cb_bbc_written', { p_member: b.dataset.unwritten, p_on: false })); patchStudent(b.dataset.unwritten, { bbc_written_at: null, bbc_written_by: null }); render(); } catch (e) { toast(errMsg(e), 6000); } });
 }
@@ -1509,7 +1511,9 @@ function liveRender() {
 }
 const quietReload = (ms = 1200) => { clearTimeout(reloadTimer); reloadTimer = setTimeout(async () => { try { await loadAll(); state.loadedAt = Date.now(); liveRender(); } catch (e) { /* try again next change */ } }, ms); };
 // Change every program row for a student (from a change here or from another device)
-function patchStudent(key, f) { state.all.students.forEach(s => { if (s.member_key === key) Object.assign(s, f); }); }
+function patchStudent(key, f) { state.all.students.forEach(s => { if (s.member_key === key) Object.assign(s, f); }); bbcBadge(); }
+// The number on the Cards to write tab
+function bbcBadge() { const b = $('#bbcCount'); if (!b || !state.all) return; const n = bbcToWrite().length; b.hidden = !n; b.textContent = n; }
 const studentFields = m => ({ full_name: m.full_name, guardian_name: m.guardian_name, phone: m.phone || m.guardian_phone || null, email: m.email || m.guardian_email || null,
   black_belt_club: !!(m.bbc_seen_at && Date.parse(m.bbc_seen_at) > Date.now() - 3 * 86400000),
   bbc_invited_at: m.bbc_invited_at || null, bbc_invited_by: m.bbc_invited_by || null, bbc_written_at: m.bbc_written_at || null, bbc_written_by: m.bbc_written_by || null });

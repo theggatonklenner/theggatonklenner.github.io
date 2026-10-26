@@ -260,7 +260,9 @@ try {
   ok((await page.textContent('#resCount')).includes('2 of 2'), 'it counts how many are done');
   // A teacher writes Kim a Black Belt Club invitation (Sam is already in the club)
   ok(!(await page.$('.rescard:has-text("Sam Lee") [data-bbcinv]')), 'no Black Belt Club invite button for someone already in the club');
-  await page.click('.rescard:has-text("Kim Ng") [data-bbcinv]'); await toastSays(page, 'invitations to write');
+  await page.click('.rescard:has-text("Kim Ng") [data-bbcinv]');
+  ok(await until(async () => (await page.textContent('#bbcCount').catch(() => '')) === '1' && await page.isVisible('#bbcCount'), 1500), 'pressing the button updates the Cards to write number straight away (on the results screen too)');
+  await toastSays(page, 'Cards to write');
   const bbcInv = (await q(`select bbc_invited_at, bbc_invited_by from efc_members where member_key = 'efc:m2'`))[0];
   ok(bbcInv.bbc_invited_at && bbcInv.bbc_invited_by === 'tate@ama.test' && await until(async () => (await page.textContent('.rescard:has-text("Kim Ng") [data-bbcinv]').catch(() => '')).includes('asked for')), 'a teacher asks for a Black Belt Club invitation from the results screen');
   // It comes up on the Black Belt Club invitations list for whoever writes them
@@ -268,7 +270,7 @@ try {
   ok(await until(async () => (await page.textContent('#bbcCount').catch(() => '')) === '1'), 'the BBC invites tab shows how many are waiting to be written');
   await page.click('.tab[data-view="bbc"]'); await page.waitForSelector('#view-bbc h2');
   ok((await page.textContent('#view-bbc')).includes('Kim Ng') && (await page.textContent('#view-bbc')).includes('asked for by tate@ama.test') && new URL(page.url()).pathname.endsWith('/black-belt-club'), 'the invitation comes up on the Black Belt Club invitations list (its own page)');
-  await page.check('#view-bbc [data-written="efc:m2"]'); await toastSays(page, 'written');
+  await page.click('#view-bbc [data-written="efc:m2"]'); await toastSays(page, 'written');
   ok(!!(await q(`select bbc_written_at from efc_members where member_key = 'efc:m2'`))[0].bbc_written_at && await until(async () => (await page.textContent('#view-bbc')).includes('No invitations to write') && await page.isHidden('#bbcCount')), 'ticking it off records that it was written');
   // Another staff member asks for an invitation on their device: it shows here without reloading
   await page.evaluate(() => applyLive({ table: 'efc_members', eventType: 'UPDATE', new: { member_key: 'efc:m1', full_name: 'Sam Lee', guardian_name: 'Pat Lee', phone: '0412 345 678', bbc_invited_at: new Date().toISOString(), bbc_invited_by: 'coach@ama.test' } }));
