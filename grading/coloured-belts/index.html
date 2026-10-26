@@ -527,8 +527,20 @@ function readyTags(s) {
 /* ---------------- Loading ---------------- */
 async function loadAll() {
   const q = (t, order) => { let x = sb.from(t).select('*'); if (order) x = x.order(order[0], { ascending: order[1] !== false }); return x; };
+  // Supabase sends at most 1,000 rows at a time: fetch long lists page by page (every program together is well over 1,000 students)
+  const all = async (t, orders) => {
+    const rows = [];
+    for (let from = 0; from < 100000; from += 1000) {
+      let x = sb.from(t).select('*'); for (const o of orders) x = x.order(o, { ascending: true });
+      const r = await x.range(from, from + 999);
+      if (r.error) return r;
+      rows.push(...(r.data || []));
+      if ((r.data || []).length < 1000) break;
+    }
+    return { data: rows, error: null };
+  };
   const [st, be, se, da, en, me, pr] = await Promise.all([
-    q('cb_students', ['full_name']).range(0, 19999), q('cb_belts', ['sort']), q('cb_settings'), q('cb_days', ['grading_date', false]), q('cb_entries', ['full_name']).range(0, 19999),
+    all('cb_students', ['full_name', 'member_key', 'programme']), q('cb_belts', ['sort']), q('cb_settings'), q('cb_days', ['grading_date', false]), all('cb_entries', ['full_name', 'entry_id']),
     sb.from('cb_messages').select('entry_id, member_key, kind, status, sent_at').order('sent_at', { ascending: false }).limit(5000), q('cb_programmes', ['sort'])]);
   for (const r of [st, be, se, da, en]) if (r.error) throw r.error;
   state.all = { students: st.data || [], belts: be.data || [], days: da.data || [], entries: en.data || [] };

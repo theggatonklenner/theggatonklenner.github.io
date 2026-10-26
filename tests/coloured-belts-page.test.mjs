@@ -44,7 +44,11 @@ await db.exec(`update efc_members set date_of_birth = to_char(current_date - int
   update efc_members set date_of_birth = to_char(current_date - interval '14 years 3 months', 'YYYY-MM-DD') where member_key = 'efc:m4';`);
 
 const users = { 'tate@ama.test': { id: '00000000-0000-0000-0000-000000000001', password: 'pw' }, 'coach@ama.test': { id: '00000000-0000-0000-0000-000000000002', password: 'pw' }, 'desk@ama.test': { id: '00000000-0000-0000-0000-000000000003', password: 'pw' } };
-const server = await startServer({ db, appDir: ROOT, users, config: '' });
+// 1,100 BJJ students at Sylvania whose names sort first: with Supabase's 1,000-row cap, the rest only load if the app fetches page by page
+await db.exec(`insert into efc_members (member_key, kind, full_name, location, programme, belt, promoted_on, attended_since_promoted)
+  select 'efc:f' || i, 'member', 'Aaa Filler ' || lpad(i::text, 4, '0'), 'Sylvania', 'BJJ', 'White Belt', current_date - 50, 3 from generate_series(1, 1100) i;
+  insert into efc_grades (member_key, programme, belt, promoted_on, attended_since_promoted) select 'efc:f' || i, 'BJJ', 'White Belt', current_date - 50, 3 from generate_series(1, 1100) i on conflict do nothing`);
+const server = await startServer({ db, appDir: ROOT, users, config: '', maxRows: 1000 });
 const BASE = `http://localhost:${server.address().port}`;
 const q = server.q;
 const configJs = `window.TOOLKIT_CONFIG = { SUPABASE_URL: '${BASE}', SUPABASE_KEY: 'test' };`;
@@ -98,6 +102,8 @@ const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Dat
 try {
   console.log('Who\'s ready');
   let { ctx, page } = await open('tate@ama.test');
+  const loaded = await page.evaluate(() => ({ n: state.all.students.length, sam: state.all.students.some(s => s.member_key === 'efc:m1' && s.phone) }));
+  ok(loaded.n > 1100 && loaded.sam, 'every student loads, even past Supabase\'s 1,000-row limit (so no one shows "No mobile" by mistake)');
   ok(new URL(page.url()).pathname === '/grading/coloured-belts/ready', 'the first screen has its own address (/grading/coloured-belts/ready)');
   await shot(page, 'cb-ready');
   let list = await page.textContent('#readyList');
@@ -255,7 +261,7 @@ try {
   ok(cDay.schools.join() === 'Marrickville,Concord' && (await page.textContent('#view-day')).includes('students from Marrickville, Concord'), 'a Concord grading day can take Marrickville students too');
   await page.click('#addReady'); await toastSays(page, 'Added');
   ok((await q(`select member_key from cb_entries where day_id = '${cDay.day_id}'`)).map(r => r.member_key).join() === 'efc:m3', '"Add everyone marked ready" adds ready Marrickville students (Alex) to the Concord day');
-  ok((await page.textContent('#entryList')).includes('from Marrickville'), 'the list shows they come from Marrickville');
+  ok(await until(async () => (await page.textContent('#entryList').catch(() => '')).includes('from Marrickville')), 'the list shows they come from Marrickville');
   ok(!(await q(`select 1 from cb_entries where day_id = '${cDay.day_id}' and member_key = 'efc:m1'`)).length, 'Sam (passed, not yet promoted in EFC) is not added again');
   await page.click('#addOne'); await page.fill('#psQ', 'Jo Bloggs'); await page.waitForTimeout(200);
   ok((await page.textContent('#psList')).includes('Jo Bloggs'), 'Concord\'s own students can be added too');
