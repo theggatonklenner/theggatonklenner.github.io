@@ -539,9 +539,12 @@ async function loadAll() {
     }
     return { data: rows, error: null };
   };
-  const [st, be, se, da, en, me, pr] = await Promise.all([
+  const [st, be, se, da, en, me, pr, lr] = await Promise.all([
     all('cb_students', ['full_name', 'member_key', 'programme']), q('cb_belts', ['sort']), q('cb_settings'), q('cb_days', ['grading_date', false]), all('cb_entries', ['full_name', 'entry_id']),
-    sb.from('cb_messages').select('entry_id, member_key, kind, status, sent_at').order('sent_at', { ascending: false }).limit(5000), q('cb_programmes', ['sort'])]);
+    sb.from('cb_messages').select('entry_id, member_key, kind, status, sent_at').order('sent_at', { ascending: false }).limit(5000), q('cb_programmes', ['sort']),
+    sb.from('cb_efc_runs').select('ran_at').order('ran_at', { ascending: false }).limit(1)]);
+  // When EFC last updated (the nightly update); missing before coloured-belts-6.sql
+  state.efcAt = !lr.error && lr.data && lr.data[0] ? lr.data[0].ran_at : null;
   for (const r of [st, be, se, da, en]) if (r.error) throw r.error;
   state.all = { students: st.data || [], belts: be.data || [], days: da.data || [], entries: en.data || [] };
   state.programmes = pr.error || !(pr.data || []).length ? [{ programme: 'Taekwondo', label: 'Taekwondo', active: true }] : pr.data.filter(x => x.active !== false);
@@ -909,7 +912,7 @@ function openEntry(id) {
       <dt>Booked in EFC</dt><dd>${e.booked_at ? new Date(e.booked_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' }) : e.booking_error ? `<span style="color:var(--danger)">Failed: ${esc(e.booking_error)}</span>` : 'Not yet'}</dd>
       <dt>Fee</dt><dd>${money(beltOf(e.belt_from).fee) || 'Not set'} ${e.paid ? '<span class="tag ok">Paid</span>' : '<span class="tag warn">Unpaid</span>'}</dd>
       <dt>Result</dt><dd>${e.result ? RESULT[e.result] : '—'}</dd>
-      <dt>Photo</dt><dd>${e.photo_path ? `Taken${sentTo('photo', e.entry_id) ? ', texted to the family' : ''}` : 'Not yet'}</dd>
+      <dt>Photo</dt><dd>${e.photo_path ? `Taken${sentTo('photo', e.entry_id) ? ', texted to the family' : ''}` : e.photo_removed_at ? 'Removed (photos are kept 30 days)' : 'Not yet'}</dd>
       ${s ? `<dt>Parent</dt><dd>${esc([s.guardian_name, s.phone].filter(Boolean).join(' · ') || '—')}</dd>` : ''}
     </dl>
     <div class="section"><h3>Booking link</h3><p class="hint" style="word-break:break-all">${esc(bookingLink(e))}</p><div class="row"><button class="btn sm" id="copyLink">Copy link</button></div></div>
@@ -964,15 +967,15 @@ function renderPhotos(d, shown) {
   const v = $('#view-day');
   const es = shown.filter(e => e.result !== 'retest');
   const thumbs = {};
-  const nextUp = () => es.find(e => !e.photo_path);
+  const nextUp = () => es.find(e => !e.photo_path && !e.photo_removed_at);
   const draw = () => {
     const done = es.filter(e => e.photo_path).length, nx = nextUp();
     const unsent = es.filter(e => e.photo_path && !sentTo('photo', e.entry_id));
     v.innerHTML = `<div class="view-head"><div><button class="x" id="backDay" style="padding:0">‹ Back to the day</button><h2>Photos · ${esc(d.location)} ${esc(fmtDate(d.grading_date))}</h2></div><span class="hint">${done} of ${es.length} taken</span></div>
-      <p class="hint">Tap Take photo, take the photo with the Grandmaster, and it saves straight away. The next student is highlighted. When you're done, text the families: each gets their own link to their photo.</p>
+      <p class="hint">Tap Take photo, take the photo with the Grandmaster, and it saves straight away. The next student is highlighted. When you're done, text the families: each gets their own link to their photo. Photos are removed 30 days after they're taken.</p>
       <div class="row" style="margin-bottom:12px"><button class="btn primary" id="phSend" ${unsent.length ? '' : 'disabled'}>Text photos${unsent.length ? ' (' + unsent.length + ')' : ''}</button></div>
       <div style="display:flex;flex-direction:column;gap:10px">${es.length ? es.map(e => `<div class="phcard${nx && nx.entry_id === e.entry_id ? ' next' : ''}" id="ph-${e.entry_id}">
-        ${thumbs[e.entry_id] ? `<img class="thumb" src="${esc(thumbs[e.entry_id])}" alt="">` : `<div class="thumb">${e.photo_path ? 'Saved' : 'No photo'}</div>`}
+        ${thumbs[e.entry_id] ? `<img class="thumb" src="${esc(thumbs[e.entry_id])}" alt="">` : `<div class="thumb">${e.photo_path ? 'Saved' : e.photo_removed_at ? 'Removed after 30 days' : 'No photo'}</div>`}
         <div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(short(e.belt_from))} to ${esc(short(toText(e)))}${e.photo_path && sentTo('photo', e.entry_id) ? ' · texted' : ''}</div></div>
         <button class="btn ${e.photo_path ? '' : 'primary'}" data-shoot="${e.entry_id}">${e.photo_path ? 'Retake' : 'Take photo'}</button></div>`).join('') : '<div class="empty">No students on this day yet.</div>'}</div>
       <input type="file" id="phFile" accept="image/*" capture="environment" hidden>`;
@@ -991,8 +994,8 @@ function renderPhotos(d, shown) {
         const up = await sb.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: type, upsert: true, cacheControl: '3600' });
         if (up.error) throw up.error;
         const at = new Date().toISOString();
-        await run(sb.from('cb_entries').update({ photo_path: path, photo_at: at, photo_by: state.me }).eq('entry_id', e.entry_id));
-        e.photo_path = path; e.photo_at = at; e.photo_by = state.me;
+        await run(sb.from('cb_entries').update({ photo_path: path, photo_at: at, photo_by: state.me, photo_removed_at: null }).eq('entry_id', e.entry_id));
+        e.photo_path = path; e.photo_at = at; e.photo_by = state.me; e.photo_removed_at = null;
         thumbs[e.entry_id] = URL.createObjectURL(blob);
         if (old && old !== path) sb.storage.from(PHOTO_BUCKET).remove([old]).catch(() => {});   // the photo it replaced
         toast(`Saved ${firstName(e.full_name)}'s photo`);
@@ -1038,6 +1041,7 @@ function renderEfc() {
   const done = state.entries.filter(e => e.efc_done).sort((a, b) => String(b.efc_done_at).localeCompare(String(a.efc_done_at))).slice(0, 30);
   v.innerHTML = `<div class="view-head"><h2>Update EFC</h2></div>
     <p class="hint">EFC is the master for belts. Promote each of these students in EFC, then tick them off. The next EFC update brings the new belt back here.</p>
+    <p class="hint" id="efcAt">${state.efcAt ? `Belts and classes last updated from EFC ${esc(new Date(state.efcAt).toLocaleString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }))}. EFC updates every night.` : 'Belts and classes update from EFC every night.'}</p>
     <ul class="list">${todo.length ? todo.map(({ e, d }) => `<li><label class="item" style="cursor:pointer"><input type="checkbox" data-efc="${e.entry_id}" ${canGrade() ? '' : 'disabled'}>
       <div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(d.location)} · ${esc(fmtDate(d.grading_date))} · ${esc(e.belt_from)} to <b>${esc(toText(e))}</b>${e.result === 'distinction' ? ' · distinction' : ''}</div></div></label></li>`).join('') : '<li class="empty">Nothing to update in EFC.</li>'}</ul>
     ${done.length ? `<h3>Recently done</h3><ul class="list">${done.map(e => `<li><div class="item" style="cursor:default"><div class="main"><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(toText(e))} · ${esc(e.efc_done_by || '')}</div></div>${canGrade() ? `<button class="btn sm" data-undo="${e.entry_id}">Undo</button>` : ''}</div></li>`).join('')}</ul>` : ''}

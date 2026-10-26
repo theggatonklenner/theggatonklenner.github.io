@@ -13,6 +13,7 @@
 //   { action: 'info', token }               a family's booking link: who, what belt, when, where (no sign-in)
 //   { action: 'book', token }               book it (no sign-in)
 //   { action: 'photo', code | token }       a family's grading photo link (short code from /p#<code>): a short-lived address for the photo (no sign-in)
+//   { action: 'cleanup' } + x-cb-cron header  the nightly job: delete grading photos older than 30 days (secret in Supabase Vault)
 //   { action: 'check' }                     staff: is texting set up?
 //   { action: 'send', kind, items: [{ entry_id?, member_key, body }] }   staff: text families
 //        kind: invite, not_booked, reminder, unpaid, congrats, retest, photo (grading staff); not_ready (instructors or grading staff)
@@ -26,7 +27,7 @@ export const EFC_LOCATIONS = {
 const KINDS = { invite: ['grading'], not_booked: ['grading'], reminder: ['grading'], unpaid: ['grading'], congrats: ['grading'], retest: ['grading'], photo: ['grading'], not_ready: ['instructor', 'grading'] };
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-cb-cron',
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -91,16 +92,35 @@ export async function handle(req, db, env = {}, http = fetch) {
     if (body.action === 'photo') {
       const byCode = /^[A-Za-z0-9]{8,16}$/.test(String(body.code || ''));
       if (!byCode && !tokenOk(body.token)) return json({ ok: false, error: 'This link isn\'t valid. Ask the front desk for a new one.' }, 404);
-      const { data: e } = await db.from('cb_entries').select('entry_id, day_id, full_name, belt_to, photo_path').eq(byCode ? 'photo_code' : 'token', byCode ? body.code : body.token).maybeSingle();
+      const { data: e } = await db.from('cb_entries').select('entry_id, day_id, full_name, belt_to, photo_path, photo_removed_at').eq(byCode ? 'photo_code' : 'token', byCode ? body.code : body.token).maybeSingle();
       if (!e) return json({ ok: false, error: 'This link isn\'t valid. Ask the front desk for a new one.' }, 404);
       const { data: d } = await db.from('cb_days').select('location, grading_date').eq('day_id', e.day_id).maybeSingle();
       const info = { ok: true, first: first(e.full_name), belt_to: e.belt_to, school: d ? d.location : null, date: d ? d.grading_date : null, photo: false };
-      if (!e.photo_path) return json({ ...info, error: 'The photo isn\'t ready yet. Please check again soon.' });
+      if (!e.photo_path) return json({ ...info, removed: !!e.photo_removed_at, error: e.photo_removed_at ? 'Grading photos are kept for 30 days, and this one has been removed. Please ask the front desk if you need it.' : 'The photo isn\'t ready yet. Please check again soon.' });
       const name = `${String(e.full_name || 'grading').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '')}-AMA-grading.${(String(e.photo_path).match(/\.(jpe?g|png|webp)$/i) || [, 'jpg'])[1].toLowerCase()}`;
       const bucket = db.storage.from('grading-photos');
       const [{ data: v, error: ve }, { data: dl }] = await Promise.all([bucket.createSignedUrl(e.photo_path, 3600), bucket.createSignedUrl(e.photo_path, 3600, { download: name })]);
       if (ve || !v) return json({ ...info, error: 'The photo couldn\'t be loaded just now. Please try again soon.' }, 502);
       return json({ ...info, photo: true, url: v.signedUrl, download: (dl && dl.signedUrl) || v.signedUrl, filename: name });
+    }
+
+    // ---- The nightly job: delete grading photos 30 days after they're taken ----
+    if (body.action === 'cleanup') {
+      const { data: okCron } = await db.rpc('cb_cron_ok', { p_secret: req.headers.get('x-cb-cron') || '' });
+      if (okCron !== true) return fail('Not allowed.', 403);
+      const { data: names, error: le } = await db.rpc('cb_old_photos', { p_days: 30 });
+      if (le) throw le;
+      const list = (names || []).map(x => typeof x === 'string' ? x : x.cb_old_photos).filter(Boolean);
+      let removed = 0, cleared = 0;
+      for (let i = 0; i < list.length; i += 100) {
+        const batch = list.slice(i, i + 100);
+        const { error: re } = await db.storage.from('grading-photos').remove(batch);
+        if (re) throw re;
+        removed += batch.length;
+        const { data: n } = await db.rpc('cb_photos_removed', { p_names: batch });
+        cleared += Number(n) || 0;
+      }
+      return json({ ok: true, removed, cleared });
     }
 
     // ---- Staff ----

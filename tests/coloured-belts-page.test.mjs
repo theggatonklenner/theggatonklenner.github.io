@@ -29,6 +29,7 @@ await db.exec(read(join(ROOT, 'supabase/coloured-belts-2.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-3.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-4.sql')));
 await db.exec(read(join(ROOT, 'supabase/coloured-belts-5.sql')));
+await db.exec(read(join(ROOT, 'supabase/coloured-belts-6.sql')));
 await db.exec(`insert into prep_roles (email, role) values ('tate@ama.test', 'admin') on conflict do nothing; delete from prep_roles where email <> 'tate@ama.test'; insert into prep_roles (email, role) values ('coach@ama.test', 'instructor'), ('desk@ama.test', 'attendance');`);
 // EFC students (made up): Sam and Kim have enough classes; Alex is overdue; Jo is at another school
 await db.exec(`insert into efc_members (member_key, kind, full_name, guardian_name, phone, location, programme, belt, promoted_on, attended_since_promoted, efc_reference) values
@@ -128,7 +129,7 @@ try {
   await page.click('#readyList [data-key="efc:m1"]'); await page.waitForSelector('#apReady');
   await page.click('#apReady'); await toastSays(page, 'Marked ready');
   ok((await q(`select status, belt from cb_approvals where member_key = 'efc:m1'`))[0]?.status === 'ready', 'an instructor marks a student ready (for their current belt)');
-  await page.click('#dlg [data-close]');
+  await settle(page); await page.click('#dlg [data-close]');
   await page.click('#readyList [data-key="efc:m2"]'); await page.waitForSelector('#apNot');
   await page.fill('#apNote', 'Practise your first pattern at home.'); await page.click('#apNot'); await toastSays(page, 'not yet');
   await page.waitForSelector('#apText'); await page.click('#apText'); await page.waitForSelector('#txPrev');
@@ -271,8 +272,23 @@ try {
   await q(`delete from cb_entries where day_id = '${cDay.day_id}'`); await q(`delete from cb_days where day_id = '${cDay.day_id}'`);
   await page.evaluate(() => loadAll().then(render));
 
+  console.log('\nNightly EFC update');
+  ok((await page.evaluate(() => state.efcAt)) === null, 'before any nightly update, there is no "last updated" time');
+  let up = (await q(`select cb_efc_update('Taekwondo', 'Marrickville', '[["m2","White Belt","2030-01-01",44],["new-1","Yellow Belt","2030-02-02",3]]'::jsonb) r`))[0].r;
+  ok(up.updated === 1 && up.missing.join() === 'new-1', 'the nightly update changes students already here and lists new ones to add');
+  const kimNow = (await q(`select m.attended_since_promoted a, g.attended_since_promoted ga from efc_members m join efc_grades g on g.member_key = m.member_key and g.programme = 'Taekwondo' where m.member_key = 'efc:m2'`))[0];
+  ok(kimNow.a === 44 && kimNow.ga === 44, '...for Taekwondo it updates the member (for Black Belt Gradings) and their grade together');
+  up = (await q(`select cb_efc_update('Kung Fu', 'Marrickville', '[["m2","Yellow Stripe","2030-03-03",2]]'::jsonb) r`))[0].r;
+  ok(up.updated === 1 && (await q(`select belt from efc_grades where member_key = 'efc:m2' and programme = 'Kung Fu'`))[0].belt === 'Yellow Stripe' && (await q(`select belt from efc_members where member_key = 'efc:m2'`))[0].belt === 'White Belt', '...other programs update just that program\'s grade');
+  await q(`update efc_members set attended_since_promoted = 26 where member_key = 'efc:m2'`);
+  await q(`delete from efc_grades where member_key = 'efc:m2' and programme = 'Kung Fu'`);
+  let denied = false; try { await q(`set role authenticated; select cb_efc_update('Taekwondo', 'Marrickville', '[]'::jsonb); reset role;`); } catch (e) { denied = true; await q('reset role').catch(() => {}); }
+  ok(denied, 'staff logins cannot run the EFC update themselves');
+  await page.evaluate(() => loadAll().then(render)); await settle(page);
+
   console.log('\nUpdate EFC, dashboard, settings');
   await page.click('.tab[data-view="efc"]');
+  ok(/last updated from EFC/.test(await page.textContent('#efcAt')) && /every night/.test(await page.textContent('#efcAt')), 'Update EFC says when belts and classes last came from EFC');
   ok((await page.textContent('#view-efc')).includes('Sam Lee') && !(await page.textContent('#view-efc')).includes('Kim Ng'), 'the Update EFC checklist lists passes to promote in EFC (not re-tests)');
   await page.check('[data-efc]');
   ok(await until(async () => (await q(`select efc_done from cb_entries where member_key = 'efc:m1'`))[0].efc_done === true && (await page.textContent('#view-efc')).includes('Nothing to update in EFC')), 'ticking it off clears it from the list');
@@ -383,7 +399,7 @@ try {
   const hub = await page.$$eval('a.pick', as => as.map(a => a.getAttribute('href')));
   ok(hub[0] === 'coloured-belts/' && hub[1].includes('Black-belt-prep-system') && hub[2].includes('ama-id-cards'), '/grading/ is a hub: coloured belts, black belts (Black Belt Gradings) and ID cards');
   await ctx.close();
-} catch (e) { failed++; console.log('  FAIL  stopped: ' + String(e.message || e).split('\n').slice(0, 3).join(' / ')); }
+} catch (e) { failed++; console.log('  FAIL  stopped: ' + String(e.message || e).split('\n').slice(0, 12).join(' / ')); }
 
 await browser.close(); server.close();
 console.log(`\n${passed} passed, ${failed} failed`);

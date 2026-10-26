@@ -44,10 +44,17 @@ const db = {
     };
     return q;
   },
-  storage: { from(bucket) { return { async createSignedUrl(path, secs, opts) { signed.push({ bucket, path, secs, opts }); return { data: { signedUrl: `https://store.test/${bucket}/${path}?ttl=${secs}${opts && opts.download ? '&download=' + opts.download : ''}` }, error: null }; } }; } },
+  // The nightly clean-up's database helpers
+  async rpc(name, args) {
+    if (name === 'cb_cron_ok') return { data: args.p_secret === 'night-secret', error: null };
+    if (name === 'cb_old_photos') return { data: oldPhotos.slice(), error: null };
+    if (name === 'cb_photos_removed') { let n = 0; for (const e of t.cb_entries) if (args.p_names.includes(e.photo_path)) { e.photo_path = null; e.photo_removed_at = 'now'; n++; } return { data: n, error: null }; }
+    return { data: null, error: { message: 'no rpc ' + name } };
+  },
+  storage: { from(bucket) { return { async remove(names) { removedFiles.push(...names.map(n => bucket + '/' + n)); return { data: [], error: null }; }, async createSignedUrl(path, secs, opts) { signed.push({ bucket, path, secs, opts }); return { data: { signedUrl: `https://store.test/${bucket}/${path}?ttl=${secs}${opts && opts.download ? '&download=' + opts.download : ''}` }, error: null }; } }; } },
   auth: { async getUser(tok) { const email = { 'tok-grader': 'grader@ama.test', 'tok-coach': 'coach@ama.test', 'tok-desk': 'desk@ama.test' }[tok]; return { data: { user: email ? { email } : null } }; } }
 };
-const signed = [];
+const signed = [], removedFiles = [], oldPhotos = [];
 const hooks = [];
 let hookStatus = 200;
 const http = async (url, opts) => {
@@ -128,6 +135,20 @@ r = await call({ action: 'send', kind: 'photo', items: [{ member_key: 'efc:m1', 
 ok(r.status === 403, 'instructors cannot text photos');
 r = await call({ action: 'send', kind: 'photo', items: [{ member_key: 'efc:m1', entry_id: 'e1', body: 'Your photo' }] }, 'tok-grader', { GHL_TEST: '1' });
 ok(r.body.sent === 1 && t.cb_messages.some(m => m.kind === 'photo' && m.entry_id === 'e1'), 'grading staff can text photo links, and each is logged');
+
+
+console.log('\nPhotos removed after 30 days');
+const callCron = async (secret) => { const res = await handle(new Request('https://x.test/functions/v1/cb', { method: 'POST', headers: { 'content-type': 'application/json', ...(secret ? { 'x-cb-cron': secret } : {}) }, body: JSON.stringify({ action: 'cleanup' }) }), db, {}, http); return { status: res.status, body: await res.json() }; };
+r = await callCron(null);
+ok(r.status === 403 && !removedFiles.length, 'the clean-up refuses anyone without the nightly secret');
+r = await callCron('guess');
+ok(r.status === 403, '...or with the wrong one');
+oldPhotos.push('d1/e1-1.jpg', 'd1/old-retake.jpg');
+r = await callCron('night-secret');
+ok(r.body.ok && r.body.removed === 2 && removedFiles.join() === 'grading-photos/d1/e1-1.jpg,grading-photos/d1/old-retake.jpg', 'it deletes photos older than 30 days from storage (including old retakes)');
+ok(t.cb_entries[0].photo_path === null && t.cb_entries[0].photo_removed_at && r.body.cleared === 1, '...and marks the student\'s photo as removed');
+r = await call({ action: 'photo', code: 'Ab3dE9xYz1' });
+ok(r.body.ok && r.body.removed && !r.body.photo && /kept for 30 days/.test(r.body.error), 'the family\'s link then says the photo was removed after 30 days');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
