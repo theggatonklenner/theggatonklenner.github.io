@@ -220,7 +220,7 @@ function draw() {
         <span class="meta">${[u.name || u.hub_only ? (u.hub_only ? '' : u.email) : '', u.hub_mobile || ''].filter(Boolean).map(x => `<span>${esc(x)}</span><span>·</span>`).join('')}${u.card_perms.includes('admin') && u.prep_roles.includes('admin') ? '<span class="chip">Admin</span>' : ''}
           <span>ID Cards: ${esc(listText(u.card_perms, CARD))}</span><span>·</span><span>Prep: ${esc(listText(u.prep_roles, PREP))}</span>${state.tv === 'ready' ? `<span>·</span><span>TV: ${esc(tvText(u))}</span>` : ''}${u.hub_only ? '<span class="tag muted">Hub sign-in</span>' : ''}
           ${!u.has_login ? '<span class="tag warn">No login yet</span>' : u.hub_only ? (u.last_sign_in_at ? '' : '<span class="tag muted">Never signed in</span>') : u.setup_pending ? '<span class="tag warn">Not set up yet</span>' : u.setup_at ? '<span class="tag ok">Set up</span>' : !u.last_sign_in_at ? '<span class="tag muted">Never signed in</span>' : ''}
-          ${u.email === state.me ? '<span class="tag muted">You</span>' : ''}</span></div>
+          ${u.owner ? '<span class="tag ok">Owner</span>' : ''}${u.email === state.me ? '<span class="tag muted">You</span>' : ''}</span></div>
       <span class="chev" aria-hidden="true">›</span></button></li>`).join('')
     : `<li class="empty">${state.users.length ? 'No one matches.' : 'No logins yet.'}</li>`;
   $('#count').textContent = `${state.users.length} login${state.users.length === 1 ? '' : 's'}`;
@@ -252,6 +252,7 @@ function openPerson(email) {
   const self = email === state.me;
   openDlg(`<div class="dlg">
     <div class="dlg-head"><div><h3>${esc(who(u))}</h3><p class="hint">${u.hub_only ? `Signs in with their hub mobile and PIN · added ${fmtDate(u.created_at)} · ${u.last_sign_in_at ? 'last signed in ' + fmtDate(u.last_sign_in_at) : 'never signed in'}` : u.has_login ? `${u.name ? esc(u.email) + ' · ' : ''}Added ${fmtDate(u.created_at)} · ${u.setup_pending ? '<b>not set up yet</b> (they haven\'t used their set-up link)' : u.setup_at ? 'set up ' + fmtDate(u.setup_at) : ''}${!u.setup_pending && u.setup_at ? ' · ' : ''}${!u.setup_pending ? (u.last_sign_in_at ? 'last signed in ' + fmtDate(u.last_sign_in_at) : 'never signed in') : ''}` : 'Has roles but no login yet'}</p></div><button class="x" data-close>Close</button></div>
+    ${u.owner && !self ? '<p class="hint" id="ownerNote">This is the owner\'s login. Only they can change it.</p>' : ''}
     ${u.has_login ? `<form id="detailsForm" class="section" style="border-top:0;padding-top:0"><h3>Details</h3>
       <div class="grid2"><div class="field"><label for="stName">Name</label><input type="text" id="stName" value="${esc(u.name || '')}" autocomplete="off"></div>
         ${state.hub ? `<div class="field"><label for="stMobile">Mobile</label><input type="tel" id="stMobile" value="${esc(u.hub_mobile || '')}" placeholder="e.g. 0412 345 678" autocomplete="off"></div>` : ''}</div>
@@ -273,6 +274,7 @@ function openPerson(email) {
     ${!self ? `<div class="section"><div class="row"><button class="btn danger" id="removeBtn">${u.has_login ? 'Remove login' : 'Remove roles'}</button></div><p class="hint">Removes their access to all the apps. Their name stays on anything they did.</p></div>` : ''}
   </div>`);
   tvLink();
+  if (u.owner && !self) dlg.querySelectorAll('input, button:not([data-close]), select, textarea').forEach(el => { el.disabled = true; });
   $('#rolesForm').onsubmit = async e => {
     e.preventDefault(); $('#saveRoles').disabled = true;
     try { await api({ action: 'roles', email, card_perms: picked('cardChecks'), prep_roles: picked('prepChecks'), tv_perms: tvPicked() }); dlg.close(); toast('Permissions saved'); await load(); }

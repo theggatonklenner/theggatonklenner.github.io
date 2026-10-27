@@ -174,5 +174,30 @@ const pat = 'hub-444000001@staff.amatoolkit.local';
 ok(userOf(pat) && cardOf(pat) === '' && prepOf(pat) === '' && db._t.hub_logins.some(x => x.email === pat), 'they get no permissions, and sign in with their hub mobile');
 r = await call(JO, { action: 'bulk', people: [{ name: 'Sneaky', mobile: '0444000009' }] });
 ok(r.status === 403, 'only admins can add several');
+
+console.log('\nThe owner (superadmin)');
+await db.auth.admin.createUser({ email: 'boss@ama.test', password: 'password1' });
+db._t.staff_permissions.push({ email: 'boss@ama.test', permission: 'admin' });
+db._t.prep_roles.push({ email: 'boss@ama.test', role: 'admin' });
+const BOSS = db._login('boss@ama.test');
+db._t.toolkit_owners = [{ email: 'tate@ama.test' }];
+for (const [t, col] of [['staff_permissions', 'permission'], ['prep_roles', 'role']]) if (!db._t[t].some(x => x.email === 'tate@ama.test' && x[col] === 'admin')) db._t[t].push({ email: 'tate@ama.test', [col]: 'admin' });
+const tateCard = cardOf('tate@ama.test'), tatePrep = prepOf('tate@ama.test');
+r = await call(BOSS, { action: 'list' });
+ok(r.body.users.find(u => u.email === 'tate@ama.test').owner === true && !r.body.users.find(u => u.email === 'boss@ama.test').owner, 'the list marks the owner');
+for (const [body, what] of [[{ action: 'roles', email: 'tate@ama.test', card_perms: ['viewer'], prep_roles: ['viewer'] }, 'change their permissions'],
+  [{ action: 'remove', email: 'tate@ama.test' }, 'remove their login'], [{ action: 'password', email: 'tate@ama.test', password: 'hijacked123' }, 'set their password'],
+  [{ action: 'link', email: 'tate@ama.test' }, 'make a set-up link for them'], [{ action: 'details', email: 'tate@ama.test', name: 'Not Tate' }, 'rename them'],
+  [{ action: 'hub', email: 'tate@ama.test', mobile: '0400999888' }, 'link a hub mobile to their login'],
+  [{ action: 'create', email: 'tate@ama.test', password: 'hijacked123', card_perms: [], prep_roles: [] }, 'overwrite them with Add login']]) {
+  r = await call(BOSS, body);
+  ok(r.status === 403 && /owner/.test(r.body.error), 'another admin can\'t ' + what);
+}
+ok(cardOf('tate@ama.test') === tateCard && prepOf('tate@ama.test') === tatePrep && userOf('tate@ama.test'), "the owner's access and login are untouched");
+r = await call(TATE, { action: 'details', email: 'tate@ama.test', name: 'Tate H' });
+ok(r.status === 200, 'the owner can still change their own login');
+r = await call(TATE, { action: 'roles', email: 'boss@ama.test', card_perms: ['admin', 'edit'], prep_roles: ['admin'] });
+ok(r.status === 200, 'the owner can still manage everyone else');
+db._t.toolkit_owners = [];
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

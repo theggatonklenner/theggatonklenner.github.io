@@ -222,6 +222,19 @@ try {
   oldFunction = false;
   await page.click('#retry'); await page.waitForSelector('#app:not([hidden])');
 
+  // The owner's login: another admin can see it but not change it
+  await db.auth.admin.createUser({ email: 'boss@ama.test', password: 'password1' });
+  db._t.staff_permissions.push({ email: 'boss@ama.test', permission: 'admin' }); db._t.prep_roles.push({ email: 'boss@ama.test', role: 'admin' });
+  db._t.toolkit_owners = [{ email: 'tate@ama.test' }];
+  await page.click('#signOut'); await page.waitForSelector('#signIn:not([hidden])');
+  await page.fill('#siEmail', 'boss@ama.test'); await page.fill('#siPass', 'password1'); await page.click('#siGo');
+  await page.waitForSelector('#app:not([hidden]) #list [data-email="tate@ama.test"]');
+  ok((await page.textContent('#list [data-email="tate@ama.test"]')).includes('Owner'), 'the owner is marked in the list');
+  await page.click('#list [data-email="tate@ama.test"]'); await page.waitForSelector('#ownerNote');
+  ok(await page.evaluate(() => [...document.querySelectorAll('#dlg input, #dlg button:not([data-close])')].every(el => el.disabled)), "another admin can't change the owner's login (everything is locked)");
+  await page.evaluate(() => document.querySelector('#dlg').close());
+  db._t.toolkit_owners = [];
+
   // Not an admin in both
   await page.click('#signOut'); await page.waitForSelector('#signIn:not([hidden])');
   await page.fill('#siEmail', 'jo@ama.test'); await page.fill('#siPass', 'brandnewpass'); await page.click('#siGo');

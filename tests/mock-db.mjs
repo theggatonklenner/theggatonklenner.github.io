@@ -1,6 +1,6 @@
 // In-memory stand-in for the parts of Supabase the staff function uses.
 export function makeDb() {
-  const t = { staff_roles: [], staff_permissions: [], prep_roles: [], push_subscriptions: [], tv_permissions: [], hub_logins: [] };
+  const t = { staff_roles: [], staff_permissions: [], prep_roles: [], push_subscriptions: [], tv_permissions: [], hub_logins: [], toolkit_owners: [] };
   const opts = { permissionsMissing: false, tvMissing: false };
   const users = []; let nextId = 1;
   const tokens = new Map();

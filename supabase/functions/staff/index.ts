@@ -18,6 +18,7 @@
 //   hub       link a login to an AMA Admin Hub mobile (sign in with the hub mobile and PIN), or clear the link
 //   details   change a login's name and mobile (the mobile is their hub mobile, for hub sign-in)
 //   bulk      add many people at once from { people: [{ name, mobile }] }: hub sign-in only, no permissions
+// Owners (supabase/owner.sql, table toolkit_owners) are protected: only the owner can change their own login.
 // Every login has a name and a mobile. The email is optional: a login made with only a name and mobile signs in with
 // the hub mobile and PIN. Supabase still needs an email for it, so it gets a stand-in one (hub-<mobile>@staff.amatoolkit.local)
 // that nobody types; the apps show the name.
@@ -119,6 +120,9 @@ export async function handle(req, db) {
     // Hub mobile links need supabase/hub-login.sql
     const hubRes = await db.from('hub_logins').select('email, mobile9');
     const hubReady = !hubRes.error, hubOf = new Map((hubRes.data || []).map(r => [r.email, r.mobile9]));
+    // Owners: nobody else can change their login (supabase/owner.sql)
+    const ownRes = await db.from('toolkit_owners').select('email');
+    const owners = new Set(ownRes.error ? [] : (ownRes.data || []).map(r => String(r.email).toLowerCase()));
 
     if (action === 'list') {
       const [users, cardRes, prepRes, tvRes] = await Promise.all([allUsers(db), db.from('staff_permissions').select('email, permission'), db.from('prep_roles').select('email, role'),
@@ -143,6 +147,7 @@ export async function handle(req, db) {
       // Permissions given to an email that has no login yet
       new Set([...card.keys(), ...prep.keys(), ...tv.keys()]).forEach(email => { if (!seen.has(email)) rows.push(row(email, null)); });
       rows.sort((a, b) => a.email.localeCompare(b.email));
+      rows.forEach(r => { r.owner = owners.has(r.email); });
       return json({ me, users: rows, card_perms: CARD_PERMS, prep_roles: PREP_ROLES, tv_perms: tvReady ? TV_PERMS : null, hub: hubReady });
     }
 
@@ -202,6 +207,7 @@ export async function handle(req, db) {
       return json({ ok: true, existed: false, email: made, hub_only: true });
     }
     if (!validEmail(email)) return fail('Enter a valid email address.');
+    if (owners.has(email) && email !== me) return fail("This is the owner's login. Only they can change it.", 403);
     const password = String(body.password || '');
     const cardWant = cardWantOf(body), prepWant = prepWantOf(body), tvWant = tvWantOf(body, tvReady);
 
