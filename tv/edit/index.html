@@ -188,6 +188,10 @@
   .seg { border-color: var(--line2); }
   .seg button { background: none; }
   .seg button[aria-pressed="true"] { background: var(--raise); color: var(--gold); box-shadow: inset 0 -2px 0 var(--gold); }
+  .shufrow { display: flex; align-items: center; gap: 12px; }
+  .shufrow .hint { flex: 1; min-width: 0; }
+  #shuffleBtn { flex: none; }
+  #shuffleBtn[aria-pressed="true"] { color: var(--gold); border-color: var(--gold); }
 </style>
 </head>
 <body>
@@ -218,7 +222,7 @@
     <div class="card full" id="status" hidden></div>
     <div class="card" id="party"></div>
     <div class="view-head full"><h2>Slides</h2><div class="row"><a class="btn sm" id="previewBtn" target="_blank" rel="noopener">Preview</a><a class="btn sm" id="remoteBtn" href="../remote/">Remote</a><button class="btn primary sm" id="addBtn">Add</button></div></div>
-    <p class="hint full">The TV shows these in order, on a loop, and picks up changes within 20 seconds.</p>
+    <div class="shufrow full"><p class="hint" id="slidesHint">The TV shows these in order, on a loop, and picks up changes within 20 seconds.</p><button class="btn sm" id="shuffleBtn" type="button" aria-pressed="false" title="Play the slides in a random order"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg><span id="shuffleTxt">Shuffle</span></button></div>
     <ul class="slides full" id="list"></ul>
 
     <div class="card full" id="eventsCard" hidden></div>
@@ -424,6 +428,7 @@ function draw() {
   drawParty();
   $('#code').textContent = S.screen_code;
   $('#setSecs').value = S.seconds; $('#setClock').checked = S.show_clock; $('#setLogo').checked = S.show_logo;
+  drawShuffle();
   $('#offBox').hidden = !('offs' in S); if ('offs' in S) { offState = JSON.parse(JSON.stringify(S.offs || [])); drawOffs(); }
   $('#bannerBox').hidden = !('banner' in S) || state.display !== 'tablet'; $('#setBanner').value = S.banner || '';   // tablets only (the TV isn't touched)
   $('#batBox').hidden = !('battery_warn' in S) || state.display !== 'tablet';   // tablets only
@@ -1747,6 +1752,21 @@ $('#setForm').onsubmit = async e => {
   const { error } = await sb.from('tv_settings').update(rec).eq('id', sid());
   if (error) return toast('Not saved: ' + error.message, 5000);
   toast('Settings saved'); load();
+};
+// Shuffle: the screens play the slides in a random order (a new order each time round)
+function drawShuffle() {
+  const S = state.settings || {}, on = !!S.shuffle, who = state.display === 'tv' ? 'The TV shows' : 'The tablets show';
+  $('#shuffleBtn').hidden = !('shuffle' in S);
+  $('#shuffleBtn').setAttribute('aria-pressed', String(on));
+  $('#shuffleTxt').textContent = on ? 'Shuffle on' : 'Shuffle';
+  $('#slidesHint').textContent = `${who} these ${on ? 'in a random order (shuffled each time round)' : 'in order'}, on a loop, and ${state.display === 'tv' ? 'picks' : 'pick'} up changes within 20 seconds.`;
+}
+$('#shuffleBtn').onclick = async () => {
+  const S = state.settings, on = !S.shuffle;
+  S.shuffle = on; drawShuffle();   // show it straight away
+  const { error } = await sb.from('tv_settings').update({ shuffle: on }).eq('id', sid());
+  if (error) { S.shuffle = !on; drawShuffle(); return toast('Not saved: ' + error.message, 5000); }
+  toast(on ? 'Shuffle on: slides play in a random order' : 'Shuffle off: slides play in order');
 };
 $('#newCode').onclick = async () => {
   if (!await confirmBox('Make a new screen code? Any TV using the old code stops until the new one is typed in.', 'New code')) return;

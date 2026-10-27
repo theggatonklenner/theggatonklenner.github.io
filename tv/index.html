@@ -329,7 +329,14 @@
       if (s.live_kind === 'month' && live.month && live.month.theme) out.push(s);
       if (s.live_kind === 'events' && live.events && live.events.some(function (m) { return m.events.length; })) out.push(s);
     });
-    playlist = out;
+    playlist = (feed.settings && feed.settings.shuffle) ? shuffled(out) : out;
+  }
+  // Shuffle: a random order, made fresh each time round (and never the same slide twice in a row)
+  function shuffled(a, avoid) {
+    a = a.slice();
+    for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; }
+    if (avoid && a.length > 1 && a[0].id === avoid) { var t2 = a[0]; a[0] = a[1]; a[1] = t2; }
+    return a;
   }
 
   // ---------- Showing a slide ----------
@@ -449,6 +456,9 @@
     }
     if (stage.querySelector('.quiet')) stage.innerHTML = '';   // quiet hours just ended
     if (!playlist.length) { showMessage('AMA Marrickville', 'No slides yet. Add some in the TV editor.'); timer = setTimeout(next, 30000); return; }
+    if (index + 1 >= playlist.length && index >= 0 && feed.settings && feed.settings.shuffle) {   // round again: a new order
+      playlist = shuffled(playlist, playlist[index] && playlist[index].id); index = -1;
+    }
     index = (index + 1) % playlist.length;
     var s = playlist[index];
     var layer = document.createElement('div');

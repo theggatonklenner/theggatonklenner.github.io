@@ -131,6 +131,7 @@ alter table public.tv_settings add constraint tv_settings_kiosk_port_check check
 alter table public.tv_settings drop constraint if exists tv_settings_signin_check;
 alter table public.tv_settings add constraint tv_settings_signin_check check (signin_idle between 10 and 900 and (signin_url is null or signin_url = '' or signin_url ~* '^https://'));   -- a message along the bottom, e.g. "Tap to sign in" ('' = none)
 update public.tv_settings set banner = case when id = 2 then 'Tap to sign in' else '' end where banner is null;
+alter table public.tv_settings add column if not exists shuffle boolean not null default false;   -- play the slides in a random order
 alter table public.tv_settings add column if not exists only_slide uuid;          -- party mode: the one slide to show
 alter table public.tv_settings add column if not exists only_until timestamptz;   -- ... until this time
 alter table public.tv_settings add column if not exists reload_at timestamptz;    -- "Refresh the TV" was pressed at this time
@@ -378,7 +379,7 @@ begin
   if s.blackout or dev_dark then
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open,
-        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn),
+        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn, 'shuffle', s.shuffle),
       'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
       'quiet', 'black', 'blackout', true, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
@@ -432,7 +433,7 @@ begin
          else now_time >= s.quiet_from or now_time < s.quiet_to end) end) then
     return jsonb_build_object(
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open,
-        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn),
+        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn, 'shuffle', s.shuffle),
       'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
       'quiet', s.quiet_style, 'off', off_now, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
@@ -473,7 +474,7 @@ begin
   return jsonb_build_object(
     'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', s.show_clock, 'show_logo', s.show_logo, 'banner', nullif(trim(coalesce(s.banner, '')), ''),
       'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open,
-        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn),
+        'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn, 'shuffle', s.shuffle),
     'remote', coalesce(s.remote_until > now(), false), 'display', s.display, 'location', loc,
     'version', greatest(coalesce(changed, s.updated_at), s.updated_at),
     'slides', slides, 'live', live, 'today', today);

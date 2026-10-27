@@ -147,6 +147,13 @@ try {
   await page.fill('#setSecs', '4'); await page.click('#setSave'); await toastSays(page, 'Settings saved');
   ok((await db.query(`select seconds from tv_settings where id = 1`)).rows[0].seconds === 4, 'seconds per slide saved');
   ok((await page.getAttribute('#previewBtn', 'href')) === `../?code=${CODE}&preview=1`, 'Preview opens the TV page with the code');
+  // Shuffle button
+  ok((await page.getAttribute('#shuffleBtn', 'aria-pressed')) === 'false' && (await page.textContent('#slidesHint')).includes('in order'), 'slides play in order by default');
+  await page.click('#shuffleBtn'); await toastSays(page, 'Shuffle on');
+  ok((await db.query(`select shuffle from tv_settings where id = 1`)).rows[0].shuffle === true && (await page.getAttribute('#shuffleBtn', 'aria-pressed')) === 'true', 'the Shuffle button turns on random order');
+  ok((await page.textContent('#slidesHint')).includes('random order'), 'the hint says the slides play in a random order');
+  await page.click('#shuffleBtn'); await toastSays(page, 'Shuffle off');
+  ok((await db.query(`select shuffle from tv_settings where id = 1`)).rows[0].shuffle === false, 'pressing it again turns shuffle off');
   await ctx.close();
 
   console.log('\nTV page (1280 x 720)');
@@ -183,6 +190,25 @@ try {
   await page.evaluate(() => window.__tv.next());
   await page.waitForFunction(() => window.__tv.state().count === 4, null, { timeout: 5000 }).catch(() => {});
   ok((await page.evaluate(() => window.__tv.state())).count === 4, 'a change in the editor reaches the TV (picked up at the next slide)');
+
+  // Shuffle: every slide once per round, in a new order each round
+  await db.query(`update tv_settings set shuffle = true where id = 1`);
+  await page.evaluate(() => window.__tv.reload()); await page.waitForTimeout(500);
+  await page.evaluate(() => window.__tv.next());
+  await page.waitForFunction(() => window.__tv.feed().settings.shuffle === true, null, { timeout: 5000 }).catch(() => {});
+  const rounds = [];
+  for (let r = 0; r < 6; r++) {
+    // finish the current round, then record the next full one
+    while ((await page.evaluate(() => window.__tv.state())).index !== (await page.evaluate(() => window.__tv.state())).count - 1) await page.evaluate(() => window.__tv.next());
+    const order = [];
+    for (let i = 0; i < 4; i++) { await page.evaluate(() => window.__tv.next()); const t = await page.evaluate(() => window.__tv.state()); order.push(t.ids[t.index]); }
+    rounds.push(order);
+  }
+  ok(rounds.every(o => new Set(o).size === 4), 'with shuffle on, each round shows every slide once');
+  ok(new Set(rounds.map(o => o.join())).size > 1, 'with shuffle on, the order changes from round to round');
+  ok(rounds.every((o, i) => i === 0 || o[0] !== rounds[i - 1][3]), 'never the same slide twice in a row between rounds');
+  await db.query(`update tv_settings set shuffle = false where id = 1`);
+  await page.evaluate(() => window.__tv.reload()); await page.waitForTimeout(500); await page.evaluate(() => window.__tv.next());
 
   // Remembered code and no connection
   await ctx.route(`${BASE}/rest/**`, r => r.abort());
