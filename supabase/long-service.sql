@@ -79,12 +79,12 @@ create policy "write" on public.lsa_settings for update to authenticated
   using (public.prep_has_role('admin')) with check (public.prep_has_role('admin'));
 
 -- Who changed what
-create or replace function public.lsa_awards_stamp() returns trigger language plpgsql as $$
+create or replace function public.lsa_awards_stamp() returns trigger language plpgsql set search_path = public as $$
 begin
   new.done_by := coalesce(public.prep_email(), new.done_by); new.done_at := now();
   return new;
 end $$;
-create or replace function public.lsa_members_stamp() returns trigger language plpgsql as $$
+create or replace function public.lsa_members_stamp() returns trigger language plpgsql set search_path = public as $$
 begin
   new.updated_at := now();
   if public.prep_email() is not null then
@@ -93,7 +93,7 @@ begin
   end if;
   return new;
 end $$;
-create or replace function public.lsa_settings_stamp() returns trigger language plpgsql as $$
+create or replace function public.lsa_settings_stamp() returns trigger language plpgsql set search_path = public as $$
 begin new.updated_at := now(); return new; end $$;
 drop function if exists public.lsa_stamp() cascade;
 drop trigger if exists lsa_awards_stamp on public.lsa_awards;
@@ -104,7 +104,7 @@ drop trigger if exists lsa_settings_stamp on public.lsa_settings;
 create trigger lsa_settings_stamp before update on public.lsa_settings for each row execute function public.lsa_settings_stamp();
 
 -- Staff can only change a person's start date, break and note (not what EFC said)
-create or replace function public.lsa_guard() returns trigger language plpgsql as $$
+create or replace function public.lsa_guard() returns trigger language plpgsql set search_path = public as $$
 begin
   if public.prep_email() is null then return new; end if;   -- the weekly check (no login)
   if new.member_key not like 'manual:%' then

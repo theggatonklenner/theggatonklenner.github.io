@@ -142,16 +142,16 @@ def more():
         if not rows:
             continue
         ages = (p['ageFrom'], p['ageTo']) if 'ageFrom' in p else None
-        if len(rows) >= PAGE and not ages:               # page full: ask again by age group
+        # A whole-window query (one school and milestone) that found anyone: ask month band by month band
+        whole = any(key(query(t, p['location'], y, date(r, 1, 1), date(r + 1, 6, 30))) == key(p) for y in YEARS)
+        if whole and not ages:
+            for y in YEARS:
+                if key(query(t, p['location'], y, date(r, 1, 1), date(r + 1, 6, 30))) == key(p):
+                    todo += [query(t, p['location'], y, a, b) for a, b in bands(r)]
+        elif len(rows) >= PAGE and not ages:             # a band with a full page: ask again by age group
             todo += [dict(p, ageFrom=a, ageTo=b) for a, b in AGES]
-            continue
-        if len(rows) >= PAGE:
+        elif len(rows) >= PAGE:
             print(f'WARNING: {SCHOOLS.get(p["location"])} weeks {p["enrolledWeeksFrom"]}-{p["enrolledWeeksTo"]} ages {ages} still returned {PAGE}: some people may be missing.', file=sys.stderr)
-        # a query covering more than one band: ask band by band (only for the milestone whose window it is)
-        for y in YEARS:
-            whole = query(t, p['location'], y, date(r, 1, 1), date(r + 1, 6, 30), ages)
-            if key(whole) == key(p):
-                todo += [query(t, p['location'], y, a, b, ages) for a, b in bands(r)]
     seen = set()
     for q in todo:
         k = key(q)

@@ -219,6 +219,12 @@ function rangeText(a, b) {   // "Feb 2027", "Jan–Feb 2027", "Dec 2026 – Jan 
   if (ya === yb) return `${MONTHS[ma]}–${MONTHS[mb]} ${ya}`;
   return `${MONTHS[ma]} ${ya} – ${MONTHS[mb]} ${yb}`;
 }
+// What to show for a date range: EFC's weeks are rounded outwards a little, so trim that slack off before naming months
+function whenText(a, b) {
+  const days = (b - a) / 864e5;
+  if (days > 30) { a = new Date(a.getTime() + 10 * 864e5); b = new Date(b.getTime() - 10 * 864e5); }
+  return rangeText(a, b);
+}
 // The last day that counts for December's awards in a given year: the end of the leeway
 const cutoff = year => new Date(Date.UTC(year + 1, state.leeway, 0));
 // Which December an anniversary belongs to: the year it falls in once the leeway months are taken off
@@ -287,7 +293,7 @@ async function load() {
 
 // ---------- Drawing ----------
 function itemHtml(x, opts = {}) {
-  const m = x.m, done = x.status === 'given', when = x.unsure ? `${rangeText(x.a, x.b)}, check date` : rangeText(x.a, x.b);
+  const m = x.m, done = x.status === 'given', when = x.unsure ? `${whenText(x.a, x.b)}, check date` : whenText(x.a, x.b);
   const bits = [esc(when), m.location ? esc(m.location) : ''].filter(Boolean).join(' · ');
   let tag = '';
   if (x.status === 'ordered') tag = '<span class="tag warn">Ordered</span>';
@@ -405,7 +411,7 @@ function printList(xs) {
   const r = state.round, w = window.open('', '_blank');
   if (!w) return toast('Allow pop-ups to print');
   const rowsHtml = byAward(xs).map(([y, list]) => `<h2>${y} years <small>(${list.length})</small></h2><table><tr><th>Name</th><th>School</th><th>Reached</th><th>Status</th><th style="width:22%">Given</th></tr>${list.map(x =>
-    `<tr><td>${esc(x.m.full_name)}</td><td>${esc(x.m.location || '')}</td><td>${esc(rangeText(x.a, x.b))}</td><td>${esc(x.status ? STATUS[x.status] : 'To order')}</td><td></td></tr>`).join('')}</table>`).join('');
+    `<tr><td>${esc(x.m.full_name)}</td><td>${esc(x.m.location || '')}</td><td>${esc(whenText(x.a, x.b))}</td><td>${esc(x.status ? STATUS[x.status] : 'To order')}</td><td></td></tr>`).join('')}</table>`).join('');
   w.document.write(`<!doctype html><title>Long service awards December ${r}</title><style>body{font:13px Arial,sans-serif;margin:18px;color:#000}h1{font-size:19px;margin:0 0 2px}p{margin:0 0 12px;color:#444}h2{font-size:15px;margin:16px 0 6px}small{font-weight:400;color:#555}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:6px;text-align:left}th{background:#eee}</style>
     <h1>AMA long service awards, December ${r}</h1><p>Members reaching their milestone by ${dayText(cutoff(r))}. Printed ${dayText(today())}.</p>${rowsHtml}`);
   w.document.close(); w.focus(); setTimeout(() => w.print(), 200);
