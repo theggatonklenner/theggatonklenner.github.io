@@ -113,6 +113,7 @@ const ICON = {
   play: '<polygon points="8 5 19 12 8 19 8 5"/>',
   staff: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18.5 14.8c1.6.8 2.6 2.5 3 5.2"/>',
   belt: '<path d="M3 10h18v4H3z"/><path d="M10 14l-2 6M14 14l2 6"/><rect x="10" y="9" width="4" height="6" rx="1"/>',
+  medal: '<circle cx="12" cy="14" r="6"/><path d="M8.5 9.2 6 3h4l2 4 2-4h4l-2.5 6.2"/><path d="M12 11.5l.9 1.8 2 .3-1.45 1.4.35 2-1.8-.95-1.8.95.35-2-1.45-1.4 2-.3z"/>',
   db: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'
 };
 // soon: a placeholder for a tool still being built (not a link)
@@ -133,6 +134,7 @@ function draw(a) {
   const tvAny = a.edit || a.party || a.remote;
   const groups = [
     ['Gradings', [(a.prep.length || a.card.length) && { href: 'grading/', icon: 'belt', name: 'Gradings', meta: 'Coloured belts and every program, Black Belt Gradings and ID cards' }]],
+    ['Members', [a.prep.some(r => ['admin', 'instructor', 'grading', 'payments'].includes(r)) && { href: 'awards/', icon: 'medal', name: 'Long service awards', meta: 'Who reaches 5, 10, 15 years and more in time for the December order' }]],
     ['Dojang TV', [
       a.party && { href: 'tv/edit/', icon: 'tv', name: a.edit ? 'TV Display' : 'TV party mode', meta: a.edit ? 'Change the photos, videos and notices on the dojang TV' : 'Birthday posters and messages on the dojang TV' },
       a.party && { href: 'tv/edit/?display=tablet', icon: 'tablet', name: a.edit ? 'Tablet Display' : 'Tablet party mode', meta: a.edit ? 'Slides for the upright tablets, with a link that just works' : 'Birthday posters and messages on the tablets' },
