@@ -45,6 +45,10 @@ alter table public.lsa_awards add column if not exists round int check (round be
 alter table public.lsa_awards drop constraint if exists lsa_awards_status_check;
 alter table public.lsa_awards add constraint lsa_awards_status_check check (status in ('due', 'ordered', 'given', 'skip'));
 
+-- Double check flag: staff (or a one-off check) mark someone to look at before ordering, e.g. not enrolled in EFC.
+-- The text says why; clearing it (null) means it's been checked.
+alter table public.lsa_members add column if not exists check_flag text;
+
 -- Weekly check results, so the page can say when EFC was last checked
 create table if not exists public.lsa_runs (
   id      bigint generated always as identity primary key,

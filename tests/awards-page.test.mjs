@@ -144,6 +144,27 @@ const pat = await q(`select member_key, location, added_by from lsa_members wher
 ok(pat[0] && pat[0].member_key.startsWith('manual:') && pat[0].location === 'Concord' && pat[0].added_by === 'coach@ama.test', 'someone added by hand is saved');
 ok((await text(page, '#g-todo + .list')).includes('Pat Early'), 'and shows as due for 10 years in November');
 
+// Double check flag (e.g. on the list but not enrolled in EFC)
+await q(`update lsa_members set check_flag = 'Not enrolled in EFC' where full_name = 'Pat Early'`);
+await page.reload(); await page.waitForSelector('#roundTitle');
+ok((await text(page, '#g-todo + .list li:has-text("Pat Early")')).includes('Double check') && (await text(page, '#app .flagbox')).includes('1 to double check'), 'a flagged person shows Double check, with a count');
+await page.click('#flagBtn');
+ok((await names(page, '#g-todo + .list')).join() === 'Pat Early', 'Show only these lists just the flagged people');
+await page.click('#flagBtn');
+await page.click('#copyBtn'); await page.waitForSelector('#olText');
+const ol2 = await page.textContent('#olText');
+ok(ol2.includes('Double check first (1)') && ol2.includes('Pat Early (Concord), 10 years') && (await text(page, '#olMark')).includes('Mark all 0'), 'order list keeps flagged people separate and out of Mark all');
+await page.click('#dlg [data-close]');
+await page.click('#g-todo + .list li:has-text("Pat Early") [data-open]'); await page.waitForSelector('#pClear');
+ok((await text(page, '#dlg')).includes('Not enrolled in EFC'), 'the person sheet says why');
+await page.evaluate(() => { document.querySelector('#toast').textContent = ''; }); await page.click('#pClear'); await toastSays(page, 'checked');
+ok((await q(`select check_flag from lsa_members where full_name = 'Pat Early'`))[0].check_flag === null && !(await page.$('#app .flagbox')), 'Checked, clear removes the flag');
+await page.click('#g-todo + .list li:has-text("Pat Early") [data-open]'); await page.waitForSelector('#pFlag');
+await page.fill('#pFlag', 'Ask about start date'); await page.evaluate(() => { document.querySelector('#toast').textContent = ''; }); await page.click('#pSave'); await toastSays(page, 'Saved');
+ok((await q(`select check_flag from lsa_members where full_name = 'Pat Early'`))[0].check_flag === 'Ask about start date', 'staff can flag someone with a reason');
+await q(`update lsa_members set check_flag = null where full_name = 'Pat Early'`);
+await page.reload(); await page.waitForSelector('#roundTitle');
+
 // Last year
 await page.click('#prevRound');
 ok((await text(page, '#roundTitle')) === 'December 2025 awards' && (await names(page, '#g-todo + .list')).includes('Ann Last'), 'the previous December shows Ann still to order');

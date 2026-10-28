@@ -102,6 +102,9 @@
   .tag.warn { color: var(--gold); } .tag.warn::before { background: var(--gold); }
   .tag.bad { color: var(--red); } .tag.bad::before { background: var(--red); }
   .empty { color: var(--faint); padding: 18px 16px; text-align: center; margin: 0; }
+  .flagtxt { color: var(--red); font-weight: 600; }
+  .flagbox { border: 1px solid var(--red); border-radius: 10px; padding: 10px 12px; display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .flagbox p { color: var(--text); font-size: 15px; }
   @media (max-width: 480px) { .item .side .tag { display: none; } .item { gap: 10px; } }
 
   details.fold { border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); }
@@ -190,7 +193,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const dlg = $('#dlg');
-const state = { roles: [], members: [], awards: {}, leeway: 2, lastRun: null, round: null, q: '', school: '', years: '' };
+const state = { roles: [], members: [], awards: {}, leeway: 2, lastRun: null, round: null, q: '', school: '', years: '', flagged: false };
 const has = (...r) => state.roles.includes('admin') || r.some(x => state.roles.includes(x));
 const canEdit = () => has('instructor', 'grading');
 
@@ -258,6 +261,7 @@ function rows() {
   for (const m of state.members) {
     if (state.school && m.location !== state.school) continue;
     if (q && !(`${m.full_name} ${m.efc_reference || ''}`.toLowerCase().includes(q))) continue;
+    if (state.flagged && !m.check_flag) continue;
     for (const x of milestones(m)) {
       if (state.years && x.years !== Number(state.years)) continue;
       if (x.round >= r - 1 && x.round <= r + 1) out.push(x);
@@ -295,9 +299,11 @@ async function load() {
 // ---------- Drawing ----------
 function itemHtml(x, opts = {}) {
   const m = x.m, done = x.status === 'given', when = x.unsure ? `${whenText(x.a, x.b)}, check date` : whenText(x.a, x.b);
-  const bits = [esc(when), m.location ? esc(m.location) : ''].filter(Boolean).join(' · ');
+  const flag = m.check_flag && x.status !== 'given' && x.status !== 'skip';
+  const bits = [flag ? '<span class="flagtxt">Double check</span>' : '', esc(when), m.location ? esc(m.location) : ''].filter(Boolean).join(' · ');
   let tag = '';
-  if (x.status === 'ordered') tag = '<span class="tag warn">Ordered</span>';
+  if (flag) tag = '<span class="tag bad">Double check</span>';
+  else if (x.status === 'ordered') tag = '<span class="tag warn">Ordered</span>';
   else if (x.status === 'given') tag = '<span class="tag ok">Given</span>';
   else if (x.status === 'skip') tag = '<span class="tag">Not giving one</span>';
   else if (x.unsure) tag = '<span class="tag bad">Check date</span>';
@@ -321,6 +327,7 @@ function draw() {
   const todo = now.filter(x => !x.status), ordered = now.filter(x => x.status === 'ordered'), given = now.filter(x => x.status === 'given'), skipped = now.filter(x => x.status === 'skip');
   const missed = xs.filter(x => x.round === r - 1 && !x.status);
   const next = xs.filter(x => x.round === r + 1 && x.mid <= addMonths(cut, 6));
+  const flaggedNow = now.filter(x => x.m.check_flag && x.status !== 'given' && x.status !== 'skip').length;
   const last = state.lastRun ? `EFC last checked ${dayText(new Date(state.lastRun.ran_at))}.` : 'EFC has not been checked yet: the weekly check fills this in.';
   const schoolOpts = SCHOOLS.map(s => `<option ${state.school === s ? 'selected' : ''}>${s}</option>`).join('');
   const yearOpts = MILESTONES.map(y => `<option value="${y}" ${String(state.years) === String(y) ? 'selected' : ''}>${y} years</option>`).join('');
@@ -350,6 +357,7 @@ function draw() {
       <button class="btn" id="printBtn" ${now.length - skipped.length ? '' : 'disabled'}>Print</button>
       ${canEdit() ? '<button class="btn" id="addBtn">Add someone</button>' : ''}
     </div>
+    ${flaggedNow || state.flagged ? `<div class="flagbox"><p>${state.flagged ? `Showing only people to double check (${flaggedNow}).` : `<span class="flagtxt">${flaggedNow} to double check</span> before ordering, e.g. not enrolled in EFC.`}</p><button class="btn sm" id="flagBtn">${state.flagged ? 'Show everyone' : 'Show only these'}</button></div>` : ''}
 
     <div class="group-head" id="g-todo"><h3>To order</h3><span class="hint">Oldest first</span></div>
     ${listHtml(todo, { leewayTag: true }, `No one to order${state.q || state.school || state.years ? ' for this search' : ''}.`)}
@@ -370,6 +378,7 @@ function draw() {
   if ($('#copyBtn')) $('#copyBtn').onclick = () => orderList(todo);
   $('#printBtn').onclick = () => printList(now.filter(x => x.status !== 'skip'));
   if ($('#addBtn')) $('#addBtn').onclick = addSomeone;
+  if ($('#flagBtn')) $('#flagBtn').onclick = () => { state.flagged = !state.flagged; draw(); };
   $$('#app [data-open]').forEach(b => b.onclick = () => { const li = b.closest('li'); openPerson(li.dataset.k, Number(li.dataset.y)); });
   $$('#app [data-set]').forEach(b => b.onclick = () => { const li = b.closest('li'); setStatus(li.dataset.k, Number(li.dataset.y), b.dataset.set); });
 }
@@ -404,13 +413,17 @@ function byAward(xs) {
   for (const x of xs) (g[x.years] = g[x.years] || []).push(x);
   return Object.keys(g).map(Number).sort((a, b) => a - b).map(y => [y, g[y].sort((a, b) => a.m.full_name.localeCompare(b.m.full_name))]);
 }
-function orderList(todo) {
+function orderList(all) {
+  // People flagged to double check are listed separately and aren't marked as ordered with the rest
+  const todo = all.filter(x => !x.m.check_flag), held = all.filter(x => x.m.check_flag);
   const r = state.round, groups = byAward(todo);
-  const text = [`AMA long service awards, December ${r}`, ''].concat(...groups.map(([y, xs]) => [`${y} years (${xs.length})`, ...xs.map(x => `${x.m.full_name}${x.m.location ? ` (${x.m.location})` : ''}`), ''])).join('\n').trim();
+  const line = x => `${x.m.full_name}${x.m.location ? ` (${x.m.location})` : ''}`;
+  const text = [`AMA long service awards, December ${r}`, ''].concat(...groups.map(([y, xs]) => [`${y} years (${xs.length})`, ...xs.map(line), '']),
+    held.length ? [`Double check first (${held.length})`, ...held.sort((a, b) => a.years - b.years || a.m.full_name.localeCompare(b.m.full_name)).map(x => `${line(x)}, ${x.years} years`)] : []).join('\n').trim();
   openDlg(`<div class="dlg">
-    <div class="dlg-head"><div><h3>Order list</h3><p class="sub">${todo.length} award${todo.length === 1 ? '' : 's'} to order: ${groups.map(([y, xs]) => `${xs.length} × ${y} years`).join(', ')}</p></div><button class="x" data-close>Close</button></div>
+    <div class="dlg-head"><div><h3>Order list</h3><p class="sub">${todo.length} award${todo.length === 1 ? '' : 's'} to order${groups.length ? ': ' + groups.map(([y, xs]) => `${xs.length} × ${y} years`).join(', ') : ''}${held.length ? `. ${held.length} to double check first, not included.` : ''}</p></div><button class="x" data-close>Close</button></div>
     <pre class="listprev" id="olText">${esc(text)}</pre>
-    <div class="dlg-actions"><button class="btn" id="olCopy">Copy</button><button class="btn primary" id="olMark">Mark all ${todo.length} as ordered</button></div></div>`);
+    <div class="dlg-actions"><button class="btn" id="olCopy">Copy</button><button class="btn primary" id="olMark" ${todo.length ? '' : 'disabled'}>Mark all ${todo.length} as ordered</button></div></div>`);
   $('#olCopy').onclick = async () => { try { await navigator.clipboard.writeText(text); toast('Copied'); } catch (e) { toast('Select the text and copy it'); } };
   $('#olMark').onclick = async () => {
     $('#olMark').disabled = true;
@@ -425,7 +438,7 @@ function printList(xs) {
   const r = state.round, w = window.open('', '_blank');
   if (!w) return toast('Allow pop-ups to print');
   const rowsHtml = byAward(xs).map(([y, list]) => `<h2>${y} years <small>(${list.length})</small></h2><table><tr><th>Name</th><th>School</th><th>Reached</th><th>Status</th><th style="width:22%">Given</th></tr>${list.map(x =>
-    `<tr><td>${esc(x.m.full_name)}</td><td>${esc(x.m.location || '')}</td><td>${esc(whenText(x.a, x.b))}</td><td>${esc(x.status ? STATUS[x.status] : 'To order')}</td><td></td></tr>`).join('')}</table>`).join('');
+    `<tr><td>${esc(x.m.full_name)}${x.m.check_flag && x.status !== 'given' ? ' <b>(double check)</b>' : ''}</td><td>${esc(x.m.location || '')}</td><td>${esc(whenText(x.a, x.b))}</td><td>${esc(x.status ? STATUS[x.status] : 'To order')}</td><td></td></tr>`).join('')}</table>`).join('');
   w.document.write(`<!doctype html><title>Long service awards December ${r}</title><style>body{font:13px Arial,sans-serif;margin:18px;color:#000}h1{font-size:19px;margin:0 0 2px}p{margin:0 0 12px;color:#444}h2{font-size:15px;margin:16px 0 6px}small{font-weight:400;color:#555}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:6px;text-align:left}th{background:#eee}</style>
     <h1>AMA long service awards, December ${r}</h1><p>Members reaching their milestone by ${dayText(cutoff(r))}. Printed ${dayText(today())}.</p>${rowsHtml}`);
   w.document.close(); w.focus(); setTimeout(() => w.print(), 200);
@@ -440,6 +453,7 @@ function openPerson(key, years) {
   const others = milestones(m).filter(z => z.status).map(z => `${z.years} years: ${STATUS[state.awards[key + '|' + z.years].status].toLowerCase()}`);
   openDlg(`<div class="dlg">
     <div class="dlg-head"><div><h3>${esc(m.full_name)}</h3><p class="sub">${esc([m.location, m.efc_reference].filter(Boolean).join(' · '))}</p></div><button class="x" data-close>Close</button></div>
+    ${m.check_flag ? `<div class="flagbox"><p><span class="flagtxt">Double check:</span> ${esc(m.check_flag)}</p>${canEdit() ? '<button class="btn sm" id="pClear">Checked, clear</button>' : ''}</div>` : ''}
     <dl class="kv">
       <dt>Award</dt><dd>${years} years</dd>
       <dt>Reaches it</dt><dd>${x ? esc(x.a.getTime() === x.b.getTime() ? dayText(x.a) : `between ${dayText(x.a)} and ${dayText(x.b)}`) : '–'}${x && x.unsure ? ' <span class="tag bad">Check date</span>' : ''}</dd>
@@ -457,6 +471,7 @@ function openPerson(key, years) {
         <div class="field"><label for="pStart">Started at AMA</label><input type="date" id="pStart" value="${esc(m.start_override || '')}"><span class="hint">Leave blank to use ${manual ? 'nothing' : 'EFC'}.</span></div>
         <div class="field"><label for="pBreak">Time away (months)</label><input type="number" id="pBreak" min="0" max="600" step="1" value="${Number(m.break_months) || 0}"></div>
       </div>
+      <div class="field"><label for="pFlag">Double check</label><input type="text" id="pFlag" value="${esc(m.check_flag || '')}" placeholder="Why it needs checking, e.g. not enrolled in EFC" autocomplete="off"><span class="hint">Leave blank once it's been checked.</span></div>
       <div class="field"><label for="pNote">Note</label><textarea id="pNote" rows="2" placeholder="e.g. away 2019 to 2020">${esc(m.note || '')}</textarea></div>
       <div class="dlg-actions">${manual ? '<button class="btn danger" id="pRemove">Remove</button>' : ''}<button class="btn primary" id="pSave">Save</button></div>
     </div>` : ''}
@@ -471,12 +486,18 @@ function openPerson(key, years) {
   });
   if ($('#pSave')) $('#pSave').onclick = async () => {
     const br = Math.max(0, Math.min(600, parseInt($('#pBreak').value, 10) || 0));
-    const rec = { start_override: $('#pStart').value || null, break_months: br, note: $('#pNote').value.trim() || null };
+    const rec = { start_override: $('#pStart').value || null, break_months: br, note: $('#pNote').value.trim() || null, check_flag: $('#pFlag').value.trim() || null };
     if (manual && !rec.start_override) return toast('Someone added by hand needs a start date');
     $('#pSave').disabled = true;
     const { error } = await sb.from('lsa_members').update(rec).eq('member_key', key);
     if (error) { $('#pSave').disabled = false; return toast('Not saved: ' + error.message, 6000); }
     Object.assign(m, rec); dlg.close(); draw(); toast('Saved');
+  };
+  if ($('#pClear')) $('#pClear').onclick = async () => {
+    $('#pClear').disabled = true;
+    const { error } = await sb.from('lsa_members').update({ check_flag: null }).eq('member_key', key);
+    if (error) { $('#pClear').disabled = false; return toast('Not saved: ' + error.message, 6000); }
+    m.check_flag = null; dlg.close(); draw(); toast(`${m.full_name}: checked`);
   };
   if ($('#pRemove')) $('#pRemove').onclick = async () => {
     if (!confirm(`Remove ${m.full_name} from long service awards?`)) return;
