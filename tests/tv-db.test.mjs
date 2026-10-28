@@ -382,6 +382,21 @@ await as('tate@ama.test', () => db.query(`select tv_screen_blackout('dark-dev-01
 ok(!(await feedAt('dark-dev-01', null)).blackout, 'and turn it back on');
 await db.exec(`delete from tv_screens where screen_id in ('dark-dev-01', 'lit-dev-001'); update tv_settings set remote_until = null`);
 
+console.log('\nRefresh reaches both FreeKiosk pages');
+{ const ck = (st) => as(null, () => db.query(`select tv_checkin($1, 'fk-tablet-01', 'x', $2::timestamptz, '{}'::jsonb) r`, [code, st])).then(r => r.rows[0].r);
+  const mainStart = '2026-10-28T06:40:00Z', saverStart = '2026-10-27T16:01:00Z';
+  await ck(saverStart); await ck(mainStart);
+  await as('tate@ama.test', () => db.exec(`update tv_settings set reload_at = now() where id = 1`));
+  await db.exec(`select pg_sleep(0.01)`);
+  // the two pages take turns checking in, as on a FreeKiosk tablet
+  const r1 = await ck(mainStart), r2 = await ck(saverStart), r3 = await ck(mainStart);
+  ok(r1.reload && r2.reload && r3.reload, 'Refresh reaches both pages of a FreeKiosk tablet, even while they take turns checking in');
+  const fresh = await ck(new Date().toISOString());
+  ok(!fresh.reload, '...and a page loaded after the refresh does not reload again');
+  for (let i = 0; i < 9; i++) await ck(new Date(Date.now() + i * 1000).toISOString());
+  ok((await db.query(`select (select count(*) from jsonb_object_keys(loads))::int n from tv_screens where screen_id = 'fk-tablet-01'`)).rows[0].n <= 6, '...and only the newest few page loads are kept');
+  await db.exec(`delete from tv_screens where screen_id = 'fk-tablet-01'; update tv_settings set reload_at = null where id = 1`); }
+
 console.log('\nSlide times of day');
 const sy = (await db.query(`select to_char(now() at time zone 'Australia/Sydney', 'HH24:MI') t, extract(dow from now() at time zone 'Australia/Sydney')::int d`)).rows[0];
 const hm = mins => { const [h, m] = sy.t.split(':').map(Number); const x = ((h * 60 + m + mins) % 1440 + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };

@@ -261,6 +261,9 @@ alter table public.tv_screens add column if not exists blackout boolean not null
 alter table public.tv_screens add column if not exists location text references public.tv_locations (slug) on update cascade on delete set null;                              -- e.g. "Front desk", given in the editor
 alter table public.tv_screens add column if not exists first_seen timestamptz not null default now();
 alter table public.tv_screens add column if not exists blackout_at timestamptz;     -- when this device was blacked out
+-- Each page load on the device and when it first checked in (FreeKiosk tablets run two pages, its main page and its
+-- screensaver, with the same device id), so "Refresh" reaches every page: {"<page started>": "<server time>", ...}
+alter table public.tv_screens add column if not exists loads jsonb not null default '{}'::jsonb;
 -- "Back to normal" on just this device (staff code typed on it, or the editor): parties and blackouts that had
 -- started by override_at are skipped on this device only, until override_until. Ones that start later still show.
 alter table public.tv_screens add column if not exists override_at timestamptz;
@@ -544,19 +547,27 @@ grant execute on function public.tv_feed(text, text, text, text) to anon, authen
 drop function if exists public.tv_checkin(text, text, text, timestamptz, jsonb);
 create or replace function public.tv_checkin(p_code text, p_screen text, p_showing text, p_started timestamptz, p_details jsonb default '{}'::jsonb, p_loc text default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
-declare s public.tv_settings%rowtype; loaded timestamptz; link_loc text;
+declare s public.tv_settings%rowtype; loaded timestamptz; link_loc text; lds jsonb; k text := coalesce(p_started::text, '');
 begin
   select * into s from public.tv_settings where screen_code = upper(trim(coalesce(p_code, '')));
   if not found then return jsonb_build_object('error', 'wrong_code'); end if;
   if coalesce(p_screen, '') !~ '^[A-Za-z0-9_-]{6,40}$' then return jsonb_build_object('error', 'bad_screen'); end if;
-  -- loaded_at is the server's time when this page load first checked in (TV clocks can be wrong)
+  -- The server's time when this page load first checked in (TV clocks can be wrong). Kept per page load, so the two
+  -- pages of a FreeKiosk tablet don't keep resetting each other's (which stopped "Refresh" reaching them).
+  select coalesce(t.loads, '{}'::jsonb) into lds from public.tv_screens t where t.screen_id = p_screen;
+  lds := coalesce(lds, '{}'::jsonb);
+  loaded := (lds ->> k)::timestamptz;
+  if loaded is null then
+    loaded := now(); lds := lds || jsonb_build_object(k, loaded);
+    if (select count(*) from jsonb_object_keys(lds)) > 6 then   -- just the newest few
+      select jsonb_object_agg(e.key, e.value) into lds from (select key, value from jsonb_each(lds) order by (value #>> '{}')::timestamptz desc limit 6) e;
+    end if;
+  end if;
   select l.slug into link_loc from public.tv_locations l where l.slug = lower(trim(coalesce(p_loc, '')));   -- a link with &loc=
-  insert into public.tv_screens as t (screen_id, display, location, last_seen, started_at, loaded_at, showing, details)
-    values (p_screen, s.display, link_loc, now(), p_started, now(), left(p_showing, 200), coalesce(p_details, '{}'::jsonb))
+  insert into public.tv_screens as t (screen_id, display, location, last_seen, started_at, loaded_at, showing, details, loads)
+    values (p_screen, s.display, link_loc, now(), p_started, loaded, left(p_showing, 200), coalesce(p_details, '{}'::jsonb), lds)
   on conflict (screen_id) do update set display = excluded.display, location = coalesce(t.location, excluded.location), last_seen = now(), started_at = excluded.started_at,
-    loaded_at = case when t.started_at is distinct from excluded.started_at or t.loaded_at is null then now() else t.loaded_at end,
-    showing = excluded.showing, details = excluded.details
-  returning t.loaded_at into loaded;
+    loaded_at = excluded.loaded_at, showing = excluded.showing, details = excluded.details, loads = excluded.loads;
   delete from public.tv_screens where last_seen < now() - interval '30 days';   -- forget old TVs
   return jsonb_build_object('reload', s.reload_at is not null and s.reload_at > loaded);
 end $$;
