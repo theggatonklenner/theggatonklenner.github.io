@@ -1040,8 +1040,8 @@ try {
   await ss.evaluate(() => window.__tv.reload()); await ss.waitForTimeout(800);
   ok(api.filter(x => x.path === '/api/url').length === 1, 'only once per party');
   ok(/[?&]p=\d+/.test(JSON.parse(urlCall.body).url), 'with a new address each time, so FreeKiosk always loads it fresh');
-  // FreeKiosk still showing an old page 10 seconds later: it sends it again
-  kioskStatus = JSON.stringify({ webview: { url: 'http://' + new URL(BASE).host + '/tv/index.html?code=X&kiosk=main&p=1' } });
+  // FreeKiosk still showing another page 10 seconds later (not the party's main page): it sends it again
+  kioskStatus = JSON.stringify({ webview: { url: 'http://' + new URL(BASE).host + '/tv/index.html?code=X' } });
   await ss.waitForTimeout(11000); await ss.evaluate(() => window.__tv.reload()); await ss.waitForTimeout(1500);
   ok(api.filter(x => x.path === '/api/url').length >= 2 && api.some(x => x.path === '/api/status'), 'if FreeKiosk is still on an old page after 10 seconds, it sends the party again');
   const lastUrl = JSON.parse(api.filter(x => x.path === '/api/url').pop().body).url;
@@ -1055,6 +1055,14 @@ try {
   await mp.click('.layer.on', { force: true }); await mp.waitForTimeout(600);
   ok(mp.url().includes('kiosk=main') && (await mp.textContent('#stage')).includes('Happy Birthday Zoe!'), 'the main screen shows the party and taps do nothing');
   ok(await mp.evaluate(() => /user-scalable=no/.test(document.querySelector('meta[name=viewport]').content) && getComputedStyle(document.body).touchAction === 'none'), 'and it can\'t be zoomed in');
+  // FreeKiosk's screensaver comes on again after a minute with no taps (a fresh copy of this page): it mustn't send the party again
+  // (that reloaded the main screen every minute)
+  { const before = api.filter(x => x.path === '/api/url').length;
+    kioskStatus = JSON.stringify({ webview: { url: mainUrl } });
+    const ss2 = await sic.newPage(); await ss2.goto(BASE + `/tv/index.html?code=${TC}`); await ss2.waitForSelector('.layer.on'); await ss2.waitForTimeout(1500);
+    await ss2.evaluate(() => window.__tv.reload()); await ss2.waitForTimeout(1000);
+    ok(api.filter(x => x.path === '/api/url').length === before, 'the screensaver coming back during a party does not reload the main screen');
+    await ss2.close(); kioskStatus = '{"status":"ok"}'; }
   await db.query(`delete from tv_party_bookings`);
   await ss.evaluate(() => window.__tv.reload()); await ss.waitForTimeout(800);
   ok(api.some(x => x.path === '/api/url' && /signin\.test/.test(x.body)), 'when the party ends, the screensaver also tells FreeKiosk to put the sign-in page back (in case the party page is paused)');
@@ -1191,6 +1199,14 @@ try {
     ok(await b1.p.isHidden('#ovr'), 'a normal tap does nothing');
     await b1.p.mouse.move(12, 12); await b1.p.mouse.down(); await b1.p.waitForTimeout(3300); await b1.p.mouse.up();
     ok(await b1.p.isVisible('#ovr'), 'holding the top-left corner for 3 seconds asks for the staff code');
+    await b1.p.click('#ovrCancel');
+    // On a tablet: a long press in the corner doesn't select text or open a menu, and still opens the staff code
+    const tp = await b1.p.evaluate(() => { const el = document.querySelector('#stage'); const t = new Touch({ identifier: 1, target: el, clientX: 15, clientY: 15 });
+      const ev = new TouchEvent('touchstart', { touches: [t], targetTouches: [t], changedTouches: [t], bubbles: true, cancelable: true }); el.dispatchEvent(ev);
+      const cm = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); el.dispatchEvent(cm);
+      return { start: ev.defaultPrevented, menu: cm.defaultPrevented, select: getComputedStyle(document.body).userSelect }; });
+    await b1.p.waitForTimeout(3300);
+    ok(tp.start && tp.menu && tp.select === 'none' && await b1.p.isVisible('#ovr'), 'a long press on a tablet opens the staff code without selecting text');
     for (const k of ['1', '1', '1', '1', 'OK']) await b1.p.click(`#ovrKeys [data-k="${k}"]`);
     await b1.p.waitForFunction(() => /not right/.test(document.querySelector('#ovrErr').textContent), null, { timeout: 5000 }).catch(() => {});
     ok((await b1.p.textContent('#ovrErr')).includes('not right'), 'a wrong code is refused');
