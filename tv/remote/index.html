@@ -192,7 +192,11 @@ async function load() {
   const { data, error } = await sb.from('tv_slides').select('*').eq('display', display).eq('enabled', true).eq('party', false).order('position').order('created_at');
   if (error) return problem(error.message);
   const t = new Date(), today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
-  slides = (data || []).filter(s => (!s.starts_on || s.starts_on <= today) && (!s.ends_on || s.ends_on >= today));
+  const mins = v => { const [h, m] = String(v).split(':').map(Number); return h * 60 + m; }, n = t.getHours() * 60 + t.getMinutes();
+  const timeOk = s => { if (s.show_days && s.show_days.length && !s.show_days.includes(t.getDay())) return false;   // slide times of day
+    const f = s.show_from ? mins(s.show_from) : null, to = s.show_to ? mins(s.show_to) : null;
+    return f == null && to == null ? true : to == null ? n >= f : f == null ? n < to : f < to ? n >= f && n < to : f > to ? n >= f || n < to : true; };
+  slides = (data || []).filter(s => (!s.starts_on || s.starts_on <= today) && (!s.ends_on || s.ends_on >= today) && timeOk(s));
   show('#app'); drawList();
   await hello(); poll();
 }

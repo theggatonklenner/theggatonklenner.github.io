@@ -152,6 +152,8 @@ alter table public.tv_settings add column if not exists remote_until timestamptz
 alter table public.tv_settings add column if not exists remote_seq bigint not null default 0;     -- ... numbers each button press
 alter table public.tv_settings add column if not exists remote_cmd jsonb;                         -- ... the last press, e.g. {"cmd": "next"}
 alter table public.tv_settings add column if not exists remote_at timestamptz;
+alter table public.tv_settings add column if not exists blackout_at timestamptz;   -- when the blackout started (filled in by itself)
+alter table public.tv_settings add column if not exists only_at timestamptz;       -- when this party mode started (filled in by itself)
 alter table public.tv_settings drop constraint if exists tv_settings_code_check;
 alter table public.tv_settings add constraint tv_settings_code_check check (screen_code ~ '^[A-Z0-9]{4,12}$');
 
@@ -189,6 +191,10 @@ alter table public.tv_slides add column if not exists link text;   -- QR code sl
 alter table public.tv_slides add column if not exists display text not null default 'tv';   -- which display it's on: 'tv' or 'tablet'
 -- A party slide's partner on the other screen (the TV poster and its tablet version), so they go on and off together
 alter table public.tv_slides add column if not exists linked uuid references public.tv_slides (id) on delete set null;
+-- Times of day: only shows between show_from and show_to (either can be blank; to before from = overnight), on show_days (0 = Sunday ... 6; blank = every day)
+alter table public.tv_slides add column if not exists show_from time;
+alter table public.tv_slides add column if not exists show_to time;
+alter table public.tv_slides add column if not exists show_days int[];
 alter table public.tv_slides drop constraint if exists tv_slides_display_check;
 alter table public.tv_slides add constraint tv_slides_display_check check (display in ('tv', 'tablet'));
 alter table public.tv_slides drop constraint if exists tv_slides_qr_check;
@@ -253,7 +259,12 @@ alter table public.tv_screens add column if not exists display text not null def
 alter table public.tv_screens add column if not exists name text;
 alter table public.tv_screens add column if not exists blackout boolean not null default false;   -- just this device blacked out
 alter table public.tv_screens add column if not exists location text references public.tv_locations (slug) on update cascade on delete set null;                              -- e.g. "Front desk", given in the editor
-alter table public.tv_screens add column if not exists first_seen timestamptz not null default now();   -- server time of the first check-in after the page loaded
+alter table public.tv_screens add column if not exists first_seen timestamptz not null default now();
+alter table public.tv_screens add column if not exists blackout_at timestamptz;     -- when this device was blacked out
+-- "Back to normal" on just this device (staff code typed on it, or the editor): parties and blackouts that had
+-- started by override_at are skipped on this device only, until override_until. Ones that start later still show.
+alter table public.tv_screens add column if not exists override_at timestamptz;
+alter table public.tv_screens add column if not exists override_until timestamptz;   -- server time of the first check-in after the page loaded
 alter table public.tv_screens enable row level security;
 drop policy if exists "staff see screens" on public.tv_screens;
 drop policy if exists "staff remove screens" on public.tv_screens;
@@ -289,6 +300,15 @@ begin
 end $$;
 drop trigger if exists tv_settings_stamp on public.tv_settings;
 create trigger tv_settings_stamp before update on public.tv_settings for each row execute function public.tv_settings_stamp();
+-- When a blackout or party mode starts (a device's "back to normal" only skips ones that had already started)
+create or replace function public.tv_takeover_stamp() returns trigger language plpgsql as $$
+begin
+  if new.blackout and not coalesce(old.blackout, false) then new.blackout_at := now(); end if;
+  if new.only_slide is not null and new.only_slide is distinct from old.only_slide then new.only_at := now(); end if;
+  return new;
+end $$;
+drop trigger if exists tv_takeover_stamp on public.tv_settings;
+create trigger tv_takeover_stamp before update on public.tv_settings for each row execute function public.tv_takeover_stamp();
 
 alter table public.tv_settings enable row level security;
 alter table public.tv_slides   enable row level security;
@@ -367,12 +387,22 @@ declare
   day_hours jsonb;
   hours jsonb; hours_on boolean;
   off_now boolean := false;
+  dev_dark_at timestamptz; ov_at timestamptz; ov_until timestamptz;
+  ov boolean := false;        -- this device was put back to normal
+  skipped boolean := false;   -- ... and it's skipping a party or blackout now
+  has_code boolean := to_regclass('public.tv_staff_code') is not null and exists (select 1 from public.tv_staff_code where code_hash is not null);
+  dow int := extract(dow from (now() at time zone 'Australia/Sydney'))::int;
 begin
   select * into s from public.tv_settings where screen_code = upper(trim(coalesce(p_code, '')));   -- the code says which display
   if not found then
     return jsonb_build_object('error', 'wrong_code');
   end if;
-  select sc.location, coalesce(sc.blackout, false) into loc, dev_dark from public.tv_screens sc where sc.screen_id = p_screen;
+  select sc.location, coalesce(sc.blackout, false), sc.blackout_at, sc.override_at, sc.override_until into loc, dev_dark, dev_dark_at, ov_at, ov_until
+    from public.tv_screens sc where sc.screen_id = p_screen;
+  ov := coalesce(ov_until > now() and ov_at is not null, false);
+  -- Back to normal on this device: blackouts that had started by then don't count here
+  if ov and s.blackout and coalesce(s.blackout_at, '-infinity') <= ov_at then s.blackout := false; skipped := true; end if;
+  if ov and dev_dark and coalesce(dev_dark_at, '-infinity') <= ov_at then dev_dark := false; skipped := true; end if;
   if loc is null then select l.slug into loc from public.tv_locations l where l.slug = lower(trim(coalesce(p_loc, ''))); end if;
 
   -- Blacked out from the remote or the editor (the whole screen, or just this device): black, whatever else is on
@@ -381,20 +411,27 @@ begin
       'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', false, 'show_logo', false, 'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open,
         'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn, 'shuffle', s.shuffle),
       'version', s.updated_at, 'slides', '[]'::jsonb, 'live', '{}'::jsonb, 'today', today,
-      'quiet', 'black', 'blackout', true, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
+      'quiet', 'black', 'blackout', true, 'override_ok', has_code, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
 
   -- Party mode: just the one slide, until the set time. Started now in the editor, or booked ahead.
   -- Only parties for this device's location (or for every location) count.
+  -- Back to normal on this device skips parties that had started by then.
   if s.only_slide is not null and s.only_until > now()
      and exists (select 1 from public.tv_slides os where os.id = s.only_slide and (coalesce(cardinality(os.locations), 0) = 0 or loc = any(os.locations))) then
-    one_id := s.only_slide; one_until := s.only_until; one_changed := s.updated_at;
-  else
+    if ov and coalesce(s.only_at, '-infinity') <= ov_at then skipped := true;
+    else one_id := s.only_slide; one_until := s.only_until; one_changed := s.updated_at; end if;
+  end if;
+  if one_id is null then
     select b.slide_id, b.ends_at, b.updated_at into one_id, one_until, one_changed
       from public.tv_party_bookings b join public.tv_slides bs on bs.id = b.slide_id
      where b.starts_at <= now() and b.ends_at > now() and bs.display = s.display
        and (coalesce(cardinality(bs.locations), 0) = 0 or loc = any(bs.locations))
+       and not (ov and b.starts_at <= ov_at)
      order by (coalesce(cardinality(bs.locations), 0) = 0), b.starts_at desc limit 1;   -- a party for this location wins over one for everywhere
+    if one_id is null and ov and exists (select 1 from public.tv_party_bookings b join public.tv_slides bs on bs.id = b.slide_id
+         where b.starts_at <= now() and b.ends_at > now() and bs.display = s.display and b.starts_at <= ov_at
+           and (coalesce(cardinality(bs.locations), 0) = 0 or loc = any(bs.locations))) then skipped := true; end if;
   end if;
   if one_id is not null then
     select jsonb_build_object('id', t.id, 'kind', t.kind, 'title', t.title, 'body', t.body, 'media_path', t.media_path,
@@ -407,7 +444,7 @@ begin
         'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn,
         'party_qr', nullif(trim(coalesce(s.party_qr_url, '')), ''), 'party_qr_text', nullif(trim(coalesce(s.party_qr_text, '')), '')),
       'version', greatest(s.updated_at, one_changed), 'slides', jsonb_build_array(one_slide), 'live', '{}'::jsonb, 'today', today,
-      'only', true, 'only_until', one_until, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
+      'only', true, 'only_until', one_until, 'override_ok', has_code, 'remote', coalesce(s.remote_until > now(), false), 'display', s.display);
   end if;
 
   -- Scheduled screen-off times for this device (or its location, or every device)
@@ -446,7 +483,15 @@ begin
     from public.tv_slides t
    where t.enabled and not t.party and t.display = s.display
      and (coalesce(cardinality(t.locations), 0) = 0 or loc = any(t.locations)) and (t.starts_on is null or t.starts_on <= today) and (t.ends_on is null or t.ends_on >= today)
-     and not (t.kind = 'countdown' and t.count_to = 'date' and t.event_on < today);
+     and not (t.kind = 'countdown' and t.count_to = 'date' and t.event_on < today)
+     -- times of day and days of the week
+     and (t.show_days is null or cardinality(t.show_days) = 0 or dow = any(t.show_days))
+     and (case when t.show_from is null and t.show_to is null then true
+               when t.show_to is null then now_time >= t.show_from
+               when t.show_from is null then now_time < t.show_to
+               when t.show_from < t.show_to then now_time >= t.show_from and now_time < t.show_to
+               when t.show_from > t.show_to then now_time >= t.show_from or now_time < t.show_to
+               else true end);
 
   -- Events: what's left of this month; in the last 10 days of the month (or once this month is over), next month too
   two := today >= m1 - 10 or not exists (select 1 from public.tv_events e where coalesce(e.ends_on, e.starts_on) >= today and e.starts_on < m1);
@@ -475,7 +520,7 @@ begin
     'settings', jsonb_build_object('seconds', s.seconds, 'show_clock', s.show_clock, 'show_logo', s.show_logo, 'banner', nullif(trim(coalesce(s.banner, '')), ''),
       'signin', nullif(trim(coalesce(s.signin_url, '')), ''), 'signin_idle', s.signin_idle, 'signin_open', s.signin_open,
         'kiosk_port', s.kiosk_port, 'kiosk_key', nullif(s.kiosk_key, ''), 'battery_warn', s.battery_warn, 'shuffle', s.shuffle),
-    'remote', coalesce(s.remote_until > now(), false), 'display', s.display, 'location', loc,
+    'remote', coalesce(s.remote_until > now(), false), 'display', s.display, 'location', loc, 'override', skipped,
     'version', greatest(coalesce(changed, s.updated_at), s.updated_at),
     'slides', slides, 'live', live, 'today', today);
 end $$;
@@ -561,13 +606,95 @@ returns jsonb language plpgsql volatile security definer set search_path = publi
 declare d text;
 begin
   if not public.tv_can('remote') then raise exception 'Your login doesn''t have TV access' using errcode = '42501'; end if;
-  update public.tv_screens set blackout = coalesce(p_on, false) where screen_id = p_screen returning display into d;
+  update public.tv_screens set blackout = coalesce(p_on, false), blackout_at = case when p_on then now() end where screen_id = p_screen returning display into d;
   if d is null then raise exception 'That device isn''t here any more'; end if;
   update public.tv_settings set remote_seq = remote_seq + 1, remote_at = now(), remote_cmd = jsonb_build_object('cmd', 'refresh') where display = d;
   return jsonb_build_object('blackout', coalesce(p_on, false));
 end $$;
 revoke all on function public.tv_screen_blackout(text, boolean) from public, anon;
 grant execute on function public.tv_screen_blackout(text, boolean) to authenticated;
+
+-- ---------- Back to normal on one device ----------
+-- During a party or blackout, staff can put one device back to normal (on a tablet: the sign-in page) while the
+-- others carry on: in the editor (that device's button), or on the device itself by holding its top-left corner
+-- and typing the staff code. The code is stored hashed; nobody can read it back. 10 wrong tries in 15 minutes
+-- locks it for 15 minutes on every device.
+create table if not exists public.tv_staff_code (
+  id          int primary key default 1 check (id = 1),
+  code_hash   text,
+  updated_at  timestamptz not null default now(),
+  updated_by  text,
+  fails       int not null default 0,
+  fails_since timestamptz,
+  locked_until timestamptz
+);
+insert into public.tv_staff_code (id) values (1) on conflict (id) do nothing;
+alter table public.tv_staff_code enable row level security;   -- no policies: only the functions below use it
+revoke all on public.tv_staff_code from anon, authenticated;
+
+create or replace function public.tv_staff_code_info()
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare r public.tv_staff_code%rowtype;
+begin
+  if not public.tv_can('remote') then return null; end if;
+  select * into r from public.tv_staff_code where id = 1;
+  return jsonb_build_object('set', r.code_hash is not null, 'updated_at', r.updated_at, 'updated_by', r.updated_by);
+end $$;
+revoke all on function public.tv_staff_code_info() from public, anon;
+grant execute on function public.tv_staff_code_info() to authenticated;
+
+create or replace function public.tv_staff_code_set(p_code text)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare c text := nullif(regexp_replace(coalesce(p_code, ''), '\s', '', 'g'), '');
+begin
+  if not public.tv_is_staff() then raise exception 'Your login can''t change the TV settings' using errcode = '42501'; end if;
+  if c is not null and c !~ '^[0-9]{4,8}$' then raise exception 'The staff code needs 4 to 8 digits'; end if;
+  update public.tv_staff_code set code_hash = case when c is null then null else extensions.crypt(c, extensions.gen_salt('bf')) end,
+         updated_at = now(), updated_by = lower(auth.jwt() ->> 'email'), fails = 0, fails_since = null, locked_until = null where id = 1;
+  return public.tv_staff_code_info();
+end $$;
+revoke all on function public.tv_staff_code_set(text) from public, anon;
+grant execute on function public.tv_staff_code_set(text) to authenticated;
+
+-- The device sends the code typed on it. Right: just this device skips the party or blackout on now (for up to 12 hours).
+create or replace function public.tv_override(p_code text, p_screen text, p_pin text)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare s public.tv_settings%rowtype; r public.tv_staff_code%rowtype;
+begin
+  select * into s from public.tv_settings where screen_code = upper(trim(coalesce(p_code, '')));
+  if not found then return jsonb_build_object('error', 'wrong_code'); end if;
+  if not exists (select 1 from public.tv_screens where screen_id = p_screen) then return jsonb_build_object('error', 'unknown_screen'); end if;
+  select * into r from public.tv_staff_code where id = 1 for update;
+  if r.code_hash is null then return jsonb_build_object('error', 'no_code'); end if;
+  if r.locked_until > now() then return jsonb_build_object('error', 'locked', 'until', r.locked_until); end if;
+  if extensions.crypt(coalesce(p_pin, ''), r.code_hash) <> r.code_hash then
+    if r.fails_since is null or r.fails_since < now() - interval '15 minutes' then r.fails := 0; r.fails_since := now(); end if;
+    r.fails := r.fails + 1;
+    update public.tv_staff_code set fails = case when r.fails >= 10 then 0 else r.fails end, fails_since = case when r.fails >= 10 then null else r.fails_since end,
+           locked_until = case when r.fails >= 10 then now() + interval '15 minutes' else locked_until end where id = 1;
+    return jsonb_build_object('error', case when r.fails >= 10 then 'locked' else 'wrong' end);
+  end if;
+  update public.tv_staff_code set fails = 0, fails_since = null where id = 1;
+  update public.tv_screens set override_at = now(), override_until = now() + interval '12 hours', blackout = false where screen_id = p_screen;
+  return jsonb_build_object('ok', true);
+end $$;
+grant execute on function public.tv_override(text, text, text) to anon, authenticated;
+
+-- The editor's button for one device: back to normal now (p_on), or let it show the party or blackout again
+create or replace function public.tv_screen_normal(p_screen text, p_on boolean)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare d text;
+begin
+  if not public.tv_can('remote') then raise exception 'Your login doesn''t have TV access' using errcode = '42501'; end if;
+  update public.tv_screens set override_at = case when p_on then now() end, override_until = case when p_on then now() + interval '12 hours' end,
+         blackout = case when p_on then false else blackout end
+   where screen_id = p_screen returning display into d;
+  if d is null then raise exception 'That device isn''t here any more'; end if;
+  update public.tv_settings set remote_seq = remote_seq + 1, remote_at = now(), remote_cmd = jsonb_build_object('cmd', 'refresh') where display = d;
+  return jsonb_build_object('normal', coalesce(p_on, false));
+end $$;
+revoke all on function public.tv_screen_normal(text, boolean) from public, anon;
+grant execute on function public.tv_screen_normal(text, boolean) to authenticated;
 
 -- ---------- Photos and videos ----------
 -- Files are public by link (the TV shows them without signing in); names are random, and only staff can add,

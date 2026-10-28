@@ -22,7 +22,9 @@ let passed = 0, failed = 0;
 const ok = (c, m) => { if (c) { passed++; console.log('  pass  ' + m); } else { failed++; console.log('  FAIL  ' + m); } };
 
 // ---- Database ----
-const db = new PGlite();
+const { pgcrypto } = await import(join(PREP_TESTS, 'node_modules/@electric-sql/pglite/dist/contrib/pgcrypto.js'));
+const db = new PGlite({ extensions: { pgcrypto } });
+await db.exec(`create schema if not exists extensions; create extension if not exists pgcrypto schema extensions;`);
 await db.exec(read(join(PREP_TESTS, 'supabase-stub.sql')));
 await db.exec(`grant usage on schema public to anon;`);
 await db.exec(`insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000000001', 'tate@ama.test'), ('00000000-0000-0000-0000-000000000002', 'jo@ama.test')`);
@@ -558,7 +560,8 @@ try {
   const qs = (await db.query(`select quiet_on, quiet_style, quiet_days from tv_settings where id = 1`)).rows[0];
   ok(qs.quiet_on && qs.quiet_style === 'logo' && (todayDow === 6 || qs.quiet_days['6'].on === '08:00') && (todayDow === 2 || qs.quiet_days['2'].off === '20:45') && qs.quiet_days[String(todayDow)] === null, 'each day saves its own hours, and a day can be off all day');
   await page.waitForTimeout(1000);   // the form redraws after saving
-  await page.fill('#qd3From', '18:00'); await page.fill('#qd3To', '17:00'); if (todayDow === 3) await page.check('#qd3On');
+  if (todayDow === 3) await page.check('#qd3On');
+  await page.fill('#qd3From', '18:00'); await page.fill('#qd3To', '17:00');
   await page.click('#setSave');
   ok((await toastSays(page, 'end time')).includes('Wednesday: the end time must be after the start time'), 'an end time before the start time is caught');
   await page.fill('#qd3To', '21:00'); if (todayDow === 3) await page.uncheck('#qd3On');
@@ -1146,6 +1149,73 @@ try {
     await ctx.close(); await a1.x.close(); await a2.x.close();
   }
 
+  // Slide times of day, and back to normal on just one device
+  console.log('\nSlide times and back to normal on one device');
+  {
+    ({ ctx, page } = await context({ width: 390, height: 844 }));
+    await page.goto(BASE + '/tv/edit/index.html');
+    await page.fill('#siEmail', 'tate@ama.test'); await page.fill('#siPass', 'pw'); await page.click('#siGo');
+    await page.waitForSelector('#list [data-open]');
+    const ts = (await db.query(`select id from tv_slides where display = 'tv' and not party and kind = 'text' and enabled order by position limit 1`)).rows[0].id;
+    await page.click(`[data-open="${ts}"]`); await page.waitForSelector('#slTFrom');
+    await page.fill('#slTFrom', '17:00'); await page.fill('#slTTo', '19:00');
+    await page.click('#slDays [data-d="6"]'); await page.click('#slDays [data-d="0"]');
+    await page.screenshot({ path: join(SHOTS, 'slide-times.png') });
+    await page.click('#slSave'); await toastSays(page, 'Saved'); await page.waitForTimeout(500);
+    const st = (await db.query(`select show_from::text f, show_to::text t, show_days d from tv_slides where id = $1`, [ts])).rows[0];
+    ok(st.f === '17:00:00' && st.t === '19:00:00' && st.d.join() === '1,2,3,4,5', 'a slide can be set to come on at 5pm to 7pm, Mon to Fri');
+    ok((await page.textContent(`#list [data-open="${ts}"]`)).includes('5pm to 7pm, Mon to Fri'), 'the list shows its times');
+    await db.query(`update tv_slides set show_from = null, show_to = null, show_days = null where id = $1`, [ts]);
+
+    // Staff code
+    await page.reload(); await page.waitForSelector('#pinBox:not([hidden])');
+    ok((await page.textContent('#pinHint')).includes('No code is set'), 'the staff code starts off');
+    await page.fill('#setPin', '12'); await page.click('#pinSave');
+    ok((await toastSays(page, '4 to 8 digits')).includes('4 to 8 digits'), 'a short code is refused');
+    await page.fill('#setPin', '2468'); await page.click('#pinSave'); await toastSays(page, 'Staff code saved');
+    ok((await page.textContent('#pinHint')).includes('A code is set'), 'the staff code is saved (and never shown again)');
+
+    // Two screens, a party on
+    const mk = async () => { const x = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+      await x.route('**/config.js', r => r.fulfill({ contentType: 'text/javascript', body: configJs }));
+      await x.route(/fonts\.(googleapis|gstatic)\.com/, r => r.fulfill({ contentType: 'text/css', body: '' }));
+      const p = await x.newPage(); await p.goto(BASE + `/tv/index.html?code=${CODE}`); await p.waitForSelector('.layer.on');
+      await p.evaluate(() => window.__tv.checkIn()); await p.waitForTimeout(500); return { x, p }; };
+    const b1 = await mk(), b2 = await mk();
+    const id2 = await b2.p.evaluate(() => localStorage.getItem('tvScreen'));
+    const ps = (await db.query(`insert into tv_slides (kind, title, theme, party, display) values ('text', 'Happy Birthday Noor!', 'party', true, 'tv') returning id`)).rows[0].id;
+    await db.query(`update tv_settings set only_slide = $1, only_until = now() + interval '1 hour' where id = 1`, [ps]);
+    for (const t of [b1, b2]) { await t.p.evaluate(() => window.__tv.reload()); await t.p.waitForFunction(() => (window.__tv.feed() || {}).only, null, { timeout: 5000 }).catch(() => {}); }
+    ok((await b1.p.textContent('#stage')).includes('Noor') && (await b2.p.textContent('#stage')).includes('Noor'), 'both screens show the party');
+    await b1.p.mouse.click(640, 360); await b1.p.waitForTimeout(300);
+    ok(await b1.p.isHidden('#ovr'), 'a normal tap does nothing');
+    await b1.p.mouse.move(12, 12); await b1.p.mouse.down(); await b1.p.waitForTimeout(3300); await b1.p.mouse.up();
+    ok(await b1.p.isVisible('#ovr'), 'holding the top-left corner for 3 seconds asks for the staff code');
+    for (const k of ['1', '1', '1', '1', 'OK']) await b1.p.click(`#ovrKeys [data-k="${k}"]`);
+    await b1.p.waitForFunction(() => /not right/.test(document.querySelector('#ovrErr').textContent), null, { timeout: 5000 }).catch(() => {});
+    ok((await b1.p.textContent('#ovrErr')).includes('not right'), 'a wrong code is refused');
+    await b1.p.screenshot({ path: join(SHOTS, 'staff-code.png') });
+    for (const k of ['2', '4', '6', '8', 'OK']) await b1.p.click(`#ovrKeys [data-k="${k}"]`);
+    const onText = p => p.evaluate(() => (document.querySelector('.layer.on') || {}).textContent || '');
+    await b1.p.waitForFunction(() => !/Noor/.test((document.querySelector('.layer.on') || {}).textContent || ''), null, { timeout: 8000 }).catch(() => {});
+    await b2.p.evaluate(() => window.__tv.reload()); await b2.p.waitForTimeout(800);
+    ok(await b1.p.isHidden('#ovr') && !(await onText(b1.p)).includes('Noor') && (await onText(b2.p)).includes('Noor'), 'the right code puts just that screen back to normal; the other keeps the party');
+    for (const t of [b1, b2]) { await t.p.evaluate(() => window.__tv.checkIn()); } await page.waitForTimeout(800);
+
+    // The editor's button for one device
+    await page.reload(); await page.waitForSelector(`#status [data-normal-tv="${id2}"]`, { timeout: 8000 }).catch(() => {});
+    ok(await page.isVisible(`#status [data-normal-tv="${id2}"][data-on="1"]`) && (await page.textContent('#status')).includes('back to normal here'), 'the status card shows which screen is back to normal, with a button for the other');
+    await page.locator('#status').screenshot({ path: join(SHOTS, 'device-normal.png') });
+    await page.click(`#status [data-normal-tv="${id2}"]`); await toastSays(page, 'goes back to normal');
+    await b2.p.evaluate(() => window.__tv.reload()); await b2.p.waitForFunction(() => !/Noor/.test((document.querySelector('.layer.on') || {}).textContent || ''), null, { timeout: 8000 }).catch(() => {});
+    ok(!(await onText(b2.p)).includes('Noor'), 'the editor button puts that screen back to normal');
+    await db.query(`update tv_settings set only_slide = null, only_until = null where id = 1`);
+    await db.query(`delete from tv_slides where id = $1`, [ps]);
+    await db.query(`update tv_screens set override_at = null, override_until = null`);
+    await db.query(`update tv_staff_code set code_hash = null`);
+    await ctx.close(); await b1.x.close(); await b2.x.close();
+  }
+
   // Delete removes the file
   ({ ctx, page } = await context({ width: 390, height: 844 }));
   await page.goto(BASE + '/tv/edit/index.html');
@@ -1188,7 +1258,7 @@ try {
 
   ok(errors.length === 0, 'no errors in the browser console' + (errors.length ? ': ' + errors.slice(0, 3).join(' / ') : ''));
 } catch (e) {
-  ok(false, 'stopped: ' + e.message.split('\n').slice(0, 3).join(' / '));
+  ok(false, 'stopped: ' + e.message.split('\n').slice(0, 3).join(' / ')); console.log(errors.slice(0, 5).join('\n'));
 }
 await browser.close(); server.close();
 console.log(`\n${passed} passed, ${failed} failed`);

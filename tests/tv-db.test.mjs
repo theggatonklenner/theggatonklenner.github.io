@@ -13,7 +13,9 @@ const { PGlite } = await import(join(PREP_TESTS, 'node_modules/@electric-sql/pgl
 const read = p => readFileSync(p, 'utf8');
 let passed = 0, failed = 0;
 const ok = (c, m) => { if (c) { passed++; console.log('  pass  ' + m); } else { failed++; console.log('  FAIL  ' + m); } };
-const db = new PGlite();
+const { pgcrypto } = await import(join(PREP_TESTS, 'node_modules/@electric-sql/pglite/dist/contrib/pgcrypto.js'));
+const db = new PGlite({ extensions: { pgcrypto } });
+await db.exec(`create schema if not exists extensions; create extension if not exists pgcrypto schema extensions;`);
 async function as(email, fn) {
   await db.exec(email ? 'set role authenticated' : 'set role anon');
   await db.query(`select set_config('request.jwt.claims', $1, false)`, [JSON.stringify(email ? { email } : {})]);
@@ -379,6 +381,63 @@ ok(!(await tryAs('nobody@ama.test', `select tv_screen_blackout('dark-dev-01', fa
 await as('tate@ama.test', () => db.query(`select tv_screen_blackout('dark-dev-01', false)`));
 ok(!(await feedAt('dark-dev-01', null)).blackout, 'and turn it back on');
 await db.exec(`delete from tv_screens where screen_id in ('dark-dev-01', 'lit-dev-001'); update tv_settings set remote_until = null`);
+
+console.log('\nSlide times of day');
+const sy = (await db.query(`select to_char(now() at time zone 'Australia/Sydney', 'HH24:MI') t, extract(dow from now() at time zone 'Australia/Sydney')::int d`)).rows[0];
+const hm = mins => { const [h, m] = sy.t.split(':').map(Number); const x = ((h * 60 + m + mins) % 1440 + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
+await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, show_from, show_to) values ('text', 'On now', $1, $2), ('text', 'Later on', $3, $4), ('text', 'From later', $3, null), ('text', 'Until earlier', null, $5)`,
+  [hm(-60), hm(60), hm(60), hm(120), hm(-30)]));
+await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, show_days) values ('text', 'Not today', $1), ('text', 'Today only', $2)`, [[0, 1, 2, 3, 4, 5, 6].filter(x => x !== sy.d), [sy.d]]));
+let tnames = (await feedNow()).slides.map(x => x.title);
+ok(tnames.includes('On now') && !tnames.includes('Later on'), `a slide shows only between its times (now ${sy.t})`);
+ok(!tnames.includes('From later') && !tnames.includes('Until earlier'), 'just a start time, or just an end time, works too');
+ok(tnames.includes('Today only') && !tnames.includes('Not today'), 'days of the week');
+await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, show_from, show_to) values ('text', 'Overnight', $1, $2)`, [hm(-10), hm(-20)]));
+ok((await feedNow()).slides.some(x => x.title === 'Overnight'), 'a window that runs past midnight (from after to) works');
+await as('tate@ama.test', () => db.exec(`delete from tv_slides where title in ('On now', 'Later on', 'From later', 'Until earlier', 'Not today', 'Today only', 'Overnight')`));
+
+console.log('\nBack to normal on one tablet');
+await as(null, () => db.query(`select tv_checkin($1, 'front-tab-01', 'x', now(), '{}'::jsonb)`, [code]));
+await as(null, () => db.query(`select tv_checkin($1, 'back-tab-001', 'x', now(), '{}'::jsonb)`, [code]));
+const op2 = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, theme, party) values ('text', 'Happy birthday Sam', 'party', true) returning id`))).rows[0].id;
+await as('tate@ama.test', () => db.query(`update tv_settings set only_slide = $1, only_until = now() + interval '1 hour' where id = 1`, [op2]));
+ok((await feedAt('front-tab-01', null)).only === true && (await feedAt('front-tab-01', null)).override_ok === false, 'party on; no staff code yet, so the tablet offers no override');
+ok(!(await tryAs('remote@ama.test', `select tv_staff_code_set('1234')`)).ok, 'only the TV editor can set the staff code');
+ok(!(await tryAs('tate@ama.test', `select tv_staff_code_set('12a')`)).ok, 'the staff code must be 4 to 8 digits');
+await as('tate@ama.test', () => db.query(`select tv_staff_code_set('2468')`));
+ok((await feedAt('front-tab-01', null)).override_ok === true, 'with a code set, the tablet offers it during a party');
+ok((await tryAs('tate@ama.test', `select * from tv_staff_code`)).ok === false, 'nobody can read the code back');
+ok((await as(null, () => db.query(`select tv_override($1, 'front-tab-01', '1111') r`, [code]))).rows[0].r.error === 'wrong', 'a wrong code is refused');
+ok((await feedAt('front-tab-01', null)).only === true, '...and the party stays');
+ok((await as(null, () => db.query(`select tv_override($1, 'front-tab-01', '2468') r`, [code]))).rows[0].r.ok === true, 'the right code is accepted');
+let fa = await feedAt('front-tab-01', null), fb2 = await feedAt('back-tab-001', null);
+ok(!fa.only && fa.override === true && fa.slides.length > 0 && fb2.only === true, 'just that tablet goes back to normal; the other keeps the party');
+await as('tate@ama.test', () => db.query(`select tv_remote_send('blackout')`));
+ok((await feedAt('front-tab-01', null)).blackout === true, 'a blackout started after the override still shows on it');
+await as('tate@ama.test', () => db.query(`select tv_remote_send('wake')`));
+await as('tate@ama.test', () => db.query(`update tv_settings set only_slide = null, only_until = null where id = 1`));
+await as('tate@ama.test', () => db.query(`update tv_settings set only_slide = $1, only_until = now() + interval '1 hour' where id = 1`, [op2]));
+ok((await feedAt('front-tab-01', null)).only === true, 'so does a party started after it');
+await as('tate@ama.test', () => db.query(`update tv_settings set only_slide = null, only_until = null where id = 1`));
+await as('tate@ama.test', () => db.query(`insert into tv_party_bookings (slide_id, starts_at, ends_at) values ($1, now() - interval '1 minute', now() + interval '1 hour')`, [op2]));
+await db.exec(`update tv_screens set override_at = null, override_until = null`);
+ok((await feedAt('front-tab-01', null)).only === true, 'a booked party is on');
+ok(!(await tryAs('nobody@ama.test', `select tv_screen_normal('front-tab-01', true)`)).ok, 'only staff can use the editor button');
+await as('remote@ama.test', () => db.query(`select tv_screen_normal('front-tab-01', true)`));
+ok(!(await feedAt('front-tab-01', null)).only && (await feedAt('back-tab-001', null)).only === true, 'the editor button puts back just that tablet, even for a booked party');
+await as('tate@ama.test', () => db.query(`select tv_screen_normal('front-tab-01', false)`));
+ok((await feedAt('front-tab-01', null)).only === true, 'and can let it show the party again');
+await db.exec(`delete from tv_party_bookings`);
+await as('tate@ama.test', () => db.query(`select tv_remote_send('blackout')`));
+await as(null, () => db.query(`select tv_override($1, 'front-tab-01', '2468')`, [code]));
+ok(!(await feedAt('front-tab-01', null)).blackout && (await feedAt('back-tab-001', null)).blackout === true, 'the code also brings one tablet out of a blackout');
+await as('tate@ama.test', () => db.query(`select tv_remote_send('wake')`));
+for (let i = 0; i < 10; i++) await as(null, () => db.query(`select tv_override($1, 'back-tab-001', '0000')`, [code]));
+ok((await as(null, () => db.query(`select tv_override($1, 'back-tab-001', '2468') r`, [code]))).rows[0].r.error === 'locked', '10 wrong tries lock it for a while, even with the right code');
+ok((await as(null, () => db.query(`select tv_override('NOPE99', 'back-tab-001', '2468') r`))).rows[0].r.error === 'wrong_code', 'needs the screen code');
+await as('tate@ama.test', () => db.query(`select tv_staff_code_set(null)`));
+await db.exec(`delete from tv_screens where screen_id in ('front-tab-01', 'back-tab-001'); update tv_settings set remote_until = null`);
+await as('tate@ama.test', () => db.query(`delete from tv_slides where id = $1`, [op2]));
 
 console.log('\nSaving egress');
 const full1 = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;

@@ -118,6 +118,20 @@
   body.hasbanner .hint { bottom: 12vh; }
   .hint { position: absolute; left: 50%; bottom: 3vh; transform: translateX(-50%); z-index: 7; background: rgba(0,0,0,.6); color: #fff; font-size: 1.8vw; padding: 1vh 2vw; border-radius: 1vw; transition: opacity .6s; }
 
+  /* Staff: back to normal on this device (hold the top-left corner during a party or blackout) */
+  .ovr { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 20; background: rgba(4,12,8,.94); display: flex; align-items: center; justify-content: center; color: #fff; font-family: "Barlow", Arial, sans-serif; }
+  .ovr .pad { width: min(78vw, 64vh); text-align: center; }
+  .ovr h2 { font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-size: min(5vw, 4.4vh); margin: 0 0 1vh; }
+  .ovr p { font-size: min(2.6vw, 2.4vh); margin: 0 0 2vh; color: #c9d6cd; }
+  .ovr .dots { font: 700 min(7vw, 6vh) "Barlow Semi Condensed", Arial, sans-serif; letter-spacing: .4em; min-height: 8vh; }
+  .ovr .err { color: #ff9c87; font-weight: 700; min-height: 3.4vh; font-size: min(2.6vw, 2.4vh); }
+  .ovr .keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.4vh; margin-top: 1vh; }
+  .ovr button { font: 700 min(5vw, 4.4vh) "Barlow Semi Condensed", Arial, sans-serif; padding: 1.6vh 0; border-radius: 1.4vh; border: 1px solid #31473a; background: #1b2821; color: #fff; cursor: pointer; }
+  .ovr button.go { background: #f5c518; border-color: #f5c518; color: #14130a; }
+  .ovr button.sm { font-size: min(2.8vw, 2.6vh); }
+  .ovr .cancel { margin-top: 2vh; width: 100%; background: transparent; }
+  .holdring { position: absolute; left: 1vh; top: 1vh; width: 9vh; height: 9vh; border-radius: 50%; border: .8vh solid rgba(245,197,24,.9); z-index: 19; pointer-events: none; transition: transform 3s linear, opacity .2s; transform: scale(.2); }
+
   /* ---------- Upright screens (the tablets): everything a bit bigger, side-by-side parts stacked ---------- */
   @media (orientation: portrait) {
     .card { padding: 12vh 8vw 10vh; }
@@ -165,6 +179,16 @@
 <div class="clock" id="clock" style="display:none"></div>
 <div class="dot" title="No connection"></div>
 <div class="hint" id="hint" style="display:none">Press OK or click for full screen</div>
+<div class="ovr" id="ovr" style="display:none" role="dialog" aria-label="Staff: back to normal">
+  <div class="pad">
+    <h2>Back to normal on this screen</h2>
+    <p>Staff: type the staff code. Only this screen changes; the others carry on.</p>
+    <div class="dots" id="ovrDots"></div>
+    <div class="err" id="ovrErr"></div>
+    <div class="keys" id="ovrKeys"></div>
+    <button type="button" class="cancel sm" id="ovrCancel">Cancel</button>
+  </div>
+</div>
 
 <div class="screen" id="codeScreen" style="display:none">
   <form class="box" id="codeForm" autocomplete="off">
@@ -206,8 +230,12 @@
     if (feed && feed.off) return 'Screen off (scheduled)';
     if (feed && feed.quiet) return 'Quiet hours (' + (feed.quiet === 'black' ? 'black screen' : 'logo') + ')';
     var s = playlist[index]; if (!s) return feed && feed.only ? 'Party mode' : 'Waiting for slides';
+    if (feed && feed.override) return (signinOpen ? 'Sign-in page' : showingName(s)) + ' (back to normal here)';
+    return (feed.only ? 'Party mode: ' : '') + showingName(s);
+  }
+  function showingName(s) {
     var name = s.title || (s.kind === 'live' ? { next_grading: 'Next grading', events: 'Events this month', month: 'Month theme' }[s.live_kind] : { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown', qr: 'QR code' }[s.kind]);
-    return (feed.only ? 'Party mode: ' : '') + name + (playlist.length > 1 ? ' (' + (index + 1) + ' of ' + playlist.length + ')' : '');
+    return name + (playlist.length > 1 ? ' (' + (index + 1) + ' of ' + playlist.length + ')' : '');
   }
   // Reload with a new address so the tablet's browser can't hand back its saved (old) copy of this page
   function freshReload() {
@@ -287,6 +315,7 @@
     });
   }
   function apply(f, first) {
+    if (!(f && (f.only || f.blackout))) ovrClose();   // the party or blackout is over: no need for the staff code
     if (first || !feed) { feed = f; version = f.version; build(); setCorners(); next(); signinCheck(true, f); return; }
     signinCheck(false, f);
     var wasOnly = feed.only ? (feed.slides[0] || {}).id : null, isOnly = f.only ? (f.slides[0] || {}).id : null;
@@ -711,13 +740,61 @@
     document.addEventListener('gesturestart', function (e) { e.preventDefault(); }, { passive: false });   // iPad
     document.addEventListener('wheel', function (e) { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
     var lastTouch = 0;
-    document.addEventListener('touchend', function (e) { var n = Date.now(); if (n - lastTouch < 350) e.preventDefault(); lastTouch = n; }, { passive: false });   // double tap
+    document.addEventListener('touchend', function (e) { var n = Date.now(); if (n - lastTouch < 350 && !(e.target.closest && e.target.closest('#ovr'))) e.preventDefault(); lastTouch = n; }, { passive: false });   // double tap
   } catch (e) { /* older browsers: the viewport setting still stops it */ }
   var idleT;
   function wake() { document.body.className = document.body.className.replace(/\bidle\b/g, ''); clearTimeout(idleT); idleT = setTimeout(function () { document.body.className += ' idle'; }, 3000); }
   document.addEventListener('mousemove', wake); wake();
   if ('ontouchstart' in window) $('hint').innerHTML = 'Tap the screen for full screen';
   if (!(document.fullscreenElement || document.webkitFullscreenElement)) { $('hint').style.display = ''; setTimeout(function () { $('hint').style.display = 'none'; }, 12000); }
+
+  // ---------- Staff: back to normal on just this device ----------
+  // During a party or blackout, hold the top-left corner for 3 seconds, then type the staff code (set in the editor).
+  // Only this device goes back to normal (on a tablet: the sign-in page); the others carry on.
+  var holdT = null, ring = null, pin = '', ovrT = null, ovrBusy = false;
+  function takenOver() { return !!(feed && (feed.only || feed.blackout) && feed.override_ok && !PREVIEW); }
+  function holdStop() { clearTimeout(holdT); holdT = null; if (ring) { ring.parentNode && ring.parentNode.removeChild(ring); ring = null; } }
+  function holdStart(x, y) {
+    if (!takenOver() || $('ovr').style.display !== 'none') return;
+    var c = Math.max(90, Math.min(window.innerWidth, window.innerHeight) * 0.14);
+    if (x > c || y > c) return;
+    holdStop();
+    ring = document.createElement('div'); ring.className = 'holdring'; document.body.appendChild(ring);
+    setTimeout(function () { if (ring) ring.style.transform = 'scale(1)'; }, 20);
+    holdT = setTimeout(function () { holdStop(); ovrOpen(); }, 3000);
+  }
+  function pt(e) { var t = e.touches && e.touches[0] || e; return [t.clientX, t.clientY]; }
+  document.addEventListener('touchstart', function (e) { var p = pt(e); holdStart(p[0], p[1]); }, { passive: true });
+  document.addEventListener('mousedown', function (e) { holdStart(e.clientX, e.clientY); });
+  ['touchend', 'touchcancel', 'mouseup'].forEach(function (ev) { document.addEventListener(ev, holdStop, { passive: true }); });
+  function ovrDraw() { $('ovrDots').textContent = pin ? pin.replace(/./g, '\u2022') : '\u00a0'; }
+  function ovrIdle() { clearTimeout(ovrT); ovrT = setTimeout(ovrClose, 30000); }
+  function ovrOpen() { pin = ''; $('ovrErr').textContent = ''; ovrDraw(); $('ovr').style.display = ''; ovrIdle(); }
+  function ovrClose() { clearTimeout(ovrT); pin = ''; $('ovr').style.display = 'none'; }
+  $('ovrKeys').innerHTML = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'OK'].map(function (k) {
+    return '<button type="button" data-k="' + k + '" class="' + (k === 'OK' ? 'go' : k === 'C' ? 'sm' : '') + '">' + (k === 'C' ? 'Clear' : k) + '</button>';
+  }).join('');
+  $('ovrKeys').addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('[data-k]') : null; if (!b || ovrBusy) return;
+    var k = b.getAttribute('data-k'); ovrIdle(); $('ovrErr').textContent = '';
+    if (k === 'C') pin = ''; else if (k === 'OK') return ovrSend(); else if (pin.length < 8) pin += k;
+    ovrDraw();
+  });
+  $('ovrCancel').onclick = ovrClose;
+  function ovrSend() {
+    if (pin.length < 4) { $('ovrErr').textContent = 'The staff code has at least 4 digits.'; return; }
+    ovrBusy = true; $('ovrErr').textContent = 'Checking...';
+    fetch(BASE + '/rest/v1/rpc/tv_override', {
+      method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'apikey': CFG.SUPABASE_KEY },
+      body: JSON.stringify({ p_code: code, p_screen: screenId, p_pin: pin })
+    }).then(function (r) { return r.json(); }).then(function (r) {
+      ovrBusy = false; pin = ''; ovrDraw();
+      if (r && r.ok) { ovrClose(); load(false); setTimeout(checkIn, 1500); return; }
+      var e = r && r.error;
+      $('ovrErr').textContent = e === 'wrong' ? 'That code is not right.' : e === 'locked' ? 'Too many wrong tries. Try again in 15 minutes, or use the TV editor.'
+        : e === 'no_code' ? 'No staff code is set. Set one in the TV editor (Settings).' : e === 'unknown_screen' ? 'This screen has not checked in yet. Try again in a minute.' : 'Not sent. Check the internet and try again.';
+    })['catch'](function () { ovrBusy = false; $('ovrErr').textContent = 'Not sent. Check the internet and try again.'; });
+  }
 
   // Reload once a night (picks up updates and keeps the TV browser fresh)
   setInterval(function () { var n = new Date(); if (n.getHours() === 3 && n.getMinutes() < 2) freshReload(); }, 60000);
