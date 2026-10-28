@@ -39,6 +39,12 @@ create table if not exists public.lsa_settings (
 );
 insert into public.lsa_settings (id) values (1) on conflict (id) do nothing;
 
+-- Moving an award to a different December (e.g. reached it in January, but given at this December's awards):
+-- round = which December it counts for (blank = worked out from the date). 'due' = moved, not ordered yet.
+alter table public.lsa_awards add column if not exists round int check (round between 2000 and 2100);
+alter table public.lsa_awards drop constraint if exists lsa_awards_status_check;
+alter table public.lsa_awards add constraint lsa_awards_status_check check (status in ('due', 'ordered', 'given', 'skip'));
+
 -- Weekly check results, so the page can say when EFC was last checked
 create table if not exists public.lsa_runs (
   id      bigint generated always as identity primary key,

@@ -245,10 +245,11 @@ function milestones(m) {
   const s = startRange(m); if (!s) return [];
   return MILESTONES.map(y => {
     const a = addYears(s[0], y), b = addYears(s[1], y), mid = new Date((a.getTime() + b.getTime()) / 2);
-    const round = roundOf(mid), cut = cutoff(round);
+    const aw = state.awards[m.member_key + '|' + y] || {}, natural = roundOf(mid);
+    const round = aw.round || natural, cut = cutoff(natural);   // staff can move an award to another December
     // Not sure which December: the date range crosses the end of the leeway by more than a week either side
     const unsure = a.getTime() + 7 * 864e5 < cut.getTime() && b.getTime() - 7 * 864e5 > cut.getTime();
-    return { m, years: y, a, b, mid, round, unsure, leeway: mid > new Date(Date.UTC(round, 11, 31)), status: (state.awards[m.member_key + '|' + y] || {}).status || null };
+    return { m, years: y, a, b, mid, round, natural, moved: round !== natural, unsure: unsure && round === natural, leeway: mid > new Date(Date.UTC(round, 11, 31)) && mid <= cutoff(round), status: aw.status && aw.status !== 'due' ? aw.status : null };
   });
 }
 function rows() {
@@ -300,6 +301,7 @@ function itemHtml(x, opts = {}) {
   else if (x.status === 'given') tag = '<span class="tag ok">Given</span>';
   else if (x.status === 'skip') tag = '<span class="tag">Not giving one</span>';
   else if (x.unsure) tag = '<span class="tag bad">Check date</span>';
+  else if (x.moved) tag = `<span class="tag">Moved from ${x.natural}</span>`;
   else if (opts.leewayTag && x.leeway) tag = '<span class="tag">In the leeway</span>';
   let btn = '';
   if (canEdit() && !opts.noButton) {
@@ -375,14 +377,26 @@ function draw() {
 // ---------- Changing things ----------
 async function setStatus(key, years, status, quiet) {
   const k = key + '|' + years, before = state.awards[k];
+  if (!status && before && before.round) status = 'due';   // moved to another December: keep that, just not ordered
   if (status) state.awards[k] = { ...(before || {}), member_key: key, years, status };
   else delete state.awards[k];
   if (!quiet) draw();
   const { error } = status
     ? await sb.from('lsa_awards').upsert({ member_key: key, years, status }, { onConflict: 'member_key,years' })
     : await sb.from('lsa_awards').delete().eq('member_key', key).eq('years', years);
+  if (status === 'due') status = null;
   if (error) { if (before) state.awards[k] = before; else delete state.awards[k]; draw(); toast('Not saved: ' + error.message, 6000); return false; }
   if (!quiet) { const m = state.members.find(x => x.member_key === key); toast(status ? `${m ? m.full_name : 'Award'}: ${STATUS[status].toLowerCase()}` : 'Back to To order'); }
+  return true;
+}
+// Which December an award counts for (null = from its date)
+async function setRound(key, years, round) {
+  const k = key + '|' + years, before = state.awards[k], st = before && before.status || 'due';
+  const { error } = !round && st === 'due'
+    ? await sb.from('lsa_awards').delete().eq('member_key', key).eq('years', years)
+    : await sb.from('lsa_awards').upsert({ member_key: key, years, status: st, round: round || null }, { onConflict: 'member_key,years' });
+  if (error) { toast('Not saved: ' + error.message, 6000); return false; }
+  if (!round && st === 'due') delete state.awards[k]; else state.awards[k] = { ...(before || {}), member_key: key, years, status: st, round: round || null };
   return true;
 }
 function byAward(xs) {
@@ -423,13 +437,13 @@ function openPerson(key, years) {
   const s = startRange(m), manual = key.startsWith('manual:');
   const efc = m.enrolled_from ? (m.enrolled_from === m.enrolled_to ? dayText(D(m.enrolled_from)) : `between ${dayText(D(m.enrolled_from))} and ${dayText(D(m.enrolled_to))}`) : 'not known';
   const choice = [['', 'To order'], ['ordered', 'Ordered'], ['given', 'Given'], ['skip', 'Not giving one']];
-  const others = milestones(m).filter(z => state.awards[key + '|' + z.years]).map(z => `${z.years} years: ${STATUS[state.awards[key + '|' + z.years].status].toLowerCase()}`);
+  const others = milestones(m).filter(z => z.status).map(z => `${z.years} years: ${STATUS[state.awards[key + '|' + z.years].status].toLowerCase()}`);
   openDlg(`<div class="dlg">
     <div class="dlg-head"><div><h3>${esc(m.full_name)}</h3><p class="sub">${esc([m.location, m.efc_reference].filter(Boolean).join(' · '))}</p></div><button class="x" data-close>Close</button></div>
     <dl class="kv">
       <dt>Award</dt><dd>${years} years</dd>
       <dt>Reaches it</dt><dd>${x ? esc(x.a.getTime() === x.b.getTime() ? dayText(x.a) : `between ${dayText(x.a)} and ${dayText(x.b)}`) : '–'}${x && x.unsure ? ' <span class="tag bad">Check date</span>' : ''}</dd>
-      <dt>For</dt><dd>${x ? `December ${x.round}${x.leeway ? ' (in the leeway)' : ''}` : '–'}</dd>
+      <dt>For</dt><dd>${x ? (canEdit() ? `<select id="pRound" aria-label="Which December">${[x.natural - 1, x.natural, x.natural + 1].map(v => `<option value="${v}" ${v === x.round ? 'selected' : ''}>December ${v}${v === x.natural ? ' (from the date)' : ''}</option>`).join('')}</select>${x.moved ? ` <span class="hint">moved from December ${x.natural}</span>` : ''}` : `December ${x.round}${x.leeway ? ' (in the leeway)' : ''}`) : '–'}</dd>
       ${manual ? '' : `<dt>EFC enrolled</dt><dd>${esc(efc)}</dd>`}
       ${m.break_months ? `<dt>Break</dt><dd>${m.break_months} month${m.break_months === 1 ? '' : 's'} taken off</dd>` : ''}
       ${m.start_override ? `<dt>Counting from</dt><dd>${esc(dayText(D(m.start_override)))}</dd>` : ''}
@@ -447,6 +461,10 @@ function openPerson(key, years) {
       <div class="dlg-actions">${manual ? '<button class="btn danger" id="pRemove">Remove</button>' : ''}<button class="btn primary" id="pSave">Save</button></div>
     </div>` : ''}
     ${s ? '' : '<p class="sub">No start date yet: add one above.</p>'}</div>`);
+  if ($('#pRound')) $('#pRound').onchange = async e => {
+    const v = Number(e.target.value);
+    if (await setRound(key, years, v === x.natural ? null : v)) { draw(); dlg.close(); toast(`${m.full_name}: December ${v}`); }
+  };
   $$('#pChoice [data-s]').forEach(b => b.onclick = async () => {
     const v = b.dataset.s || null;
     if (await setStatus(key, years, v, true)) { draw(); dlg.close(); toast(v ? `${m.full_name}: ${STATUS[v].toLowerCase()}` : `${m.full_name}: back to To order`); }

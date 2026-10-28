@@ -148,6 +148,23 @@ ok((await text(page, '#g-todo + .list')).includes('Pat Early'), 'and shows as du
 await page.click('#prevRound');
 ok((await text(page, '#roundTitle')) === 'December 2025 awards' && (await names(page, '#g-todo + .list')).includes('Ann Last'), 'the previous December shows Ann still to order');
 await page.click('#nextRound');
+
+// Move last year's award into this December
+await page.click('#g-missed'); await page.click('#g-missed li[data-k="efc:a5"] [data-open]'); await page.waitForSelector('#pRound');
+await page.selectOption('#pRound', '2026'); await toastSays(page, 'December 2026');
+let mv = await q(`select status, round from lsa_awards where member_key = 'efc:a5' and years = 5`);
+ok(mv[0] && mv[0].status === 'due' && mv[0].round === 2026, 'an award can be moved to this December');
+ok((await names(page, '#g-todo + .list')).includes('Ann Last') && (await text(page, '#g-todo + .list li[data-k="efc:a5"]')).includes('Moved from 2025') && !(await page.$('#g-missed li[data-k="efc:a5"]')), 'it shows in To order, marked as moved, and not under last year');
+await page.click('li[data-k="efc:a5"] [data-set="ordered"]'); await toastSays(page, 'ordered');
+mv = await q(`select status, round from lsa_awards where member_key = 'efc:a5' and years = 5`);
+ok(mv[0].status === 'ordered' && mv[0].round === 2026 && (await names(page, '#g-ordered + .list')).includes('Ann Last'), 'ordering it keeps it in this December');
+await page.click('#g-ordered + .list li[data-k="efc:a5"] [data-open]'); await page.waitForSelector('#pChoice');
+await page.click('#pChoice [data-s=""]'); await toastSays(page, 'back to To order');
+mv = await q(`select status, round from lsa_awards where member_key = 'efc:a5' and years = 5`);
+ok(mv[0].status === 'due' && mv[0].round === 2026 && (await names(page, '#g-todo + .list')).includes('Ann Last'), 'back to To order, it stays in this December');
+await page.click('#g-todo + .list li[data-k="efc:a5"] [data-open]'); await page.waitForSelector('#pRound');
+await page.selectOption('#pRound', '2025'); await toastSays(page, 'December 2025');
+ok(!(await q(`select 1 from lsa_awards where member_key = 'efc:a5'`)).length && (await names(page, '#g-missed')).includes('Ann Last'), 'and can be moved back');
 if (SHOTS) {
   await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(200);
   await page.screenshot({ path: join(SHOTS, 'awards-phone.png'), fullPage: true });
