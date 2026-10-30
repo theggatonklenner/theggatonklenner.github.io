@@ -708,7 +708,7 @@ function openSlide(s, fresh) {
       <p class="hint" id="cdPrev"></p>
       ${themePick}`,
     live: () => `<p class="hint">${esc(liveInfo(x.live_kind)[1])}. ${x.live_kind === 'events' ? 'It uses the events list (Edit events below).' : x.live_kind === 'month' ? 'It uses the month themes in Edit events, and changes by itself each month.' : x.live_kind === 'birthdays' ? 'It fills in by itself from EFC member birthdays, and only shows on days a current member has one.' : 'It fills in by itself from Black Belt Gradings.'}</p>
-      <div class="field"><label for="slTitle">Heading (optional)</label><input type="text" id="slTitle" maxlength="120" value="${esc(x.title || '')}" placeholder="${esc({ next_grading: 'Next black belt grading', events: "What's on at AMA", month: 'The month name', birthdays: 'Happy birthday!' }[x.live_kind] || '')}"></div>${themePick}
+      <div class="field"><label for="slTitle">Heading (optional)</label><input type="text" id="slTitle" maxlength="120" value="${esc(x.title || '')}" placeholder="${esc({ next_grading: 'Next black belt grading', events: "What's on at AMA", month: 'The month name', birthdays: 'AMA members’ birthdays today' }[x.live_kind] || '')}"></div>${themePick}
       ${x.live_kind === 'events' || x.live_kind === 'month' ? '<div class="row"><button type="button" class="btn" id="slEvents">Edit events</button></div>' : ''}`
   }[x.kind]();
   openDlg(`<form class="dlg" id="slForm">

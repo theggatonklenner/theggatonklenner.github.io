@@ -464,8 +464,8 @@
     }
     if (s.live_kind === 'birthdays') {
       var names = (live.birthdays || []);
-      return '<div class="card t-party">' + confetti() + '<div class="belt"></div><div class="kicker">' + esc(s.title || 'Happy birthday!') +
-        '</div><div class="body">A big AMA happy birthday to</div>' +
+      return '<div class="card t-party">' + confetti() + '<div class="belt"></div><div class="kicker">' + esc(longDate(feed.today)) + '</div>' +
+        '<h1>' + esc(s.title || 'AMA members’ birthdays today') + '</h1>' +
         '<div class="names' + (names.length <= 3 ? ' few' : '') + '">' + names.map(function (nm) { return '<div class="n"><b>' + esc(nm) + '</b></div>'; }).join('') + '</div></div>';
     }
     return '';
