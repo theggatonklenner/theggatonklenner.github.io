@@ -87,6 +87,10 @@
   .names.few { flex-direction: column; align-items: center; margin-top: 2vh; }
   .names.few .n { width: 100%; text-align: center; padding: 1vh 1vw; }
   .names.few .n b { font-size: 7vw; }
+  .names.many .n { width: 33.333%; padding: 1vh 1vw; }
+  .names.many .n b { font-size: 3vw; }
+  .names.lots .n { width: 25%; padding: .7vh 1vw; }
+  .names.lots .n b { font-size: 2.4vw; }
 
   /* Corner bits */
   video.vid { background: #000; opacity: 0; transition: opacity .4s; }
@@ -466,9 +470,10 @@
     }
     if (s.live_kind === 'birthdays') {
       var names = (live.birthdays || []);
+      var ncls = names.length <= 3 ? ' few' : names.length <= 8 ? '' : names.length <= 15 ? ' many' : ' lots';
       return '<div class="card t-party t-bday">' + confetti() + '<div class="belt"></div><div class="kicker">' + esc(longDate(feed.today)) + '</div>' +
         '<h1>' + esc(s.title || 'AMA members’ birthdays today') + '</h1>' +
-        '<div class="names' + (names.length <= 3 ? ' few' : '') + '">' + names.map(function (nm) { return '<div class="n"><b>' + esc(nm) + '</b></div>'; }).join('') + '</div></div>';
+        '<div class="names' + ncls + '">' + names.map(function (nm) { return '<div class="n"><b>' + esc(nm) + '</b></div>'; }).join('') + '</div></div>';
     }
     return '';
   }
