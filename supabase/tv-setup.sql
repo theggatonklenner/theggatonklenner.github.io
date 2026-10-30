@@ -10,6 +10,8 @@
 --   next_grading  the next grading date of the active cycle (from Black Belt Prep)
 --   events        this month's events (and next month's near the end of the month), from tv_events
 --   month         "This is the Month of ...", from tv_months
+--   birthdays     members with a birthday today (from efc_members), shown as first name + last initial, no age.
+--                 Current members only (status Enrolled). The slide only shows on days someone has a birthday.
 --
 -- Countdown slides: "Black belt grading in 12 days", to a set date or the next grading in Black Belt Prep.
 -- They stop showing once the day has passed.
@@ -165,7 +167,7 @@ create table if not exists public.tv_slides (
   body        text,
   media_path  text,                 -- file in the "tv" storage bucket (photos, videos, info slide backgrounds)
   theme       text not null default 'green',
-  live_kind   text check (live_kind in ('next_grading', 'events', 'month')),
+  live_kind   text check (live_kind in ('next_grading', 'events', 'month', 'birthdays')),
   seconds     int check (seconds is null or seconds between 3 and 600),   -- blank = the default
   position    int not null,         -- filled in automatically: new slides go at the end
   enabled     boolean not null default true,
@@ -202,7 +204,7 @@ alter table public.tv_slides add constraint tv_slides_qr_check check (kind <> 'q
 alter table public.tv_slides drop constraint if exists tv_slides_countdown_check;
 delete from public.tv_slides where kind = 'live' and live_kind in ('congrats', 'sessions');   -- these slides were removed
 alter table public.tv_slides drop constraint if exists tv_slides_live_kind_check;
-alter table public.tv_slides add constraint tv_slides_live_kind_check check (live_kind in ('next_grading', 'events', 'month'));
+alter table public.tv_slides add constraint tv_slides_live_kind_check check (live_kind in ('next_grading', 'events', 'month', 'birthdays'));
 alter table public.tv_slides add constraint tv_slides_countdown_check check (kind <> 'countdown' or count_to = 'grading' or (count_to = 'date' and event_on is not null));
 
 -- ---------- Booked parties ----------
@@ -507,6 +509,25 @@ begin
   live := live || jsonb_build_object('events', v);
   select jsonb_build_object('month', mt.month, 'theme', mt.theme) into v from public.tv_months mt where mt.month = m0;
   live := live || jsonb_build_object('month', v);
+
+  -- Birthdays today: current members (status Enrolled) whose date of birth is today (Sydney).
+  -- First name + last initial only, no date or age. Only sent if efc_members is set up in this project.
+  if to_regclass('public.efc_members') is not null then
+    execute $q$
+      select coalesce(jsonb_agg(nm order by lower(nm)), '[]'::jsonb) from (
+        select distinct trim(
+                 coalesce(nullif(btrim(first_name), ''), split_part(btrim(full_name), ' ', 1))
+                 || case when coalesce(nullif(btrim(last_name), ''), nullif(split_part(btrim(full_name), ' ', 2), '')) <> ''
+                         then ' ' || left(coalesce(nullif(btrim(last_name), ''), split_part(btrim(full_name), ' ', 2)), 1) || '.'
+                         else '' end) nm
+          from public.efc_members
+         where status ilike 'enrolled'
+           and coalesce(btrim(full_name), '') <> ''
+           and date_of_birth ~ '^\d{4}-\d{2}-\d{2}'
+           and to_char(left(date_of_birth, 10)::date, 'MM-DD') = to_char($1::date, 'MM-DD')
+      ) q $q$ into v using today;
+    live := live || jsonb_build_object('birthdays', v);
+  end if;
 
   -- Live AMA info (only if Black Belt Prep is set up in this project)
   if to_regclass('public.prep_cycles') is not null then

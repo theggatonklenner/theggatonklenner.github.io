@@ -112,6 +112,30 @@ const plus = n => { const d = new Date(today); d.setUTCDate(d.getUTCDate() + n);
 ok(f.live.next_grading && f.live.next_grading.date === plus(43) && f.live.next_grading.cycle === 'TV cycle', 'next grading date of the active cycle');
 ok(JSON.stringify(f).indexOf('student_id') === -1 && JSON.stringify(f).indexOf('"T1"') === -1, 'the TV never gets Student IDs or anything else about students');
 
+console.log('\nBirthdays today');
+// A minimal efc_members (the real one is in the Coloured Belts setup, not loaded here). date_of_birth is text YYYY-MM-DD.
+await db.exec(`create table if not exists public.efc_members (member_key text primary key, full_name text, first_name text, last_name text, date_of_birth text, status text);`);
+const mmdd = `to_char((now() at time zone 'Australia/Sydney')::date, 'MM-DD')`;
+await db.exec(`insert into public.efc_members (member_key, full_name, first_name, last_name, date_of_birth, status) values
+  ('m1', 'Sam Lee', 'Sam', 'Lee', '2000-' || ${mmdd}, 'Enrolled'),
+  ('m2', 'Jo Park', 'Jo', 'Park', '2015-' || ${mmdd}, 'enrolled'),
+  ('m3', 'Mia', 'Mia', null, '2016-' || ${mmdd}, 'Enrolled'),
+  ('m4', 'Not Today', 'Not', 'Today', '2010-' || to_char((now() at time zone 'Australia/Sydney')::date + 1, 'MM-DD'), 'Enrolled'),
+  ('m5', 'Ex Member', 'Ex', 'Member', '2009-' || ${mmdd}, null),
+  ('m6', 'Left Lee', 'Left', 'Lee', '2009-' || ${mmdd}, 'Cancelled');`);
+f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
+ok(Array.isArray(f.live.birthdays) && JSON.stringify(f.live.birthdays) === JSON.stringify(['Jo P.', 'Mia', 'Sam L.']),
+  'birthdays today: current members only, first name + last initial, sorted; a single name has no initial');
+ok(!JSON.stringify(f.live.birthdays).match(/20\d\d|19\d\d/) && JSON.stringify(f).indexOf('date_of_birth') === -1,
+  'no date of birth, year or age reaches the TV');
+ok(!JSON.stringify(f.live.birthdays).includes('Not') && !JSON.stringify(f.live.birthdays).includes('Ex') && !JSON.stringify(f.live.birthdays).includes('Left'),
+  "no one with a different birthday, and no one who isn't enrolled");
+ok((await tryAs('tate@ama.test', `insert into tv_slides (kind, live_kind, theme) values ('live', 'birthdays', 'party')`)).ok, 'a Birthdays today live slide can be added');
+await db.exec(`update public.efc_members set status = 'Cancelled'`);
+f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;
+ok(Array.isArray(f.live.birthdays) && f.live.birthdays.length === 0, 'with no birthdays today the list is empty (the slide hides itself)');
+await db.exec(`drop table public.efc_members; delete from tv_slides where live_kind = 'birthdays';`);
+
 console.log('\nParty mode');
 const pid = (await as('tate@ama.test', () => db.query(`insert into tv_slides (kind, title, theme, party) values ('text', 'Happy Birthday Kara!', 'party', true) returning id`))).rows[0].id;
 f = (await as(null, () => db.query(`select tv_feed($1) f`, [code]))).rows[0].f;

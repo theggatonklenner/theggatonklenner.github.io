@@ -82,6 +82,9 @@
   .names .n { width: 50%; box-sizing: border-box; padding: 1.4vh 1vw; }
   .names .n b { display: block; font-family: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; font-size: 4vw; line-height: 1.1; }
   .names .n span { font-size: 2.4vw; opacity: .85; }
+  .names.few { flex-direction: column; align-items: center; margin-top: 2vh; }
+  .names.few .n { width: 100%; text-align: center; padding: 1vh 1vw; }
+  .names.few .n b { font-size: 7vw; }
 
   /* Corner bits */
   video.vid { background: #000; opacity: 0; transition: opacity .4s; }
@@ -237,7 +240,7 @@
     return (feed.only ? 'Party mode: ' : '') + showingName(s);
   }
   function showingName(s) {
-    var name = s.title || (s.kind === 'live' ? { next_grading: 'Next grading', events: 'Events this month', month: 'Month theme' }[s.live_kind] : { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown', qr: 'QR code' }[s.kind]);
+    var name = s.title || (s.kind === 'live' ? { next_grading: 'Next grading', events: 'Events this month', month: 'Month theme', birthdays: 'Birthdays today' }[s.live_kind] : { photo: 'Photo', video: 'Video', text: 'Info slide', countdown: 'Countdown', qr: 'QR code' }[s.kind]);
     return name + (playlist.length > 1 ? ' (' + (index + 1) + ' of ' + playlist.length + ')' : '');
   }
   // Reload with a new address so the tablet's browser can't hand back its saved (old) copy of this page
@@ -360,6 +363,7 @@
       if (s.live_kind === 'next_grading' && live.next_grading && live.next_grading.date) out.push(s);
       if (s.live_kind === 'month' && live.month && live.month.theme) out.push(s);
       if (s.live_kind === 'events' && live.events && live.events.some(function (m) { return m.events.length; })) out.push(s);
+      if (s.live_kind === 'birthdays' && live.birthdays && live.birthdays.length) out.push(s);
     });
     playlist = (feed.settings && feed.settings.shuffle) ? shuffled(out) : out;
   }
@@ -457,6 +461,12 @@
                 (e.note ? '<small>' + esc(e.note) + '</small>' : '') + '</span></div>';
             }).join('') + '</div>';
         }).join('') + '</div></div>';
+    }
+    if (s.live_kind === 'birthdays') {
+      var names = (live.birthdays || []);
+      return '<div class="card t-party">' + confetti() + '<div class="belt"></div><div class="kicker">' + esc(s.title || 'Happy birthday!') +
+        '</div><div class="body">A big AMA happy birthday to</div>' +
+        '<div class="names' + (names.length <= 3 ? ' few' : '') + '">' + names.map(function (nm) { return '<div class="n"><b>' + esc(nm) + '</b></div>'; }).join('') + '</div></div>';
     }
     return '';
   }
