@@ -39,6 +39,8 @@
   .card { position: absolute; left: 0; top: 0; width: 100%; height: 100%; box-sizing: border-box; padding: 11vh 7vw 9vh; display: flex; flex-direction: column; justify-content: center; }
   .t-green { background: #04794b; color: #fff; } .t-dark { background: #0e1612; color: #e6efe9; } .t-gold { background: #f2d500; color: #16211b; } .t-light { background: #f3f6f4; color: #16211b; }
   .t-party { background: #5b2a86; background: linear-gradient(135deg, #e0218a 0%, #7b2ff7 55%, #1e90ff 100%); color: #fff; text-align: center; align-items: center; }
+  .t-bday { background: #04794b; background: radial-gradient(circle at 50% 16%, rgba(242,213,0,.42), rgba(242,213,0,0) 46%), linear-gradient(135deg, #0a5c3a 0%, #04794b 52%, #0a3d28 100%); color: #fff; }
+  .t-bday .kicker { color: #f2d500; }
   .t-party h1 { font-size: 9vw; text-shadow: 0 .4vw 1.6vw rgba(0,0,0,.25); }
   .t-party .body { font-size: 4vw; }
   .t-party .belt { display: none; }
@@ -464,7 +466,7 @@
     }
     if (s.live_kind === 'birthdays') {
       var names = (live.birthdays || []);
-      return '<div class="card t-party">' + confetti() + '<div class="belt"></div><div class="kicker">' + esc(longDate(feed.today)) + '</div>' +
+      return '<div class="card t-party t-bday">' + confetti() + '<div class="belt"></div><div class="kicker">' + esc(longDate(feed.today)) + '</div>' +
         '<h1>' + esc(s.title || 'AMA members’ birthdays today') + '</h1>' +
         '<div class="names' + (names.length <= 3 ? ' few' : '') + '">' + names.map(function (nm) { return '<div class="n"><b>' + esc(nm) + '</b></div>'; }).join('') + '</div></div>';
     }
